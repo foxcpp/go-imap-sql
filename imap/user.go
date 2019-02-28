@@ -1,0 +1,156 @@
+package imap
+
+import (
+	"database/sql"
+	"strings"
+	"time"
+
+	"github.com/emersion/go-imap/backend"
+	"github.com/pkg/errors"
+)
+
+const MailboxPathSep = "/"
+
+type User struct {
+	id       uint64
+	username string
+	parent   *Backend
+}
+
+func (u *User) Username() string {
+	return u.username
+}
+
+func (u *User) ID() uint64 {
+	return u.id
+}
+
+func (u *User) ListMailboxes(subscribed bool) ([]backend.Mailbox, error) {
+	var rows *sql.Rows
+	var err error
+	if subscribed {
+		rows, err = u.parent.listSubbedMboxes.Query(u.id)
+	} else {
+		rows, err = u.parent.listMboxes.Query(u.id)
+	}
+	if err != nil {
+		return nil, errors.Wrap(err, "ListMailboxes")
+	}
+	defer rows.Close()
+
+	res := []backend.Mailbox{}
+	for rows.Next() {
+		id, name := uint64(0), ""
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, errors.Wrap(err, "ListMailboxes")
+		}
+
+		res = append(res, &Mailbox{uid: u.id, id: id, name: name, parent: u.parent})
+	}
+	return res, errors.Wrap(rows.Err(), "ListMailboxes")
+}
+
+func (u *User) GetMailbox(name string) (backend.Mailbox, error) {
+	row := u.parent.mboxId.QueryRow(u.id, name)
+	id := uint64(0)
+	if err := row.Scan(&id); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, backend.ErrNoSuchMailbox
+		}
+		return nil, errors.Wrapf(err, "GetMailbox %s", name)
+	}
+
+	return &Mailbox{uid: u.id, id: id, name: name, parent: u.parent}, nil
+}
+
+func (u *User) CreateMailbox(name string) error {
+	tx, err := u.parent.db.Begin()
+	if err != nil {
+		return errors.Wrapf(err, "CreateMailbox %s", name)
+	}
+	defer tx.Rollback()
+
+	if err := u.createParentDirs(tx, name); err != nil {
+		return errors.Wrapf(err, "CreateMailbox %s", name)
+	}
+
+	if _, err := tx.Stmt(u.parent.createMbox).Exec(u.id, name, time.Now().Unix()); err != nil {
+		if strings.Contains(err.Error(), "UNIQUE") { // TODO: Check error messages for other RDBMS.
+			return backend.ErrMailboxAlreadyExists
+		}
+		return errors.Wrapf(err, "CreateMailbox %s", name)
+	}
+	return errors.Wrapf(tx.Commit(), "CreateMailbox %s", name)
+}
+
+func (u *User) DeleteMailbox(name string) error {
+	if strings.ToLower(name) == "inbox" {
+		return errors.New("DeleteMailbox: can't delete INBOX")
+	}
+
+	tx, err := u.parent.db.Begin()
+	if err != nil {
+		return errors.Wrapf(err, "DeleteMailbox %s", name)
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.Stmt(u.parent.mboxId).Query(name)
+	if err != nil {
+		return errors.Wrapf(err, "DeleteMailbox %s", name)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return backend.ErrNoSuchMailbox
+	}
+	id := 0
+	if err := rows.Scan(&id); err != nil {
+		if err == sql.ErrNoRows {
+			return backend.ErrNoSuchMailbox
+		}
+		return errors.Wrapf(err, "DeleteMailbox %s", name)
+	}
+
+	if tx.Stmt(u.parent.deleteMbox).Exec(name); err != nil {
+		return errors.Wrapf(err, "DeleteMailbox %s", name)
+	}
+
+	return errors.Wrapf(tx.Commit(), "DeleteMailbox %s", name)
+}
+
+func (u *User) RenameMailbox(existingName, newName string) error {
+	tx, err := u.parent.db.Begin()
+	if err != nil {
+		return errors.Wrapf(err, "RenameMailbox %s, %s", existingName, newName)
+	}
+	defer tx.Rollback()
+
+	if err := u.createParentDirs(tx, newName); err != nil {
+		return errors.Wrapf(err, "RenameMailbox %s, %s", existingName, newName)
+	}
+
+	if _, err := tx.Stmt(u.parent.renameMbox).Exec(newName, u.id, existingName); err != nil {
+		return errors.Wrapf(err, "RenameMailbox %s, %s", existingName, newName)
+	}
+
+	return errors.Wrapf(tx.Commit(), "RenameMailbox %s, %s", existingName, newName)
+}
+
+func (u *User) Logout() error {
+	return nil
+}
+
+func (u *User) createParentDirs(tx *sql.Tx, name string) error {
+	parts := strings.Split(name, MailboxPathSep)
+	curDir := ""
+	for i, part := range parts[:len(parts)-1] {
+		if i != 0 {
+			curDir += MailboxPathSep
+		}
+		curDir += part
+
+		if _, err := tx.Stmt(u.parent.createMboxExistsOk).Exec(u.id, curDir); err != nil {
+			return err
+		}
+	}
+	return nil
+}

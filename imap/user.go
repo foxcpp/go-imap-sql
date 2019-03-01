@@ -9,7 +9,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-const MailboxPathSep = "/"
+const MailboxPathSep = "."
 
 type User struct {
 	id       uint64

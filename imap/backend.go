@@ -333,7 +333,8 @@ func (b *Backend) prepareStmts() error {
 		ON map.msgId = msgs.msgId
 		LEFT JOIN flags
 		ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId
-		WHERE msgs.mboxId = ? AND msgs.msgId BETWEEN ? AND ?`)
+		WHERE msgs.mboxId = ? AND msgs.msgId BETWEEN ? AND ?
+		GROUP BY msgs.mboxId, msgs.msgId`)
 	if err != nil {
 		return errors.Wrap(err, "getMsgsNoBodyUid prep")
 	}
@@ -348,7 +349,8 @@ func (b *Backend) prepareStmts() error {
 		ON map.msgId = msgs.msgId
 		LEFT JOIN flags
 		ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId
-		WHERE msgs.mboxId = ? AND msgs.msgId BETWEEN ? AND ?`)
+		WHERE msgs.mboxId = ? AND msgs.msgId BETWEEN ? AND ?
+		GROUP BY msgs.mboxId, msgs.msgId`)
 	if err != nil {
 		return errors.Wrap(err, "getMsgsBodyUid prep")
 	}
@@ -363,7 +365,10 @@ func (b *Backend) prepareStmts() error {
 		ON map.msgId = msgs.msgId
 		LEFT JOIN flags
 		ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId
-		WHERE msgs.mboxId = ? LIMIT ? OFFSET ?-1`)
+		WHERE msgs.mboxId = ?
+		GROUP BY msgs.mboxId, msgs.msgId
+		LIMIT ? OFFSET ?-1
+		`)
 	if err != nil {
 		return errors.Wrap(err, "getMsgsNoBodySeq prep")
 	}
@@ -378,7 +383,9 @@ func (b *Backend) prepareStmts() error {
 		ON map.msgId = msgs.msgId
 		LEFT JOIN flags
 		ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId
-		WHERE msgs.mboxId = ? LIMIT ? OFFSET ?-1`)
+		WHERE msgs.mboxId = ?
+		GROUP BY msgs.mboxId, msgs.msgId
+		LIMIT ? OFFSET ?-1`)
 	if err != nil {
 		return errors.Wrap(err, "getMsgsBodySeq prep")
 	}

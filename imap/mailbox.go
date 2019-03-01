@@ -64,7 +64,8 @@ func (m *Mailbox) Status(items []imap.StatusItem) (*imap.MailboxStatus, error) {
 	}
 	res.PermanentFlags = []string{
 		imap.SeenFlag, imap.AnsweredFlag, imap.FlaggedFlag,
-		imap.DraftFlag, `"\*`,
+		imap.DeletedFlag, imap.DraftFlag,
+		`\*`,
 	}
 
 	row := tx.Stmt(m.parent.firstUnseenSeqNum).QueryRow(m.id, m.id)
@@ -140,7 +141,7 @@ func (m *Mailbox) Check() error {
 
 func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uint32, error) {
 	res := []uint32{}
-	rows, err := m.parent.getMsgsBodyUid.Query(m.id, 1, 4294967295)
+	rows, err := m.parent.getMsgsBodyUid.Query(m.id, m.id, 1, 4294967295)
 	if err != nil {
 		return res, errors.Wrap(err, "SearchMessages")
 	}
@@ -152,7 +153,7 @@ func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uin
 		var bodyLen uint32
 		var body []byte
 		var flagsStr string
-		if err := rows.Scan(&seqNum, msgId, &date, &bodyLen, &body, &flagsStr); err != nil {
+		if err := rows.Scan(&seqNum, &msgId, &date, &bodyLen, &body, &flagsStr); err != nil {
 			return res, errors.Wrap(err, "SearchMessages")
 		}
 
@@ -194,6 +195,7 @@ func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uin
 
 func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.FetchItem, ch chan<- *imap.Message) error {
 	bodyNeeded := needsBody(items)
+	defer close(ch)
 
 	// Also we use clever trick to get flags as a single string in one row
 	// This saves us from doing more bookkeeping during results iteration.

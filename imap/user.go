@@ -87,34 +87,19 @@ func (u *User) DeleteMailbox(name string) error {
 	if strings.ToLower(name) == "inbox" {
 		return errors.New("DeleteMailbox: can't delete INBOX")
 	}
-
-	tx, err := u.parent.db.Begin()
-	if err != nil {
+	if stats, err := u.parent.deleteMbox.Exec(u.id, name); err != nil {
 		return errors.Wrapf(err, "DeleteMailbox %s", name)
-	}
-	defer tx.Rollback()
-
-	rows, err := tx.Stmt(u.parent.mboxId).Query(name)
-	if err != nil {
-		return errors.Wrapf(err, "DeleteMailbox %s", name)
-	}
-	defer rows.Close()
-	if !rows.Next() {
-		return backend.ErrNoSuchMailbox
-	}
-	id := 0
-	if err := rows.Scan(&id); err != nil {
-		if err == sql.ErrNoRows {
+	} else {
+		affected, err := stats.RowsAffected()
+		if err != nil {
+			return errors.Wrapf(err, "DeleteMailbox %s", name)
+		}
+		if affected == 0 {
 			return backend.ErrNoSuchMailbox
 		}
-		return errors.Wrapf(err, "DeleteMailbox %s", name)
 	}
 
-	if tx.Stmt(u.parent.deleteMbox).Exec(name); err != nil {
-		return errors.Wrapf(err, "DeleteMailbox %s", name)
-	}
-
-	return errors.Wrapf(tx.Commit(), "DeleteMailbox %s", name)
+	return nil
 }
 
 func (u *User) RenameMailbox(existingName, newName string) error {
@@ -130,6 +115,19 @@ func (u *User) RenameMailbox(existingName, newName string) error {
 
 	if _, err := tx.Stmt(u.parent.renameMbox).Exec(newName, u.id, existingName); err != nil {
 		return errors.Wrapf(err, "RenameMailbox %s, %s", existingName, newName)
+	}
+
+	existingPattern := existingName + MailboxPathSep + "%"
+	newPrefix := newName + MailboxPathSep
+	existingPrefixLen := len(existingName + MailboxPathSep)
+	if _, err := tx.Stmt(u.parent.renameMboxChilds).Exec(newPrefix, existingPrefixLen, existingPattern, u.id); err != nil {
+		return errors.Wrapf(err, "RenameMailbox %s, %s", existingName, newName)
+	}
+
+	if existingName == "INBOX" {
+		if _, err := tx.Stmt(u.parent.createMbox).Exec(u.id, existingName, time.Now().Unix()); err != nil {
+			return errors.Wrapf(err, "RenameMailbox %s, %s", existingName, newName)
+		}
 	}
 
 	return errors.Wrapf(tx.Commit(), "RenameMailbox %s, %s", existingName, newName)
@@ -148,7 +146,7 @@ func (u *User) createParentDirs(tx *sql.Tx, name string) error {
 		}
 		curDir += part
 
-		if _, err := tx.Stmt(u.parent.createMboxExistsOk).Exec(u.id, curDir); err != nil {
+		if _, err := tx.Stmt(u.parent.createMboxExistsOk).Exec(u.id, curDir, time.Now().Unix()); err != nil {
 			return err
 		}
 	}

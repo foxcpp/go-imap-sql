@@ -1,11 +1,16 @@
 package imap
 
 import (
+	"bytes"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"strings"
 
 	"github.com/emersion/go-imap/backend"
+	"github.com/foxcpp/go-sqlmail"
 	"github.com/pkg/errors"
+	"golang.org/x/crypto/sha3"
 )
 
 type Backend struct {
@@ -14,13 +19,17 @@ type Backend struct {
 	driver string
 
 	// Shitton of pre-compiled SQL statements.
-	userId             *sql.Stmt
+	userCreds          *sql.Stmt
+	addUser            *sql.Stmt
+	delUser            *sql.Stmt
+	setUserPass        *sql.Stmt
 	listMboxes         *sql.Stmt
 	listSubbedMboxes   *sql.Stmt
 	createMboxExistsOk *sql.Stmt
 	createMbox         *sql.Stmt
 	deleteMbox         *sql.Stmt
 	renameMbox         *sql.Stmt
+	renameMboxChilds   *sql.Stmt
 	getMboxMark        *sql.Stmt
 	setSubbed          *sql.Stmt
 	uidNext            *sql.Stmt
@@ -87,10 +96,10 @@ func (b *Backend) initSchema() error {
 	var err error
 	_, err = b.db.Exec(`
 		CREATE TABLE IF NOT EXISTS users (
-			id INTEGER NOT NULL PRIMARY KEY,
+			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
 			username VARCHAR(255) NOT NULL UNIQUE,
 			password VARCHAR(255) DEFAULT NULL,
-			password_salt BLOB DEFAULT NULL
+			password_salt VARCHAR(255) DEFAULT NULL
 		)`)
 	if err != nil {
 		return errors.Wrap(err, "create table users")
@@ -140,12 +149,31 @@ func (b *Backend) initSchema() error {
 func (b *Backend) prepareStmts() error {
 	var err error
 
-	b.userId, err = b.db.Prepare(`
-		SELECT id
+	b.userCreds, err = b.db.Prepare(`
+		SELECT id, password, password_salt
 		FROM users
 		WHERE username = ?`)
 	if err != nil {
 		return errors.Wrap(err, "userId prep")
+	}
+	b.addUser, err = b.db.Prepare(`
+		INSERT INTO users(username, password, password_salt)
+		VALUES (?, ?, ?)`)
+	if err != nil {
+		return errors.Wrap(err, "addUser prep")
+	}
+	b.delUser, err = b.db.Prepare(`
+		DELETE FROM users
+		WHERE username = ?`)
+	if err != nil {
+		return errors.Wrap(err, "addUser prep")
+	}
+	b.setUserPass, err = b.db.Prepare(`
+		UPDATE users
+		SET password = ?, password_salt = ?
+		WHERE username = ?`)
+	if err != nil {
+		return errors.Wrap(err, "addUser prep")
 	}
 	b.listMboxes, err = b.db.Prepare(`
 		SELECT id, name
@@ -184,6 +212,12 @@ func (b *Backend) prepareStmts() error {
 		WHERE uid = ? AND name = ?`)
 	if err != nil {
 		return errors.Wrap(err, "renameMbox prep")
+	}
+	b.renameMboxChilds, err = b.db.Prepare(`
+		UPDATE mboxes SET name = ? || substr(name, ?+1)
+		WHERE name LIKE ? AND uid = ?`)
+	if err != nil {
+		return errors.Wrap(err, "renameMboxChilds prep")
 	}
 	b.getMboxMark, err = b.db.Prepare(`
 		SELECT mark FROM mboxes
@@ -420,27 +454,103 @@ func (b *Backend) groupConcatFn(expr, separator string) string {
 	}
 }
 
-func (b *Backend) UserID(username string) (uint64, error) {
-	row := b.userId.QueryRow(username)
-	id := uint64(0)
-	return id, row.Scan(&id)
+func (b *Backend) UserCreds(username string) (uint64, []byte, []byte, error) {
+	row := b.userCreds.QueryRow(username)
+	id, passHashHex, passSaltHex := uint64(0), "", ""
+	if err := row.Scan(&id, &passHashHex, &passSaltHex); err != nil {
+		return 0, nil, nil, err
+	}
+
+	passHash, err := hex.DecodeString(passHashHex)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	passSalt, err := hex.DecodeString(passSaltHex)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+
+	return id, passHash, passSalt, nil
 }
 
-// Login is a dummy method, as go-sqlmail itself doesn't implements user
-// account management and this is responsibility of backend stacked on top of
-// it.
-//
-// Despite of this, go-sqlmail creates table `users` with username->numeric ID
-// mapping and requires this table to be populated with usernames of
-// "registered" users. Usernames are not used directly by go-sqlmail for
-// performance reasons.
-//
-// This table also contains password and password_salt columns that may be used
-// to store actual passwords by auth backend, but they are unused by backend
-// itself.
-func (b *Backend) Login(username, password string) (backend.User, error) {
-	uid, err := b.UserID(username)
+func (b *Backend) CreateUser(username, password string) error {
+	salt := make([]byte, 16)
+	if n, err := rand.Read(salt); err != nil {
+		return errors.Wrap(err, "CreateUser")
+	} else if n != 16 {
+		return errors.New("CreateUser: failed to read enough entropy for salt from CSPRNG")
+	}
+
+	pass := make([]byte, 0, len(password)+len(salt))
+	pass = append(pass, []byte(password)...)
+	pass = append(pass, salt...)
+	digest := sha3.Sum512(pass)
+
+	_, err := b.addUser.Exec(username, hex.EncodeToString(digest[:]), hex.EncodeToString(salt))
+	if err != nil && strings.Contains(err.Error(), "UNIQUE") { // TODO: check error messages for other RDBMS
+		return sqlmail.ErrUserAlreadyExists
+	}
+	return errors.Wrap(err, "CreateUser")
+}
+
+func (b *Backend) DeleteUser(username string) error {
+	stats, err := b.delUser.Exec(username)
 	if err != nil {
+		return errors.Wrap(err, "DeleteUser")
+	}
+	affected, err := stats.RowsAffected()
+	if err != nil {
+		return errors.Wrap(err, "SetUserPassword")
+	}
+	if affected == 0 {
+		return sqlmail.ErrUserDoesntExists
+	}
+	return nil
+}
+
+func (b *Backend) SetUserPassword(username, newPassword string) error {
+	salt := make([]byte, 16)
+	if n, err := rand.Read(salt); err != nil {
+		return errors.Wrap(err, "SetUserPassword")
+	} else if n != 16 {
+		return errors.New("SetUserPassword: failed to read enough entropy for salt from CSPRNG")
+	}
+
+	pass := make([]byte, 0, len(newPassword)+len(salt))
+	pass = append(pass, []byte(newPassword)...)
+	pass = append(pass, salt...)
+	digest := sha3.Sum512(pass)
+
+	stats, err := b.setUserPass.Exec(hex.EncodeToString(digest[:]), hex.EncodeToString(salt), username)
+	affected, err := stats.RowsAffected()
+	if err != nil {
+		return errors.Wrap(err, "SetUserPassword")
+	}
+	if affected == 0 {
+		return sqlmail.ErrUserDoesntExists
+	}
+	return nil
+}
+
+func (b *Backend) GetUser(username string) (backend.User, error) {
+	uid, _, _, err := b.UserCreds(username)
+	if err != nil {
+		return nil, sqlmail.ErrUserDoesntExists
+	}
+	return &User{id: uid, username: username, parent: b}, nil
+}
+
+func (b *Backend) Login(username, password string) (backend.User, error) {
+	uid, passHash, passSalt, err := b.UserCreds(username)
+	if err != nil {
+		return nil, backend.ErrInvalidCredentials
+	}
+
+	pass := make([]byte, 0, len(password)+len(passSalt))
+	pass = append(pass, []byte(password)...)
+	pass = append(pass, passSalt...)
+	digest := sha3.Sum512(pass)
+	if !bytes.Equal(digest[:], passHash) {
 		return nil, backend.ErrInvalidCredentials
 	}
 

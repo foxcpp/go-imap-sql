@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"database/sql"
 	"io/ioutil"
-	"log"
 	"strings"
 	"time"
 
@@ -46,8 +45,6 @@ func (m *Mailbox) Info() (*imap.MailboxInfo, error) {
 	}
 	if mark == 1 {
 		res.Attributes = []string{imap.MarkedAttr}
-	} else {
-		res.Attributes = []string{imap.UnmarkedAttr}
 	}
 	return &res, nil
 }
@@ -59,17 +56,15 @@ func (m *Mailbox) Status(items []imap.StatusItem) (*imap.MailboxStatus, error) {
 	}
 	defer tx.Rollback()
 
-	res := imap.MailboxStatus{
-		Name: m.name,
-		Flags: []string{
-			imap.SeenFlag, imap.AnsweredFlag, imap.FlaggedFlag,
-			imap.DeletedFlag, imap.DraftFlag, imap.RecentFlag,
-			`\*`,
-		},
-		PermanentFlags: []string{
-			imap.SeenFlag, imap.AnsweredFlag, imap.FlaggedFlag,
-			imap.DraftFlag, `"\*`,
-		},
+	res := imap.NewMailboxStatus(m.name, items)
+	res.Flags = []string{
+		imap.SeenFlag, imap.AnsweredFlag, imap.FlaggedFlag,
+		imap.DeletedFlag, imap.DraftFlag, imap.RecentFlag,
+		`\*`,
+	}
+	res.PermanentFlags = []string{
+		imap.SeenFlag, imap.AnsweredFlag, imap.FlaggedFlag,
+		imap.DraftFlag, `"\*`,
 	}
 
 	row := tx.Stmt(m.parent.firstUnseenSeqNum).QueryRow(m.id, m.id)
@@ -105,7 +100,7 @@ func (m *Mailbox) Status(items []imap.StatusItem) (*imap.MailboxStatus, error) {
 		}
 	}
 
-	return &res, nil
+	return res, nil
 }
 
 func (m *Mailbox) UidNext(tx *sql.Tx) (uint32, error) {
@@ -496,7 +491,6 @@ func (m *Mailbox) CopyMessages(uid bool, seqset *imap.SeqSet, dest string) error
 		start, stop := sqlRange(seq)
 
 		if uid {
-			log.Println(destID, destID, srcId, start, stop)
 			if _, err := tx.Stmt(m.parent.copyMsgsUid).Exec(destID, destID, srcId, start, stop); err != nil {
 				return errors.Wrapf(err, "CopyMessages %s, %s", m.name, dest)
 			}

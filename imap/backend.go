@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"strconv"
 	"strings"
 
 	"github.com/emersion/go-imap/backend"
@@ -13,8 +14,72 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
+// db struct is a thin wrapper to solve the most annoying problems
+// with cross-RDBMS compatibility.
+type db struct {
+	DB     *sql.DB
+	driver string
+}
+
+func (d db) Prepare(req string) (*sql.Stmt, error) {
+	return d.DB.Prepare(d.rewriteSQL(req))
+}
+
+func (d db) Query(req string, args ...interface{}) (*sql.Rows, error) {
+	return d.DB.Query(d.rewriteSQL(req), args...)
+}
+
+func (d db) QueryRow(req string, args ...interface{}) *sql.Row {
+	return d.DB.QueryRow(d.rewriteSQL(req), args...)
+}
+
+func (d db) Exec(req string, args ...interface{}) (sql.Result, error) {
+	return d.DB.Exec(d.rewriteSQL(req), args...)
+}
+
+func (d db) Begin() (*sql.Tx, error) {
+	return d.DB.Begin()
+}
+
+func (d db) Close() error {
+	return d.DB.Close()
+}
+
+func (d db) rewriteSQL(req string) (res string) {
+	res = strings.TrimSpace(req)
+	if d.driver == "postgres" {
+		res = ""
+		placeholderIndx := 1
+		for _, chr := range req {
+			if chr == '?' {
+				res += "$" + strconv.Itoa(placeholderIndx)
+				placeholderIndx += 1
+			} else {
+				res += string(chr)
+			}
+		}
+		if strings.HasPrefix(res, "CREATE TABLE") {
+			res = strings.Replace(res, "BLOB", "BYTEA", -1)
+			res = strings.Replace(res, "AUTOINCREMENT", "", -1)
+		}
+	} else if d.driver == "mysql" {
+		if strings.HasPrefix(res, "CREATE TABLE") {
+			res = strings.Replace(res, "AUTOINCREMENT", "", -1)
+		}
+		if strings.HasSuffix(res, "ON CONFLICT DO NOTHING") && strings.HasPrefix(res, "INSERT") {
+			res = strings.Replace(res, "ON CONFLICT DO NOTHING", "", -1)
+			res = strings.Replace(res, "INSERT", "INSERT IGNORE", 1)
+		}
+	} else if d.driver == "sqlite3" {
+		if strings.HasPrefix(res, "CREATE TABLE") {
+			res = strings.Replace(res, "SERIAL", "INTEGER", -1)
+		}
+	}
+	return
+}
+
 type Backend struct {
-	db *sql.DB
+	db db
 
 	driver string
 
@@ -68,14 +133,27 @@ func NewBackend(driver, dsn string) (*Backend, error) {
 	}
 
 	b.driver = driver
+	b.db.driver = driver
 
-	b.db, err = sql.Open(driver, dsn)
+	b.db.DB, err = sql.Open(driver, dsn)
 	if err != nil {
 		return nil, errors.Wrap(err, "NewBackend")
 	}
 
 	if driver == "sqlite3" {
-		b.db.Exec(`PRAGMA foreign_keys = ON`)
+		_, err := b.db.Exec(`PRAGMA foreign_keys = ON`)
+		if err != nil {
+			return nil, errors.Wrap(err, "NewBackend")
+		}
+	} else if driver == "mysql" {
+		_, err := b.db.Exec(`SET SESSION sql_mode = 'ansi,no_backslash_escapes'`)
+		if err != nil {
+			return nil, errors.Wrap(err, "NewBackend")
+		}
+		_, err = b.db.Exec(`SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE`)
+		if err != nil {
+			return nil, errors.Wrap(err, "NewBackend")
+		}
 	}
 
 	if err := b.initSchema(); err != nil {
@@ -96,7 +174,7 @@ func (b *Backend) initSchema() error {
 	var err error
 	_, err = b.db.Exec(`
 		CREATE TABLE IF NOT EXISTS users (
-			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+			id SERIAL NOT NULL PRIMARY KEY AUTOINCREMENT,
 			username VARCHAR(255) NOT NULL UNIQUE,
 			password VARCHAR(255) DEFAULT NULL,
 			password_salt VARCHAR(255) DEFAULT NULL
@@ -106,8 +184,8 @@ func (b *Backend) initSchema() error {
 	}
 	_, err = b.db.Exec(`
 		CREATE TABLE IF NOT EXISTS mboxes (
-			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-			uid INTEGER NOT NULL REFERENCES users(id),
+			id SERIAL NOT NULL PRIMARY KEY AUTOINCREMENT,
+			uid INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			name VARCHAR(255) NOT NULL,
 			sub INTEGER NOT NULL DEFAULT 0,
 			mark INTEGER NOT NULL DEFAULT 0,
@@ -213,9 +291,15 @@ func (b *Backend) prepareStmts() error {
 	if err != nil {
 		return errors.Wrap(err, "renameMbox prep")
 	}
-	b.renameMboxChilds, err = b.db.Prepare(`
+	if b.db.driver == "mysql" {
+		b.renameMboxChilds, err = b.db.Prepare(`
+		UPDATE mboxes SET name = concat(?, substr(name, ?+1))
+		WHERE name LIKE ? AND uid = ?`)
+	} else {
+		b.renameMboxChilds, err = b.db.Prepare(`
 		UPDATE mboxes SET name = ? || substr(name, ?+1)
 		WHERE name LIKE ? AND uid = ?`)
+	}
 	if err != nil {
 		return errors.Wrap(err, "renameMboxChilds prep")
 	}
@@ -246,14 +330,14 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "uidvalidity prep")
 	}
 	b.msgsCount, err = b.db.Prepare(`
-		SELECT count()
+		SELECT count(*)
 		FROM msgs
 		WHERE mboxId = ?`)
 	if err != nil {
 		return errors.Wrap(err, "msgsCount prep")
 	}
 	b.recentCount, err = b.db.Prepare(`
-		SELECT count()
+		SELECT count(*)
 		FROM flags
 		WHERE mboxId = ? AND flag = '\Recent'`)
 	if err != nil {
@@ -268,7 +352,7 @@ func (b *Backend) prepareStmts() error {
 			SELECT row_number() OVER (ORDER BY msgId) AS rownr, msgId
 			FROM msgs
 			WHERE mboxId = ?
-		)
+		) seqnum
 		WHERE msgId NOT IN (
 			SELECT msgId
 			FROM flags
@@ -308,7 +392,7 @@ func (b *Backend) prepareStmts() error {
 			SELECT max(msgId)
 			FROM msgs
 			WHERE mboxId = ?
-		), 0) + row_number() OVER (ORDER BY msgId) AS msgId, date, bodyLen, body
+		), 0) + row_number() OVER (ORDER BY msgId), date, bodyLen, body
 		FROM msgs
 		WHERE mboxId = ? AND msgId BETWEEN ? AND ?`)
 	if err != nil {
@@ -316,16 +400,19 @@ func (b *Backend) prepareStmts() error {
 	}
 	b.copyMsgFlagsUid, err = b.db.Prepare(`
 		INSERT INTO flags
-		SELECT ?, new_msgId AS msgId, flags.flag FROM flags
+		SELECT ?, new_msgId AS msgId, flag
+		FROM flags
 		INNER JOIN (
-			SELECT DISTINCT coalesce((
-				SELECT max(msgId) - 1
+			SELECT coalesce((
+				SELECT max(msgId) - ?
 				FROM msgs
 				WHERE mboxId = ?
-			), 0) + row_number() OVER (ORDER BY msgId) AS new_msgId, msgId, flag
-			FROM flags WHERE mboxId = ? AND msgId BETWEEN ? AND ?
-		) map ON map.msgId = flags.msgId AND map.flag = flags.flag
-		WHERE mboxId = ?`)
+			), 0) + row_number() OVER (ORDER BY msgId) AS new_msgId, msgId, mboxId
+			FROM msgs
+			WHERE mboxId = ?
+			AND msgId BETWEEN ? AND ?
+		) map ON map.msgId = flags.msgId
+		AND map.mboxId = flags.mboxId`)
 	if err != nil {
 		return errors.Wrap(err, "copyMsgFlagsUid prep")
 	}
@@ -335,29 +422,38 @@ func (b *Backend) prepareStmts() error {
 			SELECT max(msgId)
 			FROM msgs
 			WHERE mboxId = ?
-		), 0) + row_number() OVER (ORDER BY msgId) AS msgId, date, bodyLen, body
-		FROM msgs
-		WHERE mboxId = ? LIMIT ? OFFSET ?`)
+		), 0) + row_number() OVER (ORDER BY msgId), date, bodyLen, body
+		FROM (
+			SELECT msgId, date, bodyLen, body
+			FROM msgs
+			WHERE mboxId = ?
+			LIMIT ? OFFSET ?
+		) subset`)
 	if err != nil {
 		return errors.Wrap(err, "copyMsgsSeq prep")
 	}
 	b.copyMsgFlagsSeq, err = b.db.Prepare(`
 		INSERT INTO flags
-		SELECT ?, new_msgId AS msgId, flags.flag FROM flags
+		SELECT ?, new_msgId AS msgId, flag
+		FROM flags
 		INNER JOIN (
-			SELECT DISTINCT coalesce((
-				SELECT max(msgId) - 1
+			SELECT coalesce((
+				SELECT max(msgId) - ?
 				FROM msgs
 				WHERE mboxId = ?
-			), 0) + row_number() OVER (ORDER BY msgId) AS  new_msgId, msgId, flag
-			FROM flags WHERE mboxId = ? LIMIT ? OFFSET ?
-		) map ON map.msgId = flags.msgId AND map.flag = flags.flag
-		WHERE mboxId = ?`)
+			), 0) + row_number() OVER (ORDER BY msgId) AS new_msgId, msgId
+			FROM (
+				SELECT msgId
+				FROM msgs
+				WHERE mboxId = ?
+				LIMIT ? OFFSET ?
+			) subset
+		) map ON map.msgId = flags.msgId`)
 	if err != nil {
 		return errors.Wrap(err, "copyMsgFlagsSeq prep")
 	}
 	b.getMsgsNoBodyUid, err = b.db.Prepare(`
-		SELECT DISTINCT seqnum, msgs.msgId, date, bodyLen, NULL, coalesce(` + b.groupConcatFn("flag", "{") + `, "")
+		SELECT seqnum, msgs.msgId, date, bodyLen, NULL, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
 		FROM msgs
 		INNER JOIN (
 			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
@@ -366,14 +462,14 @@ func (b *Backend) prepareStmts() error {
 		) map
 		ON map.msgId = msgs.msgId
 		LEFT JOIN flags
-		ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId
+		ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId AND msgs.mboxId = flags.mboxId
 		WHERE msgs.mboxId = ? AND msgs.msgId BETWEEN ? AND ?
-		GROUP BY msgs.mboxId, msgs.msgId`)
+		GROUP BY msgs.mboxId, msgs.msgId, seqnum`)
 	if err != nil {
 		return errors.Wrap(err, "getMsgsNoBodyUid prep")
 	}
 	b.getMsgsBodyUid, err = b.db.Prepare(`
-		SELECT DISTINCT seqnum, msgs.msgId, date, bodyLen, body, coalesce(` + b.groupConcatFn("flag", "{") + `, "")
+		SELECT seqnum, msgs.msgId, date, bodyLen, body, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
 		FROM msgs
 		INNER JOIN (
 			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
@@ -382,14 +478,14 @@ func (b *Backend) prepareStmts() error {
 		) map
 		ON map.msgId = msgs.msgId
 		LEFT JOIN flags
-		ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId
+		ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId AND msgs.mboxId = flags.mboxId
 		WHERE msgs.mboxId = ? AND msgs.msgId BETWEEN ? AND ?
 		GROUP BY msgs.mboxId, msgs.msgId`)
 	if err != nil {
 		return errors.Wrap(err, "getMsgsBodyUid prep")
 	}
 	b.getMsgsNoBodySeq, err = b.db.Prepare(`
-		SELECT DISTINCT seqnum, msgs.msgId, date, bodyLen, NULL, coalesce(` + b.groupConcatFn("flag", "{") + `, "")
+		SELECT seqnum, msgs.msgId, date, bodyLen, NULL, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
 		FROM msgs
 		INNER JOIN (
 			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
@@ -398,16 +494,15 @@ func (b *Backend) prepareStmts() error {
 		) map
 		ON map.msgId = msgs.msgId
 		LEFT JOIN flags
-		ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId
-		WHERE msgs.mboxId = ?
+		ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId AND msgs.mboxId = flags.mboxId
+		WHERE msgs.mboxId = ? AND seqnum BETWEEN ? AND ?
 		GROUP BY msgs.mboxId, msgs.msgId
-		LIMIT ? OFFSET ?-1
 		`)
 	if err != nil {
 		return errors.Wrap(err, "getMsgsNoBodySeq prep")
 	}
 	b.getMsgsBodySeq, err = b.db.Prepare(`
-		SELECT DISTINCT seqnum, msgs.msgId, date, bodyLen, body, coalesce(` + b.groupConcatFn("flag", "{") + `, "")
+		SELECT seqnum, msgs.msgId, date, bodyLen, body, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
 		FROM msgs
 		INNER JOIN (
 			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
@@ -417,9 +512,8 @@ func (b *Backend) prepareStmts() error {
 		ON map.msgId = msgs.msgId
 		LEFT JOIN flags
 		ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId
-		WHERE msgs.mboxId = ?
-		GROUP BY msgs.mboxId, msgs.msgId
-		LIMIT ? OFFSET ?-1`)
+		WHERE msgs.mboxId = ? AND seqnum BETWEEN ? AND ? AND msgs.mboxId = map.mboxId
+		GROUP BY msgs.mboxId, msgs.msgId`)
 	if err != nil {
 		return errors.Wrap(err, "getMsgsBodySeq prep")
 	}
@@ -435,9 +529,12 @@ func (b *Backend) prepareStmts() error {
 		WHERE mboxId = ?
 		AND msgId IN (
 			SELECT msgId
-			FROM msgs
-			WHERE mboxId = ?
-			LIMIT ? OFFSET ?
+			FROM (
+				SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId
+				FROM msgs
+				WHERE mboxId = ?
+			) seq
+			WHERE seqnum BETWEEN ? AND ?
 		)`)
 	if err != nil {
 		return errors.Wrap(err, "massClearFlagsSeq prep")
@@ -449,9 +546,14 @@ func (b *Backend) prepareStmts() error {
 func (b *Backend) groupConcatFn(expr, separator string) string {
 	if b.driver == "sqlite3" {
 		return "group_concat(" + expr + ", '" + separator + "')"
-	} else {
-		return "group_concat(" + expr + " SEPARATOR'" + separator + "')"
 	}
+	if b.driver == "postgres" {
+		return "string_agg(" + expr + ", '" + separator + "')"
+	}
+	if b.driver == "mysql" {
+		return "group_concat(" + expr + " SEPARATOR '" + separator + "')"
+	}
+	panic("Unsupported driver")
 }
 
 func (b *Backend) UserCreds(username string) (uint64, []byte, []byte, error) {
@@ -487,7 +589,7 @@ func (b *Backend) CreateUser(username, password string) error {
 	digest := sha3.Sum512(pass)
 
 	_, err := b.addUser.Exec(username, hex.EncodeToString(digest[:]), hex.EncodeToString(salt))
-	if err != nil && strings.Contains(err.Error(), "UNIQUE") { // TODO: check error messages for other RDBMS
+	if err != nil && (strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "Duplicate entry")) { // TODO: check error messages for other RDBMS
 		return sqlmail.ErrUserAlreadyExists
 	}
 	return errors.Wrap(err, "CreateUser")

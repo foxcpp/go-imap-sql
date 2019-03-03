@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"io/ioutil"
+	"sort"
 	"strings"
 	"time"
 
@@ -38,9 +39,6 @@ func (m *Mailbox) Info() (*imap.MailboxInfo, error) {
 	row := m.parent.getMboxMark.QueryRow(m.uid, m.name)
 	mark := 0
 	if err := row.Scan(&mark); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, backend.ErrNoSuchMailbox
-		}
 		return nil, errors.Wrapf(err, "Info %s", m.name)
 	}
 	if mark == 1 {
@@ -214,9 +212,9 @@ func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.Fetch
 			}
 		} else {
 			if bodyNeeded {
-				rows, err = m.parent.getMsgsBodySeq.Query(m.id, m.id, stop-start+1, start)
+				rows, err = m.parent.getMsgsBodySeq.Query(m.id, m.id, start, stop)
 			} else {
-				rows, err = m.parent.getMsgsNoBodySeq.Query(m.id, m.id, stop-start+1, start)
+				rows, err = m.parent.getMsgsNoBodySeq.Query(m.id, m.id, start, stop)
 			}
 		}
 		if err != nil {
@@ -226,7 +224,7 @@ func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.Fetch
 		for rows.Next() {
 			msg, err := scanMessage(rows, items)
 			if err != nil {
-				return errors.Wrap(err, "ListMessages")
+				return errors.Wrap(err, "ListMessages (scan)")
 			}
 
 			ch <- msg
@@ -278,6 +276,10 @@ func scanMessage(rows *sql.Rows, items []imap.FetchItem) (*imap.Message, error) 
 			res.BodyStructure, err = backendutil.FetchBodyStructure(ent, item == imap.FetchBodyStructure)
 		case imap.FetchFlags:
 			res.Flags = strings.Split(flagsStr, flagsSep) // see ListMessages for reasons of using { as a sep
+			if len(res.Flags) == 1 && res.Flags[0] == "" {
+				res.Flags = []string{}
+			}
+			sort.Strings(res.Flags)
 		case imap.FetchInternalDate:
 			res.InternalDate = time.Unix(date, 0)
 		case imap.FetchRFC822Size:
@@ -294,12 +296,14 @@ func scanMessage(rows *sql.Rows, items []imap.FetchItem) (*imap.Message, error) 
 
 			sect, err := imap.ParseBodySectionName(item)
 			if err != nil {
-				return nil, err
+				break
 			}
 
 			res.Body[sect], err = backendutil.FetchBodySection(ent, sect)
 			if err != nil {
-				return nil, err
+				// While this is not explicitly stated in standard,
+				// non-existent sections should return empty literal.
+				res.Body[sect] = bytes.NewReader([]byte{})
 			}
 		}
 	}
@@ -317,6 +321,7 @@ func needsBody(items []imap.FetchItem) bool {
 		case imap.FetchInternalDate:
 		case imap.FetchRFC822Size:
 		case imap.FetchUid:
+			return false
 		default:
 			return true
 		}
@@ -344,7 +349,7 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, body imap.Litera
 	_, err = tx.Stmt(m.parent.addMsg).Exec(
 		/* mboxId:   */ m.id,
 		/* msgId:    */ msgId,
-		/* date:     */ time.Now().Unix(),
+		/* date:     */ date.Unix(),
 		/* bodyLen:  */ len(bodyBlob),
 		/* body:     */ bodyBlob,
 	)
@@ -352,14 +357,26 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, body imap.Litera
 		return errors.Wrap(err, "CreateMessage (addMsg)")
 	}
 
-	flagsReq := `
+	haveRecent := false
+	for _, flag := range flags {
+		if flag == imap.RecentFlag {
+			haveRecent = true
+		}
+	}
+	if !haveRecent {
+		flags = append(flags, imap.RecentFlag)
+	}
+
+	if len(flags) != 0 {
+		flagsReq := `
 		INSERT INTO flags
 		SELECT ? AS mboxId, msgId, column1 AS flag
 		FROM msgs
-		CROSS JOIN (` + m.valuesSubquery(flags) + `)
+		CROSS JOIN (` + m.valuesSubquery(flags) + `) flagset
 		WHERE mboxId = ? AND msgId = ?`
-	if _, err := tx.Exec(flagsReq, m.id, m.id, msgId); err != nil {
-		return errors.Wrap(err, "CreateMessage (flags)")
+		if _, err := tx.Exec(flagsReq, m.id, m.id, msgId); err != nil {
+			return errors.Wrap(err, "CreateMessage (flags)")
+		}
 	}
 
 	return errors.Wrap(tx.Commit(), "CreateMessage (tx commit)")
@@ -381,7 +398,7 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 			if uid {
 				_, err = tx.Stmt(m.parent.massClearFlagsUid).Exec(m.id, start, stop)
 			} else {
-				_, err = tx.Stmt(m.parent.massClearFlagsSeq).Exec(m.id, m.id, stop-start+1, start)
+				_, err = tx.Stmt(m.parent.massClearFlagsSeq).Exec(m.id, m.id, start, stop)
 			}
 			if err != nil {
 				return errors.Wrap(err, "UpdateMessagesFlags")
@@ -390,21 +407,21 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 		fallthrough
 	case imap.AddFlags:
 		if uid {
-			query, err = tx.Prepare(`
+			query, err = tx.Prepare(m.parent.db.rewriteSQL(`
 				INSERT INTO flags
 				SELECT ? AS mboxId, msgId, column1 AS flag
 				FROM msgs
-				CROSS JOIN (` + m.valuesSubquery(flags) + `)
+				CROSS JOIN (` + m.valuesSubquery(flags) + `) flagset
 				WHERE mboxId = ? AND msgId BETWEEN ? AND ?
-				ON CONFLICT DO NOTHING`)
+				ON CONFLICT DO NOTHING`))
 		} else {
 			// ON 1=1 is necessary to make SQL parser not interpret ON CONFLICT as join condition.
-			query, err = tx.Prepare(`
+			query, err = tx.Prepare(m.parent.db.rewriteSQL(`
 				INSERT INTO flags
 				SELECT ? AS mboxId, msgId, column1 AS flag
-				FROM (SELECT msgId FROM msgs WHERE mboxId = ? LIMIT ? OFFSET ?)
-				CROSS JOIN (` + m.valuesSubquery(flags) + `) ON 1=1
-				ON CONFLICT DO NOTHING`)
+				FROM (SELECT msgId FROM msgs WHERE mboxId = ? LIMIT ? OFFSET ?) msgIds
+				CROSS JOIN (` + m.valuesSubquery(flags) + `) flagset ON 1=1
+				ON CONFLICT DO NOTHING`))
 		}
 		if err != nil {
 			return errors.Wrap(err, "UpdateMessagesFlags")
@@ -425,17 +442,24 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 		query.Close()
 	case imap.RemoveFlags:
 		if uid {
-			query, err = tx.Prepare(`
+			query, err = tx.Prepare(m.parent.db.rewriteSQL(`
 				DELETE FROM flags
 				WHERE mboxId = ?
 				AND msgId BETWEEN ? AND ?
-				AND flag IN (` + m.valuesSubquery(flags) + `)`)
+				AND flag IN (` + m.valuesSubquery(flags) + `)`))
 		} else {
-			query, err = tx.Prepare(`
+			query, err = tx.Prepare(m.parent.db.rewriteSQL(`
 				DELETE FROM flags
 				WHERE mboxId = ?
-				AND msgId IN (SELECT msgId FROM msgs WHERE mboxId = ? LIMIT ? OFFSET ?)
-				AND flag IN (` + m.valuesSubquery(flags) + `)`)
+				AND msgId IN (
+					SELECT msgId
+					FROM (
+						SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId
+						FROM msgs
+						WHERE mboxId = ?
+					) seqnums
+					WHERE seqnum BETWEEN ? AND ?
+				) AND flag IN (` + m.valuesSubquery(flags) + `)`))
 		}
 		if err != nil {
 			return errors.Wrap(err, "UpdateMessagesFlags")
@@ -446,7 +470,7 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 			if uid {
 				_, err = query.Exec(m.id, start, stop)
 			} else {
-				_, err = query.Exec(m.id, m.id, stop-start+1, start+1)
+				_, err = query.Exec(m.id, m.id, start, stop)
 			}
 			if err != nil {
 				query.Close()
@@ -461,6 +485,19 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 
 func (m *Mailbox) valuesSubquery(rows []string) string {
 	sqlList := ""
+	if m.parent.db.driver == "mysql" {
+		val0 := strings.Replace(rows[0], "''", "''", -1)
+
+		sqlList += "SELECT '" + val0 + "' AS column1"
+		for _, val := range rows[1:] {
+			val = strings.Replace(val, "''", "''", -1)
+
+			sqlList += " UNION ALL SELECT '" + val + "' "
+		}
+
+		return sqlList
+	}
+
 	for i, val := range rows {
 		sqlList += "('" + strings.Replace(val, "'", "''", -1) + "')"
 		if i+1 != len(rows) {
@@ -496,14 +533,14 @@ func (m *Mailbox) CopyMessages(uid bool, seqset *imap.SeqSet, dest string) error
 			if _, err := tx.Stmt(m.parent.copyMsgsUid).Exec(destID, destID, srcId, start, stop); err != nil {
 				return errors.Wrapf(err, "CopyMessages %s, %s", m.name, dest)
 			}
-			if _, err := tx.Stmt(m.parent.copyMsgFlagsUid).Exec(destID, destID, srcId, start, stop, srcId); err != nil {
+			if _, err := tx.Stmt(m.parent.copyMsgFlagsUid).Exec(destID, stop-start+1, destID, srcId, start, stop); err != nil {
 				return errors.Wrapf(err, "CopyMessages (flags) %s, %s", m.name, dest)
 			}
 		} else {
 			if _, err := tx.Stmt(m.parent.copyMsgsSeq).Exec(destID, destID, srcId, stop-start+1, start-1); err != nil {
 				return errors.Wrapf(err, "CopyMessages %s, %s", m.name, dest)
 			}
-			if _, err := tx.Stmt(m.parent.copyMsgFlagsSeq).Exec(destID, destID, srcId, stop-start+1, start-1, srcId); err != nil {
+			if _, err := tx.Stmt(m.parent.copyMsgFlagsSeq).Exec(destID, stop-start+1, destID, srcId, stop-start+1, start-1); err != nil {
 				return errors.Wrapf(err, "CopyMessages (flags) %s, %s", m.name, dest)
 			}
 		}

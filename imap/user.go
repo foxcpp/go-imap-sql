@@ -75,7 +75,7 @@ func (u *User) CreateMailbox(name string) error {
 	}
 
 	if _, err := tx.Stmt(u.parent.createMbox).Exec(u.id, name, time.Now().Unix()); err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") { // TODO: Check error messages for other RDBMS.
+		if strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "Duplicate entry") { // TODO: Check error messages for other RDBMS.
 			return backend.ErrMailboxAlreadyExists
 		}
 		return errors.Wrapf(err, "CreateMailbox %s", name)
@@ -121,7 +121,7 @@ func (u *User) RenameMailbox(existingName, newName string) error {
 	newPrefix := newName + MailboxPathSep
 	existingPrefixLen := len(existingName + MailboxPathSep)
 	if _, err := tx.Stmt(u.parent.renameMboxChilds).Exec(newPrefix, existingPrefixLen, existingPattern, u.id); err != nil {
-		return errors.Wrapf(err, "RenameMailbox %s, %s", existingName, newName)
+		return errors.Wrapf(err, "RenameMailbox (childs) %s, %s", existingName, newName)
 	}
 
 	if existingName == "INBOX" {

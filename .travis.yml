@@ -1,0 +1,26 @@
+sudo: false
+dist: xenial
+language: go
+
+go:
+- "1.x"
+
+matrix:
+  include:
+  - env: GO111MODULE=on TEST_DB=sqlite3 TEST_DSN=":memory:"
+  - env: GO111MODULE=on TEST_DB=mysql TEST_DSN="root@tcp(localhost)/sqlmail_test"
+    services:
+    - mysql
+    before_install:
+    - mysql -u root -e 'CREATE DATABASE IF NOT EXISTS sqlmail_test;'
+# - env: GO111MODULE=on TEST_DB=postgres TEST_DSN="user=postgres dbname=sqlmail_test sslmode=disable"
+#   services:
+#   - postgresql
+#   before_install:
+#   - psql -c 'create database sqlmail_test;' -U postgres
+
+script:
+- go test ./... -race -coverprofile=coverage.txt -covermode=atomic -tags $TEST_DB
+
+after_success:
+- bash <(curl -s https://codecov.io/bash)

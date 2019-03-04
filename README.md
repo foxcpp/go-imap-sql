@@ -11,22 +11,22 @@ SQL-based storage backend for [go-imap] ~~and [go-smtp]~~ _(not yet)_ libraries.
 #### Building
 
 Go 1.11 is required because we are using modules. Things may work on older versions
-but these configuration will not be supported.
+but these configurations will not be supported.
 
 #### RDBMS support
 
 - SQLite
-- MySQL 
-- PostgreSQL _planned_
+- MySQL 8 _(5.7 support is planned)_
+- ~~PostgreSQL~~ _(planned)_
 
 #### IMAP Exntesions Supported
 
 Due to go-imap architecture, some extensions require support from used backend.
 Here are extensions supported by go-sqlmail:
-- [APPEND-LIMIT] _planned_
-- [UIDPLUS] _planned_
-- [MOVE] _planned_
-- [IDLE] _planned_
+- ~~[APPEND-LIMIT]~~ _(planned)_
+- ~~[UIDPLUS]~~ _(planned)_
+- ~~[MOVE]~~ _(planned)_
+- ~~[IDLE]~~ _(planned)_
 
 #### Maddy
 
@@ -36,7 +36,7 @@ https://github.com/foxcpp/maddy/tree/sqlmail
 
 You need to execute this command prior to building to get lastest development version:
 ```
-go get github.com/foxcpp/
+go get github.com/foxcpp/go-sqlmail@dev
 ```
 
 Here is minimal example for testing, using SQLite (you need CGo for SQLite!):

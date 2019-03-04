@@ -16,7 +16,7 @@ but these configurations will not be supported.
 #### RDBMS support
 
 - SQLite
-- MySQL 8 _(5.7 support is planned)_
+- MySQL 5.7+ (or MariaDB 10.0+)
 - ~~PostgreSQL~~ _(planned)_
 
 #### IMAP Exntesions Supported

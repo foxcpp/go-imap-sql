@@ -368,13 +368,22 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, body imap.Litera
 	}
 
 	if len(flags) != 0 {
+		// TOOD: Use addFlag if only one flag is added.
 		flagsReq := `
 		INSERT INTO flags
 		SELECT ? AS mboxId, msgId, column1 AS flag
 		FROM msgs
-		CROSS JOIN (` + m.valuesSubquery(flags) + `) flagset
+		CROSS JOIN (` + m.valuesSubquery(len(flags)) + `) flagset
 		WHERE mboxId = ? AND msgId = ?`
-		if _, err := tx.Exec(flagsReq, m.id, m.id, msgId); err != nil {
+
+		// How horrible variable arguments in Go are...
+		params := make([]interface{}, 0, 3+len(flags))
+		params = append(params, m.id)
+		for _, flag := range flags {
+			params = append(params, flag)
+		}
+		params = append(params, m.id, msgId)
+		if _, err := tx.Exec(flagsReq, params...); err != nil {
 			return errors.Wrap(err, "CreateMessage (flags)")
 		}
 	}
@@ -411,7 +420,7 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 				INSERT INTO flags
 				SELECT ? AS mboxId, msgId, column1 AS flag
 				FROM msgs
-				CROSS JOIN (` + m.valuesSubquery(flags) + `) flagset
+				CROSS JOIN (` + m.valuesSubquery(len(flags)) + `) flagset
 				WHERE mboxId = ? AND msgId BETWEEN ? AND ?
 				ON CONFLICT DO NOTHING`))
 		} else {
@@ -420,7 +429,7 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 				INSERT INTO flags
 				SELECT ? AS mboxId, msgId, column1 AS flag
 				FROM (SELECT msgId FROM msgs WHERE mboxId = ? LIMIT ? OFFSET ?) msgIds
-				CROSS JOIN (` + m.valuesSubquery(flags) + `) flagset ON 1=1
+				CROSS JOIN (` + m.valuesSubquery(len(flags)) + `) flagset ON 1=1
 				ON CONFLICT DO NOTHING`))
 		}
 		if err != nil {
@@ -429,10 +438,23 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 
 		for _, seq := range seqset.Set {
 			start, stop := sqlRange(seq)
+			// How horrible variable arguments in Go are...
 			if uid {
-				_, err = query.Exec(m.id, m.id, start, stop)
+				params := make([]interface{}, 0, 4+len(flags))
+				params = append(params, m.id)
+				for _, flag := range flags {
+					params = append(params, flag)
+				}
+				params = append(params, m.id, start, stop)
+
+				_, err = query.Exec(params...)
 			} else {
-				_, err = query.Exec(m.id, m.id, stop-start+1, start-1)
+				params := make([]interface{}, 0, 4+len(flags))
+				params = append(params, m.id, m.id, stop-start+1, start-1)
+				for _, flag := range flags {
+					params = append(params, flag)
+				}
+				_, err = query.Exec(params...)
 			}
 			if err != nil {
 				query.Close()
@@ -446,7 +468,7 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 				DELETE FROM flags
 				WHERE mboxId = ?
 				AND msgId BETWEEN ? AND ?
-				AND flag IN (` + m.valuesSubquery(flags) + `)`))
+				AND flag IN (` + m.valuesSubquery(len(flags)) + `)`))
 		} else {
 			query, err = tx.Prepare(m.parent.db.rewriteSQL(`
 				DELETE FROM flags
@@ -459,7 +481,7 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 						WHERE mboxId = ?
 					) seqnums
 					WHERE seqnum BETWEEN ? AND ?
-				) AND flag IN (` + m.valuesSubquery(flags) + `)`))
+				) AND flag IN (` + m.valuesSubquery(len(flags)) + `)`))
 		}
 		if err != nil {
 			return errors.Wrap(err, "UpdateMessagesFlags")
@@ -468,9 +490,19 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 		for _, seq := range seqset.Set {
 			start, stop := sqlRange(seq)
 			if uid {
-				_, err = query.Exec(m.id, start, stop)
+				params := make([]interface{}, 0, 3+len(flags))
+				params = append(params, m.id, start, stop)
+				for _, flag := range flags {
+					params = append(params, flag)
+				}
+				_, err = query.Exec(params...)
 			} else {
-				_, err = query.Exec(m.id, m.id, start, stop)
+				params := make([]interface{}, 0, 4+len(flags))
+				params = append(params, m.id, m.id, start, stop)
+				for _, flag := range flags {
+					params = append(params, flag)
+				}
+				_, err = query.Exec(params...)
 			}
 			if err != nil {
 				query.Close()
@@ -483,24 +515,20 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 	return errors.Wrap(tx.Commit(), "UpdateMessagesFlags")
 }
 
-func (m *Mailbox) valuesSubquery(rows []string) string {
+func (m *Mailbox) valuesSubquery(count int) string {
 	sqlList := ""
 	if m.parent.db.driver == "mysql" {
-		val0 := strings.Replace(rows[0], "''", "''", -1)
-
-		sqlList += "SELECT '" + val0 + "' AS column1"
-		for _, val := range rows[1:] {
-			val = strings.Replace(val, "''", "''", -1)
-
-			sqlList += " UNION ALL SELECT '" + val + "' "
+		sqlList += "SELECT ? AS column1"
+		for i := 1; i < count; i++ {
+			sqlList += " UNION ALL SELECT ? "
 		}
 
 		return sqlList
 	}
 
-	for i, val := range rows {
-		sqlList += "('" + strings.Replace(val, "'", "''", -1) + "')"
-		if i+1 != len(rows) {
+	for i := 0; i < count; i++ {
+		sqlList += "(?)"
+		if i+1 != count {
 			sqlList += ","
 		}
 	}

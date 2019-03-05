@@ -16,8 +16,12 @@ but these configurations will not be supported.
 #### RDBMS support
 
 - SQLite
-- MySQL 5.7+ (or MariaDB 10.0+)
+- MySQL 5.7 (or MariaDB 10.2)
 - ~~PostgreSQL~~ _(planned)_
+
+**Note:** MySQL 5.7 support is deprecated since it's addition and not even
+strictly safe to use. Please stick to using newer versions (MySQL 8 or MariaDB)
+when possible.
 
 #### IMAP Exntesions Supported
 

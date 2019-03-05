@@ -369,12 +369,12 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, body imap.Litera
 
 	if len(flags) != 0 {
 		// TOOD: Use addFlag if only one flag is added.
-		flagsReq := `
-		INSERT INTO flags
-		SELECT ? AS mboxId, msgId, column1 AS flag
-		FROM msgs
-		CROSS JOIN (` + m.valuesSubquery(flags) + `) flagset
-		WHERE mboxId = ? AND msgId = ?`
+		flagsReq := m.parent.db.rewriteSQL(`
+			INSERT INTO flags
+			SELECT ?, msgId, column1 AS flag
+			FROM msgs
+			CROSS JOIN (` + m.valuesSubquery(flags) + `) flagset
+			WHERE mboxId = ? AND msgId = ?`)
 
 		// How horrible variable arguments in Go are...
 		params := make([]interface{}, 0, 3+len(flags))
@@ -426,13 +426,23 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 				WHERE mboxId = ? AND msgId BETWEEN ? AND ?
 				ON CONFLICT DO NOTHING`))
 		} else {
-			// ON 1=1 is necessary to make SQL parser not interpret ON CONFLICT as join condition.
-			query, err = tx.Prepare(m.parent.db.rewriteSQL(`
-				INSERT INTO flags
-				SELECT ? AS mboxId, msgId, column1 AS flag
-				FROM (SELECT msgId FROM msgs WHERE mboxId = ? LIMIT ? OFFSET ?) msgIds
-				CROSS JOIN (` + m.valuesSubquery(flags) + `) flagset ON 1=1
-				ON CONFLICT DO NOTHING`))
+			// ON 1=1 is necessary to make SQLite's parser not interpret ON CONFLICT as join condition.
+			if m.parent.db.driver == "sqlite3" {
+				query, err = tx.Prepare(m.parent.db.rewriteSQL(`
+					INSERT INTO flags
+					SELECT ? AS mboxId, msgId, column1 AS flag
+					FROM (SELECT msgId FROM msgs WHERE mboxId = ? LIMIT ? OFFSET ?) msgIds
+					CROSS JOIN (` + m.valuesSubquery(flags) + `) flagset ON 1=1
+					ON CONFLICT DO NOTHING`))
+			} else {
+				// But 1 = 1 in query causes errors on PostgreSQL.
+				query, err = tx.Prepare(m.parent.db.rewriteSQL(`
+					INSERT INTO flags
+					SELECT ? AS mboxId, msgId, column1 AS flag
+					FROM (SELECT msgId FROM msgs WHERE mboxId = ? LIMIT ? OFFSET ?) msgIds
+					CROSS JOIN (` + m.valuesSubquery(flags) + `) flagset
+					ON CONFLICT DO NOTHING`))
+			}
 		}
 		if err != nil {
 			return errors.Wrap(err, "UpdateMessagesFlags")

@@ -13,11 +13,11 @@ matrix:
     - mysql
     before_install:
     - mysql -u root -e 'CREATE DATABASE IF NOT EXISTS sqlmail_test;'
-# - env: GO111MODULE=on TEST_DB=postgres TEST_DSN="user=postgres dbname=sqlmail_test sslmode=disable"
-#   services:
-#   - postgresql
-#   before_install:
-#   - psql -c 'create database sqlmail_test;' -U postgres
+  - env: GO111MODULE=on TEST_DB=postgres TEST_DSN="user=postgres dbname=sqlmail_test sslmode=disable"
+    services:
+    - postgresql
+    before_install:
+    - psql -c 'create database sqlmail_test;' -U postgres
 
 script:
 - go test ./... -race -coverprofile=coverage.txt -covermode=atomic -tags $TEST_DB

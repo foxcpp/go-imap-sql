@@ -15,12 +15,13 @@ but these configurations will not be supported.
 
 #### RDBMS support
 
-- SQLite
+go-sqlmail is known to work with (and constantly being tested against) following RDBMS:
+- SQLite 3.25.0
 - MySQL 5.7 (or MariaDB 10.2)
-- ~~PostgreSQL~~ _(planned)_
+- PostgreSQL
 
 **Note:** MySQL 5.7 support is deprecated since it's addition and not even
-strictly safe to use. Please stick to using newer versions (MySQL 8 or MariaDB)
+strictly safe to use. Please stick to using newer versions (MySQL 8 or compatible MariaDB version)
 when possible.
 
 #### IMAP Exntesions Supported

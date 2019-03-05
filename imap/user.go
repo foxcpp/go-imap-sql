@@ -71,7 +71,7 @@ func (u *User) CreateMailbox(name string) error {
 	defer tx.Rollback()
 
 	if err := u.createParentDirs(tx, name); err != nil {
-		return errors.Wrapf(err, "CreateMailbox %s", name)
+		return errors.Wrapf(err, "CreateMailbox (parents) %s", name)
 	}
 
 	if _, err := tx.Stmt(u.parent.createMbox).Exec(u.id, name, time.Now().Unix()); err != nil {

@@ -45,10 +45,18 @@ func initTestBackend() testsuite.Backend {
 
 func cleanBackend(bi testsuite.Backend) {
 	b := bi.(*Backend)
-	b.db.Exec(`DROP TABLE users`)
-	b.db.Exec(`DROP TABLE mboxes`)
-	b.db.Exec(`DROP TABLE flags`)
-	b.db.Exec(`DROP TABLE msgs`)
+	if _, err := b.db.Exec(`DROP TABLE flags`); err != nil {
+		panic(err)
+	}
+	if _, err := b.db.Exec(`DROP TABLE msgs`); err != nil {
+		panic(err)
+	}
+	if _, err := b.db.Exec(`DROP TABLE mboxes`); err != nil {
+		panic(err)
+	}
+	if _, err := b.db.Exec(`DROP TABLE users`); err != nil {
+		panic(err)
+	}
 	b.Close()
 }
 

@@ -48,6 +48,7 @@ func (d db) Close() error {
 
 func (d db) rewriteSQL(req string) (res string) {
 	res = strings.TrimSpace(req)
+	res = strings.TrimLeft(res, "\n\t")
 	if d.driver == "postgres" {
 		res = ""
 		placeholderIndx := 1
@@ -59,13 +60,15 @@ func (d db) rewriteSQL(req string) (res string) {
 				res += string(chr)
 			}
 		}
+		res = strings.TrimLeft(res, "\n\t")
 		if strings.HasPrefix(res, "CREATE TABLE") {
 			res = strings.Replace(res, "BLOB", "BYTEA", -1)
 			res = strings.Replace(res, "AUTOINCREMENT", "", -1)
 		}
 	} else if d.driver == "mysql" {
 		if strings.HasPrefix(res, "CREATE TABLE") {
-			res = strings.Replace(res, "AUTOINCREMENT", "", -1)
+			res = strings.Replace(res, "BIGSERIAL", "BIGINT", -1)
+			res = strings.Replace(res, "AUTOINCREMENT", "AUTO_INCREMENT", -1)
 		}
 		if strings.HasSuffix(res, "ON CONFLICT DO NOTHING") && strings.HasPrefix(res, "INSERT") {
 			res = strings.Replace(res, "ON CONFLICT DO NOTHING", "", -1)
@@ -73,7 +76,7 @@ func (d db) rewriteSQL(req string) (res string) {
 		}
 	} else if d.driver == "sqlite3" {
 		if strings.HasPrefix(res, "CREATE TABLE") {
-			res = strings.Replace(res, "SERIAL", "INTEGER", -1)
+			res = strings.Replace(res, "BIGSERIAL", "INTEGER", -1)
 		}
 	}
 	return
@@ -169,7 +172,6 @@ func NewBackend(driver, dsn string) (*Backend, error) {
 	if err := b.prepareStmts(); err != nil {
 		return nil, errors.Wrap(err, "NewBackend")
 	}
-
 	return b, nil
 }
 
@@ -181,7 +183,7 @@ func (b *Backend) initSchema() error {
 	var err error
 	_, err = b.db.Exec(`
 		CREATE TABLE IF NOT EXISTS users (
-			id SERIAL NOT NULL PRIMARY KEY AUTOINCREMENT,
+			id BIGSERIAL NOT NULL PRIMARY KEY AUTOINCREMENT,
 			username VARCHAR(255) NOT NULL UNIQUE,
 			password VARCHAR(255) DEFAULT NULL,
 			password_salt VARCHAR(255) DEFAULT NULL
@@ -191,7 +193,7 @@ func (b *Backend) initSchema() error {
 	}
 	_, err = b.db.Exec(`
 		CREATE TABLE IF NOT EXISTS mboxes (
-			id SERIAL NOT NULL PRIMARY KEY AUTOINCREMENT,
+			id BIGSERIAL NOT NULL PRIMARY KEY AUTOINCREMENT,
 			uid INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			name VARCHAR(255) NOT NULL,
 			sub INTEGER NOT NULL DEFAULT 0,
@@ -205,9 +207,9 @@ func (b *Backend) initSchema() error {
 	}
 	_, err = b.db.Exec(`
 		CREATE TABLE IF NOT EXISTS msgs (
-			mboxId INTEGER NOT NULL REFERENCES mboxes(id) ON DELETE CASCADE,
-			msgId INTEGER NOT NULL,
-			date INTEGER NOT NULL,
+			mboxId BIGINT NOT NULL REFERENCES mboxes(id) ON DELETE CASCADE,
+			msgId BIGINT NOT NULL,
+			date BIGINT NOT NULL,
 			bodyLen INTEGER NOT NULL,
 			body BLOB NOT NULL,
 
@@ -218,8 +220,8 @@ func (b *Backend) initSchema() error {
 	}
 	_, err = b.db.Exec(`
 		CREATE TABLE IF NOT EXISTS flags (
-			mboxId INTEGER NOT NULL,
-			msgId INTEGER NOT NULL,
+			mboxId BIGINT NOT NULL,
+			msgId BIGINT NOT NULL,
 			flag VARCHAR(255) NOT NULL,
 
 			FOREIGN KEY (mboxId, msgId) REFERENCES msgs(mboxId, msgId) ON DELETE CASCADE,
@@ -761,7 +763,7 @@ func (b *Backend) CreateUser(username, password string) error {
 	digest := sha3.Sum512(pass)
 
 	_, err := b.addUser.Exec(username, hex.EncodeToString(digest[:]), hex.EncodeToString(salt))
-	if err != nil && (strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "Duplicate entry")) { // TODO: check error messages for other RDBMS
+	if err != nil && (strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "Duplicate entry") || strings.Contains(err.Error(), "unique")) {
 		return sqlmail.ErrUserAlreadyExists
 	}
 	return errors.Wrap(err, "CreateUser")

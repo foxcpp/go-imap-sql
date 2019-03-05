@@ -17,9 +17,9 @@ func UserDB_CreateUser(t *testing.T, newBack newBackFunc, closeBack closeBackFun
 
 	u, err := b.GetUser("username1")
 	assert.NilError(t, err, "GetUser username1 failed")
-	u.Logout()
+	assert.NilError(t, u.Logout())
 
-	u, err = b.GetUser("username2")
+	_, err = b.GetUser("username2")
 	assert.Error(t, err, sqlmail.ErrUserDoesntExists.Error(), "GetUser username2 failed")
 }
 
@@ -31,7 +31,7 @@ func UserDB_Login(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
 
 	u, err := b.Login("username1", "password1")
 	assert.NilError(t, err, "Login username1")
-	u.Logout()
+	assert.NilError(t, u.Logout())
 }
 
 func UserDB_SetPassword(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
@@ -42,7 +42,7 @@ func UserDB_SetPassword(t *testing.T, newBack newBackFunc, closeBack closeBackFu
 
 	u, err := b.Login("username1", "password1")
 	assert.NilError(t, err, "Login with original password")
-	u.Logout()
+	assert.NilError(t, u.Logout())
 
 	assert.NilError(t, b.SetUserPassword("username1", "password2"), "SetPassword failed")
 
@@ -51,7 +51,7 @@ func UserDB_SetPassword(t *testing.T, newBack newBackFunc, closeBack closeBackFu
 
 	u, err = b.Login("username1", "password2")
 	assert.NilError(t, err, "Login with new password failed")
-	u.Logout()
+	assert.NilError(t, u.Logout())
 }
 
 func UserDB_DeleteUser(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {

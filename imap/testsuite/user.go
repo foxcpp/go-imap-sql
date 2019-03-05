@@ -165,6 +165,7 @@ func User_ListMailboxes(t *testing.T, newBack newBackFunc, closeBack closeBackFu
 	assert.NilError(t, u.CreateMailbox("INBOX"))
 
 	mboxes, err := u.ListMailboxes(false)
+	assert.NilError(t, err)
 	assert.Assert(t, is.Len(mboxes, 1), "Mailboxes count mismatch")
 	assert.Equal(t, mboxes[0].Name(), "INBOX", "Mailbox name mismatch")
 }

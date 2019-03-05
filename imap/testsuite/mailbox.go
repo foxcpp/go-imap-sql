@@ -122,7 +122,7 @@ func Mailbox_Status(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) 
 		seq := imap.SeqSet{}
 		seq.AddNum(1)
 		ch := make(chan *imap.Message, 1)
-		mbox.ListMessages(false, &seq, []imap.FetchItem{imap.FetchUid}, ch)
+		assert.NilError(t, mbox.ListMessages(false, &seq, []imap.FetchItem{imap.FetchUid}, ch))
 		assert.Assert(t, is.Len(ch, 1), "Missing message")
 		msg := <-ch
 
@@ -274,8 +274,7 @@ Test! Test! Test! Test!
 	if !t.Run("Seq1:3", func(t *testing.T) {
 		seq, _ := imap.ParseSeqSet("1:3")
 		ch := make(chan *imap.Message, 10)
-		mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch)
-		assert.NilError(t, err)
+		assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch))
 		assert.Assert(t, is.Len(ch, 3), "Wrong number of messages returned")
 		msg := <-ch
 		assert.DeepEqual(t, msg.Flags, []string{"$Test1", "$Test2", imap.RecentFlag})
@@ -297,8 +296,7 @@ Test! Test! Test! Test!
 	t.Run("Seq1:5 (4,5 invalid)", func(t *testing.T) {
 		seq, _ := imap.ParseSeqSet("1:5")
 		ch := make(chan *imap.Message, 10)
-		mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch)
-		assert.NilError(t, err)
+		assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch))
 		assert.Assert(t, is.Len(ch, 3), "Wrong number of messages returned")
 		msg := <-ch
 		assert.DeepEqual(t, msg.Flags, []string{"$Test1", "$Test2", imap.RecentFlag})
@@ -318,8 +316,7 @@ Test! Test! Test! Test!
 	t.Run("Seq1:*", func(t *testing.T) {
 		seq, _ := imap.ParseSeqSet("1:*")
 		ch := make(chan *imap.Message, 10)
-		mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch)
-		assert.NilError(t, err)
+		assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch))
 		assert.Assert(t, is.Len(ch, 3), "Wrong number of messages returned")
 		msg := <-ch
 		assert.DeepEqual(t, msg.Flags, []string{"$Test1", "$Test2", imap.RecentFlag})
@@ -339,8 +336,7 @@ Test! Test! Test! Test!
 	t.Run("Seq1", func(t *testing.T) {
 		seq, _ := imap.ParseSeqSet("1")
 		ch := make(chan *imap.Message, 10)
-		mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch)
-		assert.NilError(t, err)
+		assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch))
 		assert.Assert(t, is.Len(ch, 1), "Wrong number of messages returned")
 		msg := <-ch
 		assert.DeepEqual(t, msg.Flags, []string{"$Test1", "$Test2", imap.RecentFlag})
@@ -351,8 +347,7 @@ Test! Test! Test! Test!
 	t.Run("Seq25:30 (fully invalid)", func(t *testing.T) {
 		seq, _ := imap.ParseSeqSet("25:30")
 		ch := make(chan *imap.Message, 10)
-		mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch)
-		assert.NilError(t, err)
+		assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch))
 		assert.Assert(t, is.Len(ch, 0), "Wrong number of messages returned")
 	})
 
@@ -360,8 +355,7 @@ Test! Test! Test! Test!
 	t.Run("Uid1:*", func(t *testing.T) {
 		seq, _ := imap.ParseSeqSet("1:*")
 		ch := make(chan *imap.Message, 10)
-		mbox.ListMessages(true, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch)
-		assert.NilError(t, err)
+		assert.NilError(t, mbox.ListMessages(true, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch))
 		assert.Assert(t, is.Len(ch, 3), "Wrong number of messages returned")
 		msg := <-ch
 		assert.DeepEqual(t, msg.Flags, []string{"$Test1", "$Test2", imap.RecentFlag})
@@ -380,8 +374,7 @@ Test! Test! Test! Test!
 		seq.AddNum(firstUid)
 		seq.AddNum(secondUid)
 		ch := make(chan *imap.Message, 10)
-		mbox.ListMessages(true, &seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch)
-		assert.NilError(t, err)
+		assert.NilError(t, mbox.ListMessages(true, &seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch))
 		assert.Assert(t, is.Len(ch, 2), "Wrong number of messages returned")
 		msg := <-ch
 		assert.DeepEqual(t, msg.Flags, []string{"$Test1", "$Test2", imap.RecentFlag})
@@ -396,8 +389,7 @@ Test! Test! Test! Test!
 		seq := imap.SeqSet{}
 		seq.AddRange(firstUid, thirdUid)
 		ch := make(chan *imap.Message, 10)
-		mbox.ListMessages(true, &seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch)
-		assert.NilError(t, err)
+		assert.NilError(t, mbox.ListMessages(true, &seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch))
 		assert.Assert(t, is.Len(ch, 3), "Wrong number of messages returned")
 		msg := <-ch
 		assert.DeepEqual(t, msg.Flags, []string{"$Test1", "$Test2", imap.RecentFlag})
@@ -415,8 +407,7 @@ Test! Test! Test! Test!
 		seq := imap.SeqSet{}
 		seq.AddRange(firstUid, thirdUid+2)
 		ch := make(chan *imap.Message, 10)
-		mbox.ListMessages(true, &seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch)
-		assert.NilError(t, err)
+		assert.NilError(t, mbox.ListMessages(true, &seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch))
 		assert.Assert(t, is.Len(ch, 3), "Wrong number of messages returned")
 		msg := <-ch
 		assert.DeepEqual(t, msg.Flags, []string{"$Test1", "$Test2", imap.RecentFlag})
@@ -433,8 +424,7 @@ Test! Test! Test! Test!
 		seq := imap.SeqSet{}
 		seq.AddRange(firstUid+50, thirdUid+50)
 		ch := make(chan *imap.Message, 10)
-		mbox.ListMessages(true, &seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch)
-		assert.NilError(t, err)
+		assert.NilError(t, mbox.ListMessages(true, &seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch))
 		assert.Assert(t, is.Len(ch, 0), "Wrong number of messages returned")
 	})
 
@@ -443,8 +433,7 @@ Test! Test! Test! Test!
 		seq.AddRange(firstUid+50, thirdUid+50)
 		seq.AddRange(firstUid, thirdUid)
 		ch := make(chan *imap.Message, 10)
-		mbox.ListMessages(true, &seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch)
-		assert.NilError(t, err)
+		assert.NilError(t, mbox.ListMessages(true, &seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch))
 		assert.Assert(t, is.Len(ch, 3), "Wrong number of messages returned")
 		msg := <-ch
 		assert.DeepEqual(t, msg.Flags, []string{"$Test1", "$Test2", imap.RecentFlag})
@@ -553,7 +542,6 @@ func Mailbox_SetMessageFlags(t *testing.T, newBack newBackFunc, closeBack closeB
 			mbox, err := u.GetMailbox("TEST2S")
 			assert.NilError(t, err)
 			seq, _ := imap.ParseSeqSet("1")
-			ch := make(chan *imap.Message, 10)
 
 			date := time.Now()
 			assert.NilError(t, mbox.CreateMessage([]string{"$Test1", "$Test2"}, date, strings.NewReader(testMsg)))
@@ -561,7 +549,7 @@ func Mailbox_SetMessageFlags(t *testing.T, newBack newBackFunc, closeBack closeB
 
 			assert.NilError(t, mbox.UpdateMessagesFlags(false, seq, imap.RemoveFlags, []string{"$Test2"}))
 
-			ch = make(chan *imap.Message, 10)
+			ch := make(chan *imap.Message, 10)
 			assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags}, ch))
 			assert.Assert(t, is.Len(ch, 1), "Wrong number of messages returned")
 			msg := <-ch
@@ -622,7 +610,6 @@ func Mailbox_SetMessageFlags(t *testing.T, newBack newBackFunc, closeBack closeB
 			mbox, err := u.GetMailbox("TEST3S")
 			assert.NilError(t, err)
 			seq, _ := imap.ParseSeqSet("1")
-			ch := make(chan *imap.Message, 10)
 
 			date := time.Now()
 			assert.NilError(t, mbox.CreateMessage([]string{"$Test1", "$Test2"}, date, strings.NewReader(testMsg)))
@@ -630,7 +617,7 @@ func Mailbox_SetMessageFlags(t *testing.T, newBack newBackFunc, closeBack closeB
 
 			assert.NilError(t, mbox.UpdateMessagesFlags(false, seq, imap.SetFlags, []string{"$Test3", "$Test4"}))
 
-			ch = make(chan *imap.Message, 10)
+			ch := make(chan *imap.Message, 10)
 			assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags}, ch))
 			assert.Assert(t, is.Len(ch, 1), "Wrong number of messages returned")
 			msg := <-ch
@@ -717,8 +704,8 @@ func Mailbox_CopyMessages(t *testing.T, newBack newBackFunc, closeBack closeBack
 	ch := make(chan *imap.Message, 10)
 	assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchUid}, ch))
 	assert.Assert(t, is.Len(ch, 3))
+	<-ch
 	msg := <-ch
-	msg = <-ch
 	secondUid := msg.Uid
 	msg = <-ch
 	thirdUid := msg.Uid

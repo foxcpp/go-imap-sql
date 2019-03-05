@@ -52,7 +52,7 @@ func (m *Mailbox) Status(items []imap.StatusItem) (*imap.MailboxStatus, error) {
 	if err != nil {
 		return nil, errors.Wrapf(err, "Status %s", m.name)
 	}
-	defer tx.Rollback()
+	defer tx.Rollback() //nolint:errcheck
 
 	res := imap.NewMailboxStatus(m.name, items)
 	res.Flags = []string{
@@ -274,6 +274,9 @@ func scanMessage(rows *sql.Rows, items []imap.FetchItem) (*imap.Message, error) 
 			}
 
 			res.BodyStructure, err = backendutil.FetchBodyStructure(ent, item == imap.FetchBodyStructure)
+			if err != nil {
+				return nil, err
+			}
 		case imap.FetchFlags:
 			res.Flags = strings.Split(flagsStr, flagsSep) // see ListMessages for reasons of using { as a sep
 			if len(res.Flags) == 1 && res.Flags[0] == "" {
@@ -334,7 +337,7 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, body imap.Litera
 	if err != nil {
 		return errors.Wrap(err, "CreateMessage (tx begin)")
 	}
-	defer tx.Rollback()
+	defer tx.Rollback() //nolint:errcheck
 
 	msgId, err := m.UidNext(tx)
 	if err != nil {
@@ -398,7 +401,7 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 	if err != nil {
 		return errors.Wrap(err, "UpdateMessagesFlags")
 	}
-	defer tx.Rollback()
+	defer tx.Rollback() //nolint:errcheck
 
 	var query *sql.Stmt
 
@@ -602,7 +605,7 @@ func (m *Mailbox) CopyMessages(uid bool, seqset *imap.SeqSet, dest string) error
 	if err != nil {
 		return errors.Wrapf(err, "CopyMessages %s, %s", m.name, dest)
 	}
-	defer tx.Rollback()
+	defer tx.Rollback() //nolint:errcheck
 
 	for _, seq := range seqset.Set {
 		start, stop := sqlRange(seq)

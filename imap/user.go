@@ -68,7 +68,7 @@ func (u *User) CreateMailbox(name string) error {
 	if err != nil {
 		return errors.Wrapf(err, "CreateMailbox %s", name)
 	}
-	defer tx.Rollback()
+	defer tx.Rollback() //nolint:errcheck
 
 	if err := u.createParentDirs(tx, name); err != nil {
 		return errors.Wrapf(err, "CreateMailbox (parents) %s", name)
@@ -107,7 +107,7 @@ func (u *User) RenameMailbox(existingName, newName string) error {
 	if err != nil {
 		return errors.Wrapf(err, "RenameMailbox %s, %s", existingName, newName)
 	}
-	defer tx.Rollback()
+	defer tx.Rollback() //nolint:errcheck
 
 	if err := u.createParentDirs(tx, newName); err != nil {
 		return errors.Wrapf(err, "RenameMailbox %s, %s", existingName, newName)

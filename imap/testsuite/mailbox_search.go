@@ -2,6 +2,7 @@ package testsuite
 
 import (
 	"net/textproto"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -193,15 +194,45 @@ func Mailbox_SearchMessages_Body(t *testing.T, newBack newBackFunc, closeBack cl
 	mbox, err := u.GetMailbox("TEST")
 	assert.NilError(t, err)
 
-	err = mbox.CreateMessage([]string{"$Test1", "$Test2"}, testDate, strings.NewReader(testMailString))
-	assert.NilError(t, err)
+	assert.NilError(t, mbox.CreateMessage([]string{"$Test1", "$Test2"}, testDate, strings.NewReader(testMailString)))
 
 	for _, crit := range matchTests {
+		crit := crit
 		t.Run("Crit "+crit.name, func(t *testing.T) {
 			if crit.name == "SentSince" {
 				t.Skip("Skipped due to bug in go-imap (https://github.com/emersion/go-imap/issues/222)")
 				t.SkipNow()
 			}
+
+			res, err := mbox.SearchMessages(false, crit.criteria)
+			assert.NilError(t, err)
+			if crit.res {
+				assert.Assert(t, len(res) == 1 && res[0] == 1, "Criteria not matched when expected")
+			} else {
+				assert.Assert(t, len(res) == 0, "Criteria matched when not expected")
+			}
+		})
+	}
+}
+
+func Mailbox_SearchMessages_Flags(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+	b := newBack()
+	defer closeBack(b)
+	err := b.CreateUser("username1", "password1")
+	assert.NilError(t, err)
+	u, err := b.GetUser("username1")
+	assert.NilError(t, err)
+	defer assert.NilError(t, u.Logout())
+
+	for i, crit := range flagsTests {
+		crit := crit
+		name := "Crit " + strconv.Itoa(i+1)
+		t.Run(name, func(t *testing.T) {
+			assert.NilError(t, u.CreateMailbox("TEST"+name))
+			mbox, err := u.GetMailbox("TEST" + name)
+			assert.NilError(t, err)
+
+			assert.NilError(t, mbox.CreateMessage(crit.flags, testDate, strings.NewReader(testMailString)))
 
 			res, err := mbox.SearchMessages(false, crit.criteria)
 			assert.NilError(t, err)

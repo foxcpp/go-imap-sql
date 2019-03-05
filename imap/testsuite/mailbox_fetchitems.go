@@ -118,8 +118,7 @@ func Mailbox_ListMessages_Body(t *testing.T, newBack newBackFunc, closeBack clos
 		test := test
 		t.Run(test.section, func(t *testing.T) {
 			ch := make(chan *imap.Message, 10)
-			mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchItem(test.section)}, ch)
-			assert.NilError(t, err)
+			assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchItem(test.section)}, ch))
 			assert.Assert(t, is.Len(ch, 1), "Wrong number of messages returned")
 			msg := <-ch
 			assert.Equal(t, msg.SeqNum, uint32(1))
@@ -200,8 +199,7 @@ func Mailbox_ListMessages_BodyStruct(t *testing.T, newBack newBackFunc, closeBac
 	seq, _ := imap.ParseSeqSet("1")
 
 	ch := make(chan *imap.Message, 10)
-	mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchBodyStructure}, ch)
-	assert.NilError(t, err)
+	assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchBodyStructure}, ch))
 	assert.Assert(t, is.Len(ch, 1), "Wrong number of messages returned")
 	msg := <-ch
 	assert.Equal(t, msg.SeqNum, uint32(1))

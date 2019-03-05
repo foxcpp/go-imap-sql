@@ -798,6 +798,9 @@ func (b *Backend) SetUserPassword(username, newPassword string) error {
 	digest := sha3.Sum512(pass)
 
 	stats, err := b.setUserPass.Exec(hex.EncodeToString(digest[:]), hex.EncodeToString(salt), username)
+	if err != nil {
+		return errors.Wrap(err, "SetUserPassword")
+	}
 	affected, err := stats.RowsAffected()
 	if err != nil {
 		return errors.Wrap(err, "SetUserPassword")

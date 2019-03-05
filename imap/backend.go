@@ -87,6 +87,8 @@ type Backend struct {
 
 	driver string
 
+	childrenExt bool
+
 	// Shitton of pre-compiled SQL statements.
 	userCreds          *sql.Stmt
 	addUser            *sql.Stmt
@@ -102,6 +104,7 @@ type Backend struct {
 	getMboxMark        *sql.Stmt
 	setSubbed          *sql.Stmt
 	uidNext            *sql.Stmt
+	hasChildren        *sql.Stmt
 	uidValidity        *sql.Stmt
 	msgsCount          *sql.Stmt
 	recentCount        *sql.Stmt
@@ -173,6 +176,11 @@ func NewBackend(driver, dsn string) (*Backend, error) {
 		return nil, errors.Wrap(err, "NewBackend")
 	}
 	return b, nil
+}
+
+func (b *Backend) EnableChildrenExt() bool {
+	b.childrenExt = true
+	return true
 }
 
 func (b *Backend) Close() error {
@@ -323,6 +331,13 @@ func (b *Backend) prepareStmts() error {
 		WHERE id = ?`)
 	if err != nil {
 		return errors.Wrap(err, "setSubbed prep")
+	}
+	b.hasChildren, err = b.db.Prepare(`
+		SELECT count(*)
+		FROM mboxes
+		WHERE name LIKE ? AND uid = ?`)
+	if err != nil {
+		return errors.Wrap(err, "hasChildren prep")
 	}
 	b.uidNext, err = b.db.Prepare(`
 		SELECT max(msgId)+1

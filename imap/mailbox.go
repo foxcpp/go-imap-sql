@@ -12,6 +12,7 @@ import (
 	"github.com/emersion/go-imap/backend"
 	"github.com/emersion/go-imap/backend/backendutil"
 	"github.com/emersion/go-message"
+	"github.com/foxcpp/go-sqlmail/imap/children"
 	"github.com/pkg/errors"
 )
 
@@ -44,6 +45,20 @@ func (m *Mailbox) Info() (*imap.MailboxInfo, error) {
 	if mark == 1 {
 		res.Attributes = []string{imap.MarkedAttr}
 	}
+
+	if m.parent.childrenExt {
+		row = m.parent.hasChildren.QueryRow(m.name+MailboxPathSep+"%", m.uid)
+		childrenCount := 0
+		if err := row.Scan(&childrenCount); err != nil {
+			return nil, errors.Wrapf(err, "Info %s", m.name)
+		}
+		if childrenCount != 0 {
+			res.Attributes = append(res.Attributes, children.HasChildrenAttr)
+		} else {
+			res.Attributes = append(res.Attributes, children.HasNoChildrenAttr)
+		}
+	}
+
 	return &res, nil
 }
 
@@ -139,10 +154,11 @@ func (m *Mailbox) Check() error {
 
 func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uint32, error) {
 	res := []uint32{}
-	rows, err := m.parent.getMsgsBodyUid.Query(m.id, m.id, 1, 4294967295)
+	rows, err := m.parent.getMsgsBodyUid.Query(m.id, m.id, 1, 10000)
 	if err != nil {
 		return res, errors.Wrap(err, "SearchMessages")
 	}
+
 	defer rows.Close()
 	for rows.Next() {
 		var seqNum uint32

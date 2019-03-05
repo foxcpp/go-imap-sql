@@ -45,17 +45,19 @@ func initTestBackend() testsuite.Backend {
 
 func cleanBackend(bi testsuite.Backend) {
 	b := bi.(*Backend)
-	if _, err := b.db.Exec(`DROP TABLE flags`); err != nil {
-		panic(err)
-	}
-	if _, err := b.db.Exec(`DROP TABLE msgs`); err != nil {
-		panic(err)
-	}
-	if _, err := b.db.Exec(`DROP TABLE mboxes`); err != nil {
-		panic(err)
-	}
-	if _, err := b.db.Exec(`DROP TABLE users`); err != nil {
-		panic(err)
+	if os.Getenv("PRESERVE_SQLITE3_DB") != "1" {
+		if _, err := b.db.Exec(`DROP TABLE flags`); err != nil {
+			panic(err)
+		}
+		if _, err := b.db.Exec(`DROP TABLE msgs`); err != nil {
+			panic(err)
+		}
+		if _, err := b.db.Exec(`DROP TABLE mboxes`); err != nil {
+			panic(err)
+		}
+		if _, err := b.db.Exec(`DROP TABLE users`); err != nil {
+			panic(err)
+		}
 	}
 	b.Close()
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/backend"
+	"github.com/foxcpp/go-sqlmail/imap/children"
 	"gotest.tools/assert"
 	is "gotest.tools/assert/cmp"
 )
@@ -34,8 +35,11 @@ func Mailbox_Info(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
 	assert.Equal(t, info.Name, mbox.Name(), "Mailbox name mismatch")
 
 	t.Run("HasChildren attr", func(t *testing.T) {
-		t.Skip("CHILDREN extension is not implemeted yet")
-		t.SkipNow()
+		b, ok := b.(children.Backend)
+		if !ok || !b.EnableChildrenExt() {
+			t.Skip("CHILDREN extension is not implemeted")
+			t.SkipNow()
+		}
 
 		info, err := mbox.Info()
 		assert.NilError(t, err)

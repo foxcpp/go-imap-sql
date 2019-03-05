@@ -24,7 +24,7 @@ go-sqlmail is known to work with (and constantly being tested against) following
 strictly safe to use. Please stick to using newer versions (MySQL 8 or compatible MariaDB version)
 when possible.
 
-#### IMAP Exntesions Supported
+#### IMAP Extensions Supported
 
 Due to go-imap architecture, some extensions require support from used backend.
 Here are extensions supported by go-sqlmail:

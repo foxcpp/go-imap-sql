@@ -606,7 +606,6 @@ func (m *Mailbox) valuesSubquery(rows []string) string {
 }
 
 func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error {
-
 	tx, err := m.parent.db.Begin()
 	if err != nil {
 		return errors.Wrap(err, "MoveMessages")
@@ -624,21 +623,20 @@ func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error
 }
 
 func (m *Mailbox) CopyMessages(uid bool, seqset *imap.SeqSet, dest string) error {
-	return errors.Wrap(m.copyMessages(nil, uid, seqset, dest), "CopyMessages")
+	tx, err := m.parent.db.Begin()
+	if err != nil {
+		return errors.Wrap(err, "CopyMessages")
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if err := m.copyMessages(tx, uid, seqset, dest); err != nil {
+		return errors.Wrap(err, "CopyMessages")
+	}
+
+	return errors.Wrap(tx.Commit(), "CopyMessages")
 }
 
 func (m *Mailbox) delMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet) error {
-	hadNoTx := false
-	var err error
-	if tx == nil {
-		hadNoTx = true
-		tx, err = m.parent.db.Begin()
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback() //nolint:errcheck
-	}
-
 	for _, seq := range seqset.Set {
 		start, stop := sqlRange(seq)
 
@@ -653,16 +651,12 @@ func (m *Mailbox) delMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet) error {
 		}
 	}
 
-	if hadNoTx {
-		return tx.Commit()
-	} else {
-		return nil
-	}
+	return nil
 }
 
 func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest string) error {
 	destID := 0
-	row := m.parent.mboxId.QueryRow(m.uid, dest)
+	row := tx.Stmt(m.parent.mboxId).QueryRow(m.uid, dest)
 	if err := row.Scan(&destID); err != nil {
 		if err == sql.ErrNoRows {
 			return backend.ErrNoSuchMailbox
@@ -671,17 +665,6 @@ func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest s
 	}
 
 	srcId := m.id
-
-	var err error
-	hadNoTx := false
-	if tx == nil {
-		hadNoTx = true
-		tx, err = m.parent.db.Begin()
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback() //nolint:errcheck
-	}
 
 	for _, seq := range seqset.Set {
 		start, stop := sqlRange(seq)
@@ -715,11 +698,7 @@ func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest s
 		}
 	}
 
-	if hadNoTx {
-		return tx.Commit()
-	} else {
-		return nil
-	}
+	return nil
 }
 
 func (m *Mailbox) Expunge() error {

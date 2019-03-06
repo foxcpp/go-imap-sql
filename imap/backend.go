@@ -150,6 +150,10 @@ func NewBackend(driver, dsn string) (*Backend, error) {
 	}
 
 	if driver == "sqlite3" {
+		if dsn == "file::memory:?_journal=WAL&_busy_timeout=5000" {
+			b.db.DB.SetMaxOpenConns(1)
+		}
+
 		_, err := b.db.Exec(`PRAGMA foreign_keys = ON`)
 		if err != nil {
 			return nil, errors.Wrap(err, "NewBackend")

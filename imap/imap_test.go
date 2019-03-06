@@ -45,7 +45,7 @@ func initTestBackend() testsuite.Backend {
 
 func cleanBackend(bi testsuite.Backend) {
 	b := bi.(*Backend)
-	if os.Getenv("PRESERVE_SQLITE3_DB") != "1" {
+	if os.Getenv("PRESERVE_DB") != "1" {
 		if _, err := b.db.Exec(`DROP TABLE flags`); err != nil {
 			panic(err)
 		}

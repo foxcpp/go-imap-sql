@@ -122,6 +122,8 @@ type Backend struct {
 	getMsgsNoBodySeq   *sql.Stmt
 	massClearFlagsUid  *sql.Stmt
 	massClearFlagsSeq  *sql.Stmt
+	delMsgsUid         *sql.Stmt
+	delMsgsSeq         *sql.Stmt
 }
 
 func NewBackend(driver, dsn string) (*Backend, error) {
@@ -727,6 +729,42 @@ func (b *Backend) prepareStmts() error {
 	}
 	if err != nil {
 		return errors.Wrap(err, "massClearFlagsSeq prep")
+	}
+	b.delMsgsUid, err = b.db.Prepare(`
+		DELETE FROM msgs
+		WHERE mboxId = ? ANd msgId BETWEEN ? AND ?`)
+	if err != nil {
+		return errors.Wrap(err, "delMsgsUid prep")
+	}
+	if b.db.mysql57 {
+		b.delMsgsSeq, err = b.db.Prepare(`
+			DELETE FROM msgs
+			WHERE mboxId = ?
+			AND msgId IN (
+				SELECT msgId
+				FROM (
+					SELECT (@rownum := @rownum + 1) AS seqnum, msgId
+					FROM msgs, (SELECT @rownum := 0) counter
+					WHERE mboxId = ?
+				) seq
+				WHERE seqnum BETWEEN ? AND ?
+			)`)
+	} else {
+		b.delMsgsSeq, err = b.db.Prepare(`
+			DELETE FROM msgs
+			WHERE mboxId = ?
+			AND msgId IN (
+				SELECT msgId
+				FROM (
+					SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId
+					FROM msgs
+					WHERE mboxId = ?
+				) seq
+				WHERE seqnum BETWEEN ? AND ?
+			)`)
+	}
+	if err != nil {
+		return errors.Wrap(err, "delMsgsSeq prep")
 	}
 
 	return nil

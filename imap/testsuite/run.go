@@ -59,6 +59,7 @@ func RunTests(t *testing.T, newBackend newBackFunc, closeBackend closeBackFunc) 
 	addTest(Mailbox_SetMessageFlags)
 	addTest(Mailbox_Expunge)
 	addTest(Mailbox_CopyMessages)
+	addTest(Mailbox_MoveMessages)
 }
 
 func TestInit(t *testing.T, newBackend newBackFunc, closeBackend closeBackFunc) {

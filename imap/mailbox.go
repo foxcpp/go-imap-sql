@@ -605,45 +605,121 @@ func (m *Mailbox) valuesSubquery(rows []string) string {
 	return "VALUES " + sqlList
 }
 
+func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error {
+
+	tx, err := m.parent.db.Begin()
+	if err != nil {
+		return errors.Wrap(err, "MoveMessages")
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if err := m.copyMessages(tx, uid, seqset, dest); err != nil {
+		return errors.Wrap(err, "MoveMessages")
+	}
+	if err := m.delMessages(tx, uid, seqset); err != nil {
+		return errors.Wrap(err, "MoveMessages")
+	}
+
+	return errors.Wrap(tx.Commit(), "MoveMessages")
+}
+
 func (m *Mailbox) CopyMessages(uid bool, seqset *imap.SeqSet, dest string) error {
+	return errors.Wrap(m.copyMessages(nil, uid, seqset, dest), "CopyMessages")
+}
+
+func (m *Mailbox) delMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet) error {
+	hadNoTx := false
+	var err error
+	if tx == nil {
+		hadNoTx = true
+		tx, err = m.parent.db.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback() //nolint:errcheck
+	}
+
+	for _, seq := range seqset.Set {
+		start, stop := sqlRange(seq)
+
+		var err error
+		if uid {
+			_, err = tx.Stmt(m.parent.delMsgsUid).Exec(m.id, start, stop)
+		} else {
+			_, err = tx.Stmt(m.parent.delMsgsSeq).Exec(m.id, m.id, start, stop)
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	if hadNoTx {
+		return tx.Commit()
+	} else {
+		return nil
+	}
+}
+
+func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest string) error {
 	destID := 0
 	row := m.parent.mboxId.QueryRow(m.uid, dest)
 	if err := row.Scan(&destID); err != nil {
 		if err == sql.ErrNoRows {
 			return backend.ErrNoSuchMailbox
 		}
-		return errors.Wrapf(err, "CopyMessages %s, %s", m.name, dest)
+		return err
 	}
 
 	srcId := m.id
 
-	tx, err := m.parent.db.Begin()
-	if err != nil {
-		return errors.Wrapf(err, "CopyMessages %s, %s", m.name, dest)
+	var err error
+	hadNoTx := false
+	if tx == nil {
+		hadNoTx = true
+		tx, err = m.parent.db.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback() //nolint:errcheck
 	}
-	defer tx.Rollback() //nolint:errcheck
 
 	for _, seq := range seqset.Set {
 		start, stop := sqlRange(seq)
 
 		if uid {
 			if _, err := tx.Stmt(m.parent.copyMsgsUid).Exec(destID, destID, srcId, start, stop); err != nil {
-				return errors.Wrapf(err, "CopyMessages %s, %s", m.name, dest)
+				if strings.Contains(err.Error(), "foreign") {
+					return backend.ErrNoSuchMailbox
+				}
+				return err
 			}
 			if _, err := tx.Stmt(m.parent.copyMsgFlagsUid).Exec(destID, stop-start+1, destID, srcId, start, stop); err != nil {
-				return errors.Wrapf(err, "CopyMessages (flags) %s, %s", m.name, dest)
+				if strings.Contains(err.Error(), "foreign") {
+					return backend.ErrNoSuchMailbox
+				}
+				return err
 			}
 		} else {
 			if _, err := tx.Stmt(m.parent.copyMsgsSeq).Exec(destID, destID, srcId, stop-start+1, start-1); err != nil {
-				return errors.Wrapf(err, "CopyMessages %s, %s", m.name, dest)
+				if strings.Contains(err.Error(), "foreign") {
+					return backend.ErrNoSuchMailbox
+				}
+				return err
 			}
 			if _, err := tx.Stmt(m.parent.copyMsgFlagsSeq).Exec(destID, stop-start+1, destID, srcId, stop-start+1, start-1); err != nil {
-				return errors.Wrapf(err, "CopyMessages (flags) %s, %s", m.name, dest)
+				if strings.Contains(err.Error(), "foreign") {
+					return backend.ErrNoSuchMailbox
+				}
+				return err
 			}
 		}
 	}
 
-	return errors.Wrapf(tx.Commit(), "CopyMessages %s, %s", m.name, dest)
+	if hadNoTx {
+		return tx.Commit()
+	} else {
+		return nil
+	}
 }
 
 func (m *Mailbox) Expunge() error {

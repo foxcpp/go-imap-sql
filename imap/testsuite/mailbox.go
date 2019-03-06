@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/emersion/go-imap"
+	move "github.com/emersion/go-imap-move"
 	"github.com/emersion/go-imap/backend"
 	"github.com/foxcpp/go-sqlmail/imap/children"
 	"gotest.tools/assert"
@@ -679,5 +680,86 @@ func Mailbox_CopyMessages(t *testing.T, newBack newBackFunc, closeBack closeBack
 		msg = <-ch
 		assert.Check(t, isNthMsg(msg, 3), "Messages copied in wrong order")
 		assert.Check(t, isNthMsgFlags(msg, 3), "Flags are not copied")
+	})
+}
+
+func Mailbox_MoveMessages(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+	//t.Run("Non-Existent Dest", func(t *testing.T) {
+	//	seq, _ := imap.ParseSeqSet("2:3")
+	//	assert.Error(t, mboxMove.MoveMessages(false, seq, "TEST112341324132"), "MoveMessages: No such mailbox")
+	//})
+	t.Run("Uid", func(t *testing.T) {
+		b := newBack()
+		defer closeBack(b)
+		u := getUser(t, b)
+		defer assert.NilError(t, u.Logout())
+		mboxSrc, mboxTgt := getMbox(t, u), getMbox(t, u)
+
+		moveSrc, ok := mboxSrc.(move.Mailbox)
+		if !ok {
+			t.Skip("MOVE extension it not supported")
+			t.SkipNow()
+		}
+
+		uids := createMsgsUids(t, mboxSrc, 3)
+
+		seq := &imap.SeqSet{}
+		seq.AddNum(uids[1], uids[2])
+		assert.NilError(t, moveSrc.MoveMessages(true, seq, mboxTgt.Name()))
+
+		ch := make(chan *imap.Message, 10)
+		seq, _ = imap.ParseSeqSet("*")
+		assert.NilError(t, mboxTgt.ListMessages(true, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchInternalDate}, ch))
+		assert.Assert(t, is.Len(ch, 2), "Extra or no messages created in dest mailbox")
+		msg := <-ch
+		assert.Check(t, isNthMsg(msg, 2), "Messages moved in wrong order")
+		assert.Check(t, isNthMsgFlags(msg, 2), "Flags are not moved")
+		msg = <-ch
+		assert.Check(t, isNthMsg(msg, 3), "Messages moved in wrong order")
+		assert.Check(t, isNthMsgFlags(msg, 3), "Flags are not moved")
+
+		ch = make(chan *imap.Message, 10)
+		assert.NilError(t, mboxSrc.ListMessages(true, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchInternalDate}, ch))
+		assert.Assert(t, is.Len(ch, 1), "Wrong number of messages moved")
+		msg = <-ch
+		assert.Check(t, isNthMsg(msg, 1), "Wrong message moved")
+		assert.Check(t, isNthMsgFlags(msg, 1), "Wrong message moved")
+	})
+	t.Run("Seq", func(t *testing.T) {
+		b := newBack()
+		defer closeBack(b)
+		u := getUser(t, b)
+		defer assert.NilError(t, u.Logout())
+		mboxSrc, mboxTgt := getMbox(t, u), getMbox(t, u)
+
+		moveSrc, ok := mboxSrc.(move.Mailbox)
+		if !ok {
+			t.Skip("MOVE extension it not supported")
+			t.SkipNow()
+		}
+
+		createMsgs(t, mboxSrc, 3)
+
+		seq := &imap.SeqSet{}
+		seq.AddRange(2, 3)
+		assert.NilError(t, moveSrc.MoveMessages(true, seq, mboxTgt.Name()))
+
+		ch := make(chan *imap.Message, 10)
+		seq, _ = imap.ParseSeqSet("*")
+		assert.NilError(t, mboxTgt.ListMessages(true, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchInternalDate}, ch))
+		assert.Assert(t, is.Len(ch, 2), "Extra or no messages created in dest mailbox")
+		msg := <-ch
+		assert.Check(t, isNthMsg(msg, 2), "Messages moved in wrong order")
+		assert.Check(t, isNthMsgFlags(msg, 2), "Flags are not moved")
+		msg = <-ch
+		assert.Check(t, isNthMsg(msg, 3), "Messages moved in wrong order")
+		assert.Check(t, isNthMsgFlags(msg, 3), "Flags are not moved")
+
+		ch = make(chan *imap.Message, 10)
+		assert.NilError(t, mboxSrc.ListMessages(true, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchInternalDate}, ch))
+		assert.Assert(t, is.Len(ch, 1), "Wrong number of messages moved")
+		msg = <-ch
+		assert.Check(t, isNthMsg(msg, 1), "Wrong message moved")
+		assert.Check(t, isNthMsgFlags(msg, 1), "Wrong message moved")
 	})
 }

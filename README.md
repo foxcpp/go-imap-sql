@@ -18,7 +18,7 @@ but these configurations will not be supported.
 go-sqlmail is known to work with (and constantly being tested against) following RDBMS:
 - SQLite 3.25.0
 - MySQL 5.7 (or MariaDB 10.2)
-- PostgreSQL
+- PostgreSQL 9.6
 
 **Note:** MySQL 5.7 support is deprecated since it's addition and not even
 strictly safe to use. Please stick to using newer versions (MySQL 8 or compatible MariaDB version)
@@ -28,9 +28,10 @@ when possible.
 
 Due to go-imap architecture, some extensions require support from used backend.
 Here are extensions supported by go-sqlmail:
+- [CHILDREN]
 - ~~[APPEND-LIMIT]~~ _(planned)_
 - ~~[UIDPLUS]~~ _(planned)_
-- ~~[MOVE]~~ _(planned)_
+- [MOVE]
 - ~~[IDLE]~~ _(planned)_
 
 #### Maddy
@@ -52,6 +53,7 @@ imap://127.0.0.1:1993 {
 }
 ```
 
+[CHILDREN]: https://tools.ietf.org/html/rfc3348
 [APPEND-LIMIT]: https://tools.ietf.org/html/rfc7889
 [UIDPLUS]: https://tools.ietf.org/html/rfc4315
 [MOVE]: https://tools.ietf.org/html/rfc6851

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/emersion/go-imap"
+	appendlimit "github.com/emersion/go-imap-appendlimit"
 	"github.com/emersion/go-imap/backend"
 	"github.com/emersion/go-imap/backend/backendutil"
 	"github.com/emersion/go-message"
@@ -21,6 +22,7 @@ const flagsSep = "{"
 // Message UIDs are assigned sequentelly, starting at 1.
 
 type Mailbox struct {
+	user   *User
 	uid    uint64
 	name   string
 	parent *Backend
@@ -348,7 +350,41 @@ func needsBody(items []imap.FetchItem) bool {
 	return false
 }
 
+func (m *Mailbox) CreateMessageLimit() *uint32 {
+	res := uint32(0)
+	row := m.parent.mboxMsgSizeLimit.QueryRow(m.id)
+	if err := row.Scan(&res); err != nil {
+		// Oops!
+		return new(uint32)
+	}
+
+	if res != 0 {
+		return &res
+	} else {
+		return nil
+	}
+}
+
+func (m *Mailbox) SetMessageLimit(val uint32) error {
+	_, err := m.parent.setMboxMsgSizeLimit.Exec(val, m.id)
+	return err
+}
+
 func (m *Mailbox) CreateMessage(flags []string, date time.Time, body imap.Literal) error {
+	mboxLimit := m.CreateMessageLimit()
+	if mboxLimit != nil && uint32(body.Len()) > *mboxLimit {
+		return appendlimit.ErrTooBig
+	} else if mboxLimit == nil {
+		userLimit := m.user.CreateMessageLimit()
+		if userLimit != nil && uint32(body.Len()) > *userLimit {
+			return appendlimit.ErrTooBig
+		} else if userLimit == nil {
+			if m.parent.opts.MaxMsgBytes != 0 && uint32(body.Len()) > m.parent.opts.MaxMsgBytes {
+				return appendlimit.ErrTooBig
+			}
+		}
+	}
+
 	tx, err := m.parent.db.Begin()
 	if err != nil {
 		return errors.Wrap(err, "CreateMessage (tx begin)")

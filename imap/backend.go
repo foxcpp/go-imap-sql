@@ -82,10 +82,20 @@ func (d db) rewriteSQL(req string) (res string) {
 	return
 }
 
-type Backend struct {
-	db db
+// Opts structure specifies additional settings that may be set
+// for backend.
+//
+// Please use names to reference structure members on creation,
+// fields may be reordered or added without major version increment.
+type Opts struct {
+	// Maximum amount of bytes that backend will accept.
+	// Intended for use with APPENDLIMIT extension.
+	MaxMsgBytes uint32
+}
 
-	driver string
+type Backend struct {
+	db   db
+	opts Opts
 
 	childrenExt bool
 
@@ -122,13 +132,23 @@ type Backend struct {
 	getMsgsNoBodySeq   *sql.Stmt
 	massClearFlagsUid  *sql.Stmt
 	massClearFlagsSeq  *sql.Stmt
-	delMsgsUid         *sql.Stmt
-	delMsgsSeq         *sql.Stmt
+
+	// For MOVE extension
+	delMsgsUid *sql.Stmt
+	delMsgsSeq *sql.Stmt
+
+	// For APPEND-LIMIT extension
+	setUserMsgSizeLimit *sql.Stmt
+	userMsgSizeLimit    *sql.Stmt
+	setMboxMsgSizeLimit *sql.Stmt
+	mboxMsgSizeLimit    *sql.Stmt
 }
 
-func NewBackend(driver, dsn string) (*Backend, error) {
+func NewBackend(driver, dsn string, opts Opts) (*Backend, error) {
 	b := new(Backend)
 	var err error
+
+	b.opts = opts
 
 	if driver == "sqlite3" {
 		if !strings.HasPrefix(dsn, "file:") {
@@ -141,7 +161,6 @@ func NewBackend(driver, dsn string) (*Backend, error) {
 		dsn = dsn + "_journal=WAL&_busy_timeout=5000"
 	}
 
-	b.driver = driver
 	b.db.driver = driver
 
 	b.db.DB, err = sql.Open(driver, dsn)
@@ -199,6 +218,7 @@ func (b *Backend) initSchema() error {
 		CREATE TABLE IF NOT EXISTS users (
 			id BIGSERIAL NOT NULL PRIMARY KEY AUTOINCREMENT,
 			username VARCHAR(255) NOT NULL UNIQUE,
+			msgsizelimit INTEGER NOT NULL DEFAULT 0,
 			password VARCHAR(255) DEFAULT NULL,
 			password_salt VARCHAR(255) DEFAULT NULL
 		)`)
@@ -212,6 +232,7 @@ func (b *Backend) initSchema() error {
 			name VARCHAR(255) NOT NULL,
 			sub INTEGER NOT NULL DEFAULT 0,
 			mark INTEGER NOT NULL DEFAULT 0,
+			msgsizelimit INTEGER NOT NULL DEFAULT 0,
 			uidvalidity INTEGER NOT NULL,
 
 			UNIQUE(uid, name)
@@ -771,17 +792,46 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "delMsgsSeq prep")
 	}
 
+	b.setUserMsgSizeLimit, err = b.db.Prepare(`
+		UPDATE users
+		SET msgsizelimit = ?
+		WHERE id = ?`)
+	if err != nil {
+		return errors.Wrap(err, "setUserMsgSizeLimit prep")
+	}
+	b.userMsgSizeLimit, err = b.db.Prepare(`
+		SELECT msgsizelimit
+		FROM users
+		WHERE id = ?`)
+	if err != nil {
+		return errors.Wrap(err, "userMsgSizeLimit prep")
+	}
+	b.setMboxMsgSizeLimit, err = b.db.Prepare(`
+		UPDATE mboxes
+		SET msgsizelimit = ?
+		WHERE id = ?`)
+	if err != nil {
+		return errors.Wrap(err, "setUserMsgSizeLimit prep")
+	}
+	b.mboxMsgSizeLimit, err = b.db.Prepare(`
+		SELECT msgsizelimit
+		FROM mboxes
+		WHERE id = ?`)
+	if err != nil {
+		return errors.Wrap(err, "userMsgSizeLimit prep")
+	}
+
 	return nil
 }
 
 func (b *Backend) groupConcatFn(expr, separator string) string {
-	if b.driver == "sqlite3" {
+	if b.db.driver == "sqlite3" {
 		return "group_concat(" + expr + ", '" + separator + "')"
 	}
-	if b.driver == "postgres" {
+	if b.db.driver == "postgres" {
 		return "string_agg(" + expr + ", '" + separator + "')"
 	}
-	if b.driver == "mysql" {
+	if b.db.driver == "mysql" {
 		return "group_concat(" + expr + " SEPARATOR '" + separator + "')"
 	}
 	panic("Unsupported driver")
@@ -891,4 +941,13 @@ func (b *Backend) Login(username, password string) (backend.User, error) {
 	}
 
 	return &User{id: uid, username: username, parent: b}, nil
+}
+
+func (b *Backend) CreateMessageLimit() *uint32 {
+	return &b.opts.MaxMsgBytes
+}
+
+func (b *Backend) SetMessageLimit(val uint32) error {
+	b.opts.MaxMsgBytes = val
+	return nil
 }

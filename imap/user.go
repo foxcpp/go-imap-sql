@@ -45,7 +45,7 @@ func (u *User) ListMailboxes(subscribed bool) ([]backend.Mailbox, error) {
 			return nil, errors.Wrap(err, "ListMailboxes")
 		}
 
-		res = append(res, &Mailbox{uid: u.id, id: id, name: name, parent: u.parent})
+		res = append(res, &Mailbox{user: u, uid: u.id, id: id, name: name, parent: u.parent})
 	}
 	return res, errors.Wrap(rows.Err(), "ListMailboxes")
 }
@@ -60,7 +60,27 @@ func (u *User) GetMailbox(name string) (backend.Mailbox, error) {
 		return nil, errors.Wrapf(err, "GetMailbox %s", name)
 	}
 
-	return &Mailbox{uid: u.id, id: id, name: name, parent: u.parent}, nil
+	return &Mailbox{user: u, uid: u.id, id: id, name: name, parent: u.parent}, nil
+}
+
+func (u *User) CreateMessageLimit() *uint32 {
+	res := uint32(0)
+	row := u.parent.userMsgSizeLimit.QueryRow(u.id)
+	if err := row.Scan(&res); err != nil {
+		// Oops!
+		return new(uint32)
+	}
+
+	if res != 0 {
+		return &res
+	} else {
+		return nil
+	}
+}
+
+func (u *User) SetMessageLimit(val uint32) error {
+	_, err := u.parent.setUserMsgSizeLimit.Exec(val, u.id)
+	return err
 }
 
 func (u *User) CreateMailbox(name string) error {

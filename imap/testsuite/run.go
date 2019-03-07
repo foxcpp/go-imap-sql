@@ -59,7 +59,14 @@ func RunTests(t *testing.T, newBackend newBackFunc, closeBackend closeBackFunc) 
 	addTest(Mailbox_SetMessageFlags)
 	addTest(Mailbox_Expunge)
 	addTest(Mailbox_CopyMessages)
+
+	// MOVE extension
 	addTest(Mailbox_MoveMessages)
+
+	// APPEND-LIMIT extension
+	addTest(Backend_AppendLimit)
+	addTest(User_AppendLimit)
+	addTest(Mailbox_AppendLimit)
 }
 
 func TestInit(t *testing.T, newBackend newBackFunc, closeBackend closeBackFunc) {

@@ -36,7 +36,7 @@ func initTestBackend() testsuite.Backend {
 		dsn = filepath.Join(tempDir, "test.db")
 	}
 
-	b, err := NewBackend(driver, dsn)
+	b, err := NewBackend(driver, dsn, Opts{})
 	if err != nil {
 		panic(err)
 	}

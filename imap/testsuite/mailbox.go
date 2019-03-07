@@ -449,13 +449,11 @@ func Mailbox_SetMessageFlags(t *testing.T, newBack newBackFunc, closeBack closeB
 			mbox := getMbox(t, u)
 			uids := createMsgsUids(t, mbox, 1) // $Test1, $Test2
 
-			ch := make(chan *imap.Message, 10)
-
 			seq := imap.SeqSet{}
 			seq.AddNum(uids[0])
 			assert.NilError(t, mbox.UpdateMessagesFlags(true, &seq, imap.AddFlags, []string{"$Test3"}))
 
-			ch = make(chan *imap.Message, 10)
+			ch := make(chan *imap.Message, 10)
 			assert.NilError(t, mbox.ListMessages(true, &seq, []imap.FetchItem{imap.FetchFlags}, ch))
 			assert.Assert(t, is.Len(ch, 1), "Wrong number of messages returned")
 			msg := <-ch

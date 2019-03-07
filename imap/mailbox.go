@@ -113,6 +113,11 @@ func (m *Mailbox) Status(items []imap.StatusItem) (*imap.MailboxStatus, error) {
 			if err := row.Scan(&res.UidValidity); err != nil {
 				return nil, errors.Wrapf(err, "Status (uidvalidity) %s", m.name)
 			}
+		case appendlimit.StatusAppendLimit:
+			val := m.createMessageLimit(tx)
+			if val != nil {
+				appendlimit.StatusSetAppendLimit(res, val)
+			}
 		}
 	}
 
@@ -350,22 +355,31 @@ func needsBody(items []imap.FetchItem) bool {
 	return false
 }
 
-func (m *Mailbox) CreateMessageLimit() *uint32 {
-	res := uint32(0)
-	row := m.parent.mboxMsgSizeLimit.QueryRow(m.id)
+func (m *Mailbox) createMessageLimit(tx *sql.Tx) *uint32 {
+	var res sql.NullInt64
+	var row *sql.Row
+	if tx == nil {
+		row = m.parent.mboxMsgSizeLimit.QueryRow(m.id)
+	} else {
+		row = tx.Stmt(m.parent.mboxMsgSizeLimit).QueryRow(m.id)
+	}
 	if err := row.Scan(&res); err != nil {
-		// Oops!
-		return new(uint32)
+		return new(uint32) // 0
 	}
 
-	if res != 0 {
-		return &res
-	} else {
+	if !res.Valid {
 		return nil
+	} else {
+		val := uint32(res.Int64)
+		return &val
 	}
 }
 
-func (m *Mailbox) SetMessageLimit(val uint32) error {
+func (m *Mailbox) CreateMessageLimit() *uint32 {
+	return m.createMessageLimit(nil)
+}
+
+func (m *Mailbox) SetMessageLimit(val *uint32) error {
 	_, err := m.parent.setMboxMsgSizeLimit.Exec(val, m.id)
 	return err
 }
@@ -379,7 +393,7 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, body imap.Litera
 		if userLimit != nil && uint32(body.Len()) > *userLimit {
 			return appendlimit.ErrTooBig
 		} else if userLimit == nil {
-			if m.parent.opts.MaxMsgBytes != 0 && uint32(body.Len()) > m.parent.opts.MaxMsgBytes {
+			if m.parent.opts.MaxMsgBytes != nil && uint32(body.Len()) > *m.parent.opts.MaxMsgBytes {
 				return appendlimit.ErrTooBig
 			}
 		}

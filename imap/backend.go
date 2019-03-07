@@ -90,7 +90,8 @@ func (d db) rewriteSQL(req string) (res string) {
 type Opts struct {
 	// Maximum amount of bytes that backend will accept.
 	// Intended for use with APPENDLIMIT extension.
-	MaxMsgBytes uint32
+	// nil value means no limit, 0 means zero limit (no new messages allowed)
+	MaxMsgBytes *uint32
 }
 
 type Backend struct {
@@ -218,7 +219,7 @@ func (b *Backend) initSchema() error {
 		CREATE TABLE IF NOT EXISTS users (
 			id BIGSERIAL NOT NULL PRIMARY KEY AUTOINCREMENT,
 			username VARCHAR(255) NOT NULL UNIQUE,
-			msgsizelimit INTEGER NOT NULL DEFAULT 0,
+			msgsizelimit INTEGER DEFAULT NULL,
 			password VARCHAR(255) DEFAULT NULL,
 			password_salt VARCHAR(255) DEFAULT NULL
 		)`)
@@ -232,7 +233,7 @@ func (b *Backend) initSchema() error {
 			name VARCHAR(255) NOT NULL,
 			sub INTEGER NOT NULL DEFAULT 0,
 			mark INTEGER NOT NULL DEFAULT 0,
-			msgsizelimit INTEGER NOT NULL DEFAULT 0,
+			msgsizelimit INTEGER DEFAULT NULL,
 			uidvalidity INTEGER NOT NULL,
 
 			UNIQUE(uid, name)
@@ -944,10 +945,10 @@ func (b *Backend) Login(username, password string) (backend.User, error) {
 }
 
 func (b *Backend) CreateMessageLimit() *uint32 {
-	return &b.opts.MaxMsgBytes
+	return b.opts.MaxMsgBytes
 }
 
-func (b *Backend) SetMessageLimit(val uint32) error {
+func (b *Backend) SetMessageLimit(val *uint32) error {
 	b.opts.MaxMsgBytes = val
 	return nil
 }

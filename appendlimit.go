@@ -7,7 +7,9 @@ import appendlimit "github.com/emersion/go-imap-appendlimit"
 type AppendLimitBackend interface {
 	appendlimit.Backend
 
-	SetMessageLimit(val uint32) error
+	// SetMessageLimit sets new value for limit.
+	// nil pointer means no limit.
+	SetMessageLimit(val *uint32) error
 }
 
 // AppendLimitUser is extension for backend.User interface which allows to
@@ -15,13 +17,17 @@ type AppendLimitBackend interface {
 type AppendLimitUser interface {
 	appendlimit.User
 
-	SetMessageLimit(val uint32) error
+	// SetMessageLimit sets new value for limit.
+	// nil pointer means no limit.
+	SetMessageLimit(val *uint32) error
 }
 
 // AppendLimitMbox is extension for backend.Mailbox interface which allows to
 // set append limit value for testing and administration purposes.
 type AppendLimitMbox interface {
-	CreateMessageLimit() *uint32
+	appendlimit.Mailbox
 
-	SetMessageLimit(val uint32) error
+	// SetMessageLimit sets new value for limit.
+	// nil pointer means no limit.
+	SetMessageLimit(val *uint32) error
 }

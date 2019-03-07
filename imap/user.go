@@ -64,21 +64,22 @@ func (u *User) GetMailbox(name string) (backend.Mailbox, error) {
 }
 
 func (u *User) CreateMessageLimit() *uint32 {
-	res := uint32(0)
+	res := sql.NullInt64{}
 	row := u.parent.userMsgSizeLimit.QueryRow(u.id)
 	if err := row.Scan(&res); err != nil {
 		// Oops!
 		return new(uint32)
 	}
 
-	if res != 0 {
-		return &res
-	} else {
+	if !res.Valid {
 		return nil
+	} else {
+		val := uint32(res.Int64)
+		return &val
 	}
 }
 
-func (u *User) SetMessageLimit(val uint32) error {
+func (u *User) SetMessageLimit(val *uint32) error {
 	_, err := u.parent.setUserMsgSizeLimit.Exec(val, u.id)
 	return err
 }

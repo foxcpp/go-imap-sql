@@ -93,6 +93,13 @@ type Opts struct {
 	// Intended for use with APPENDLIMIT extension.
 	// nil value means no limit, 0 means zero limit (no new messages allowed)
 	MaxMsgBytes *uint32
+
+	// Controls when channel returned by Updates should be created.
+	// If set to false - channel will be created before NewBackend returns.
+	// If set to true - channel will be created upon first call to Updates.
+	// Second is useful for tests that don't consume values from Updates
+	// channel.
+	LazyUpdatesInit bool
 }
 
 type Backend struct {
@@ -161,6 +168,9 @@ func NewBackend(driver, dsn string, opts Opts) (*Backend, error) {
 	var err error
 
 	b.opts = opts
+	if !b.opts.LazyUpdatesInit {
+		b.updates = make(chan backend.Update, 20)
+	}
 
 	if driver == "sqlite3" {
 		if !strings.HasPrefix(dsn, "file:") {
@@ -996,11 +1006,14 @@ func (b *Backend) prepareStmts() error {
 }
 
 func (b *Backend) Updates() <-chan backend.Update {
-	b.updatesLck.Lock()
-	defer b.updatesLck.Unlock()
+	if b.opts.LazyUpdatesInit && b.updates == nil {
+		b.updatesLck.Lock()
+		defer b.updatesLck.Unlock()
 
-	// Suitable value for tests.
-	b.updates = make(chan backend.Update, 20)
+		if b.updates == nil {
+			b.updates = make(chan backend.Update, 20)
+		}
+	}
 	return b.updates
 }
 

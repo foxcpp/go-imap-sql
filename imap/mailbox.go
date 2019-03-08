@@ -474,7 +474,7 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, body imap.Litera
 
 	row = tx.Stmt(m.parent.recentCount).QueryRow(m.id)
 	newRecent := uint32(0)
-	if err := row.Scan(&newCount); err != nil {
+	if err := row.Scan(&newRecent); err != nil {
 		return errors.Wrap(err, "CreateMessage (recent read)")
 	}
 

@@ -26,8 +26,7 @@ func Backend_AppendLimit(t *testing.T, newBack newBackFunc, closeBack closeBackF
 	defer assert.NilError(t, u.Logout())
 
 	t.Run("No Limit", func(t *testing.T) {
-		lim := uint32(0)
-		bAL.SetMessageLimit(&lim)
+		bAL.SetMessageLimit(nil)
 		mbox := getMbox(t, u)
 
 		err := mbox.CreateMessage([]string{}, time.Now(), strings.NewReader(strings.Repeat("A", 300)))
@@ -69,8 +68,7 @@ func User_AppendLimit(t *testing.T, newBack newBackFunc, closeBack closeBackFunc
 	}
 
 	t.Run("No Limit", func(t *testing.T) {
-		lim := uint32(0)
-		uAL.SetMessageLimit(&lim)
+		uAL.SetMessageLimit(nil)
 		mbox := getMbox(t, u)
 
 		err := mbox.CreateMessage([]string{}, time.Now(), strings.NewReader(strings.Repeat("A", 300)))

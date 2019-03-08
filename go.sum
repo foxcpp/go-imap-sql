@@ -1,7 +1,5 @@
-github.com/emersion/go-imap v1.0.0-beta.1.0.20190301190428-347e1d8236ee h1:r55GwzAepFYbc1wpdMmZWGbVNAPQ0VOFtFtM+Hj2SGU=
-github.com/emersion/go-imap v1.0.0-beta.1.0.20190301190428-347e1d8236ee/go.mod h1:mOPegfAgLVXbhRm1bh2JTX08z2Y3HYmKYpbrKDeAzsQ=
-github.com/emersion/go-imap-appendlimit v0.0.0-20171113205933-5003646b0a40 h1:HdkXNf19pX/eny98aYtx9mVgOR/oH8tMauBC2X0Ik7s=
-github.com/emersion/go-imap-appendlimit v0.0.0-20171113205933-5003646b0a40/go.mod h1:ikgISoP7pRAolqsVP64yMteJa2FIpS6ju88eBT6K1yQ=
+github.com/emersion/go-imap v1.0.0-beta.2 h1:Vphj2ktRFf+BNPjvnLiwL9mXNtaHaQ7ijhF9i3spl2I=
+github.com/emersion/go-imap v1.0.0-beta.2/go.mod h1:mOPegfAgLVXbhRm1bh2JTX08z2Y3HYmKYpbrKDeAzsQ=
 github.com/emersion/go-imap-move v0.0.0-20180601155324-5eb20cb834bf h1:TmRfuPmhrwAhWKu2XaBaY9N+anRRDBO+E8VRVO9g3fY=
 github.com/emersion/go-imap-move v0.0.0-20180601155324-5eb20cb834bf/go.mod h1:QuMaZcKFDVI0yCrnAbPLfbwllz1wtOrZH8/vZ5yzp4w=
 github.com/emersion/go-message v0.9.1 h1:s6HoJ6t+1wHWEs0G/QVR1r5bb6nvx2/b6DuQfknit14=
@@ -10,6 +8,8 @@ github.com/emersion/go-sasl v0.0.0-20161116183048-7e096a0a6197 h1:rDJPbyliyym8ZL
 github.com/emersion/go-sasl v0.0.0-20161116183048-7e096a0a6197/go.mod h1:G/dpzLu16WtQpBfQ/z3LYiYJn3ZhKSGWn83fyoyQe/k=
 github.com/emersion/go-textwrapper v0.0.0-20160606182133-d0e65e56babe h1:40SWqY0zE3qCi6ZrtTf5OUdNm5lDnGnjRSq9GgmeTrg=
 github.com/emersion/go-textwrapper v0.0.0-20160606182133-d0e65e56babe/go.mod h1:aqO8z8wPrjkscevZJFVE1wXJrLpC5LtJG7fqLOsPb2U=
+github.com/foxcpp/go-imap-appendlimit v0.0.0-20190307172709-25eb12ad1a94 h1:xxwCbJSoSEb16k+sy7WWF91Y5fUzAngOONiU9O+G5rQ=
+github.com/foxcpp/go-imap-appendlimit v0.0.0-20190307172709-25eb12ad1a94/go.mod h1:4QxnNf/J0mUbZ7k2XlgzJLtHmZd/uYcnELIWouWeH4Y=
 github.com/go-sql-driver/mysql v1.4.1 h1:g24URVg0OFbNUTx9qqY1IRZ9D9z3iPyi5zKhQZpNwpA=
 github.com/go-sql-driver/mysql v1.4.1/go.mod h1:zAC/RDZ24gD3HViQzih4MyKcchzm+sOG5ZlKdlhCg5w=
 github.com/golang/protobuf v1.2.0/go.mod h1:6lQm79b+lXiMfvg/cZm0SGofjICqVBUtrP5yJMmIC1U=

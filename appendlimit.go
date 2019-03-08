@@ -25,7 +25,7 @@ type AppendLimitUser interface {
 // AppendLimitMbox is extension for backend.Mailbox interface which allows to
 // set append limit value for testing and administration purposes.
 type AppendLimitMbox interface {
-	appendlimit.Mailbox
+	CreateMessageLimit() *uint32
 
 	// SetMessageLimit sets new value for limit.
 	// nil pointer means no limit.

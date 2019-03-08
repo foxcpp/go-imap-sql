@@ -2,7 +2,7 @@ module github.com/foxcpp/go-sqlmail
 
 require (
 	github.com/emersion/go-imap v1.0.0-beta.2
-	github.com/emersion/go-imap-appendlimit v0.0.0-20171113205933-5003646b0a40
+	github.com/emersion/go-imap-appendlimit v0.0.0-20190308131241-25671c986a6a
 	github.com/emersion/go-imap-move v0.0.0-20180601155324-5eb20cb834bf
 	github.com/emersion/go-message v0.9.1
 	github.com/go-sql-driver/mysql v1.4.1
@@ -14,5 +14,3 @@ require (
 	google.golang.org/appengine v1.4.0 // indirect
 	gotest.tools v2.2.0+incompatible
 )
-
-replace github.com/emersion/go-imap-appendlimit => github.com/foxcpp/go-imap-appendlimit v0.0.0-20190307172709-25eb12ad1a94

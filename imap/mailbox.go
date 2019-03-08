@@ -462,6 +462,10 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, body imap.Litera
 		}
 	}
 
+	if _, err := tx.Stmt(m.parent.addUidNext).Exec(1, m.id); err != nil {
+		return errors.Wrap(err, "CreateMessage (uidnext bump)")
+	}
+
 	row := tx.Stmt(m.parent.msgsCount).QueryRow(m.id)
 	newCount := uint32(0)
 	if err := row.Scan(&newCount); err != nil {
@@ -487,7 +491,9 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, body imap.Litera
 
 	// Send update after commiting transaction,
 	// just in case reading side will block us for some time.
-	m.parent.updates <- &upd
+	if m.parent.updates != nil {
+		m.parent.updates <- &upd
+	}
 	return nil
 }
 
@@ -694,8 +700,10 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 		return errors.Wrap(err, "UpdateMessagesFlags")
 	}
 
-	for _, update := range updatesBuffer {
-		m.parent.updates <- update
+	if m.parent.updates != nil {
+		for _, update := range updatesBuffer {
+			m.parent.updates <- update
+		}
 	}
 	return nil
 }
@@ -826,27 +834,45 @@ func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest s
 		start, stop := sqlRange(seq)
 
 		if uid {
-			if _, err := tx.Stmt(m.parent.copyMsgsUid).Exec(destID, destID, srcId, start, stop); err != nil {
+			if stats, err := tx.Stmt(m.parent.copyMsgsUid).Exec(destID, destID, srcId, start, stop); err != nil {
 				if strings.Contains(err.Error(), "foreign") {
 					return backend.ErrNoSuchMailbox
 				}
 				return err
+			} else {
+				affected, err := stats.RowsAffected()
+				if err != nil {
+					return err
+				}
+
+				if _, err := tx.Stmt(m.parent.addUidNext).Exec(affected, destID); err != nil {
+					return err
+				}
 			}
 			if _, err := tx.Stmt(m.parent.copyMsgFlagsUid).Exec(destID, stop-start+1, destID, srcId, start, stop); err != nil {
-				if strings.Contains(err.Error(), "foreign") {
+				if strings.Contains(err.Error(), "foreign") || strings.Contains(err.Error(), "FOREIGN") {
 					return backend.ErrNoSuchMailbox
 				}
 				return err
 			}
 		} else {
-			if _, err := tx.Stmt(m.parent.copyMsgsSeq).Exec(destID, destID, srcId, stop-start+1, start-1); err != nil {
-				if strings.Contains(err.Error(), "foreign") {
+			if stats, err := tx.Stmt(m.parent.copyMsgsSeq).Exec(destID, destID, srcId, stop-start+1, start-1); err != nil {
+				if strings.Contains(err.Error(), "foreign") || strings.Contains(err.Error(), "FOREIGN") {
 					return backend.ErrNoSuchMailbox
 				}
 				return err
+			} else {
+				affected, err := stats.RowsAffected()
+				if err != nil {
+					return err
+				}
+
+				if _, err := tx.Stmt(m.parent.addUidNext).Exec(affected, destID); err != nil {
+					return err
+				}
 			}
 			if _, err := tx.Stmt(m.parent.copyMsgFlagsSeq).Exec(destID, stop-start+1, destID, srcId, stop-start+1, start-1); err != nil {
-				if strings.Contains(err.Error(), "foreign") {
+				if strings.Contains(err.Error(), "foreign") || strings.Contains(err.Error(), "FOREIGN") {
 					return backend.ErrNoSuchMailbox
 				}
 				return err
@@ -890,10 +916,12 @@ func (m *Mailbox) Expunge() error {
 		return errors.Wrap(err, "Expunge")
 	}
 
-	for _, seqnum := range seqnums {
-		m.parent.updates <- &backend.ExpungeUpdate{
-			Update: backend.NewUpdate(m.user.username, m.name),
-			SeqNum: seqnum,
+	if m.parent.updates != nil {
+		for _, seqnum := range seqnums {
+			m.parent.updates <- &backend.ExpungeUpdate{
+				Update: backend.NewUpdate(m.user.username, m.name),
+				SeqNum: seqnum,
+			}
 		}
 	}
 

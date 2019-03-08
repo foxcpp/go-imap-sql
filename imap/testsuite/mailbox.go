@@ -761,3 +761,41 @@ func Mailbox_MoveMessages(t *testing.T, newBack newBackFunc, closeBack closeBack
 		assert.Check(t, isNthMsgFlags(msg, 1), "Wrong message moved")
 	})
 }
+
+func Mailbox_MonotonicUid(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+	b := newBack()
+	defer closeBack(b)
+	u := getUser(t, b)
+	defer assert.NilError(t, u.Logout())
+	mbox := getMbox(t, u)
+
+	createMsgs(t, mbox, 3)
+
+	seq, _ := imap.ParseSeqSet("*")
+
+	var uid uint32
+	ch := make(chan *imap.Message, 10)
+	err := mbox.ListMessages(true, seq, []imap.FetchItem{imap.FetchUid}, ch)
+	assert.NilError(t, err)
+	msg := <-ch
+	uid = msg.Uid
+	msg = <-ch
+	assert.Check(t, msg.Uid > uid, "UIDs are not increasing")
+	uid = msg.Uid
+	msg = <-ch
+	assert.Check(t, msg.Uid > uid, "UIDs are not increasing")
+	uid = msg.Uid
+
+	status, err := mbox.Status([]imap.StatusItem{imap.StatusUidNext})
+	assert.NilError(t, err)
+
+	assert.Check(t, status.UidNext > uid, "UIDNEXT is smaller than UID of last message")
+
+	assert.NilError(t, mbox.UpdateMessagesFlags(true, seq, imap.AddFlags, []string{imap.DeletedFlag}))
+	assert.NilError(t, mbox.Expunge())
+
+	status2, err := mbox.Status([]imap.StatusItem{imap.StatusUidNext})
+	assert.NilError(t, err)
+
+	assert.Equal(t, status2.UidNext, status.UidNext, "EXPUNGE changed UIDNEXT value")
+}

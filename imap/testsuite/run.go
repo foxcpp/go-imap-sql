@@ -57,6 +57,7 @@ func RunTests(t *testing.T, newBackend newBackFunc, closeBackend closeBackFunc) 
 	addTest(Mailbox_SearchMessages_Body)
 	addTest(Mailbox_SearchMessages_Flags)
 	addTest(Mailbox_SetMessageFlags)
+	addTest(Mailbox_MonotonicUid)
 	addTest(Mailbox_Expunge)
 	addTest(Mailbox_CopyMessages)
 

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/emersion/go-imap/backend"
 	"github.com/foxcpp/go-sqlmail"
@@ -101,6 +102,8 @@ type Backend struct {
 	childrenExt bool
 
 	updates chan backend.Update
+	// updates channel is lazily initalized, so we need to ensure thread-safety.
+	updatesLck sync.Mutex
 
 	// Shitton of pre-compiled SQL statements.
 	userCreds          *sql.Stmt
@@ -117,6 +120,7 @@ type Backend struct {
 	getMboxMark        *sql.Stmt
 	setSubbed          *sql.Stmt
 	uidNext            *sql.Stmt
+	addUidNext         *sql.Stmt
 	hasChildren        *sql.Stmt
 	uidValidity        *sql.Stmt
 	msgsCount          *sql.Stmt
@@ -157,7 +161,6 @@ func NewBackend(driver, dsn string, opts Opts) (*Backend, error) {
 	var err error
 
 	b.opts = opts
-	b.updates = make(chan backend.Update, 5)
 
 	if driver == "sqlite3" {
 		if !strings.HasPrefix(dsn, "file:") {
@@ -242,6 +245,7 @@ func (b *Backend) initSchema() error {
 			sub INTEGER NOT NULL DEFAULT 0,
 			mark INTEGER NOT NULL DEFAULT 0,
 			msgsizelimit INTEGER DEFAULT NULL,
+			uidnext INTEGER NOT NULL DEFAULT 1,
 			uidvalidity INTEGER NOT NULL,
 
 			UNIQUE(uid, name)
@@ -376,11 +380,18 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "hasChildren prep")
 	}
 	b.uidNext, err = b.db.Prepare(`
-		SELECT max(msgId)+1
-		FROM msgs
-		WHERE mboxId = ?`)
+		SELECT uidnext
+		FROM mboxes
+		WHERE id = ?`)
 	if err != nil {
 		return errors.Wrap(err, "uidNext prep")
+	}
+	b.addUidNext, err = b.db.Prepare(`
+		UPDATE mboxes
+		SET uidnext = uidnext + ?
+		WHERE id = ?`)
+	if err != nil {
+		return errors.Wrap(err, "addUidNext prep")
 	}
 	b.uidValidity, err = b.db.Prepare(`
 		SELECT uidvalidity
@@ -549,22 +560,22 @@ func (b *Backend) prepareStmts() error {
 	if b.db.mysql57 {
 		b.copyMsgsUid, err = b.db.Prepare(`
 			INSERT INTO msgs
-			SELECT ? AS mboxId, coalesce((
-				SELECT max(msgId)
-				FROM msgs
-				WHERE mboxId = ?
-			), 0) + (@rownum := @rownum + 1), date, bodyLen, body
+			SELECT ? AS mboxId, (
+				SELECT uidnext
+				FROM mboxes
+				WHERE id = ?
+			) + (@rownum := @rownum + 1), date, bodyLen, body
 			FROM msgs, (SELECT @rownum := 0) counter
 			WHERE mboxId = ? AND msgId BETWEEN ? AND ?
 			ORDER BY msgId`)
 	} else {
 		b.copyMsgsUid, err = b.db.Prepare(`
 			INSERT INTO msgs
-			SELECT ? AS mboxId, coalesce((
-				SELECT max(msgId)
-				FROM msgs
-				WHERE mboxId = ?
-			), 0) + row_number() OVER (ORDER BY msgId), date, bodyLen, body
+			SELECT ? AS mboxId, (
+				SELECT uidnext
+				FROM mboxes
+				WHERE id = ?
+			) + row_number() OVER (ORDER BY msgId), date, bodyLen, body
 			FROM msgs
 			WHERE mboxId = ? AND msgId BETWEEN ? AND ?`)
 	}
@@ -577,11 +588,11 @@ func (b *Backend) prepareStmts() error {
 			SELECT ?, new_msgId AS msgId, flag
 			FROM flags
 			INNER JOIN (
-				SELECT coalesce((
-					SELECT max(msgId) - ?
-					FROM msgs
-					WHERE mboxId = ?
-				), 0) + (@rownum := @rownum + 1) AS new_msgId, msgId, mboxId
+				SELECT (
+					SELECT uidnext - ?
+					FROM mboxes
+					WHERE id = ?
+				) + (@rownum := @rownum + 1) AS new_msgId, msgId, mboxId
 				FROM msgs, (SELECT @rownum := 0) counter
 				WHERE mboxId = ?
 				AND msgId BETWEEN ? AND ?
@@ -594,11 +605,11 @@ func (b *Backend) prepareStmts() error {
 			SELECT ?, new_msgId AS msgId, flag
 			FROM flags
 			INNER JOIN (
-				SELECT coalesce((
-					SELECT max(msgId) - ?
-					FROM msgs
-					WHERE mboxId = ?
-				), 0) + row_number() OVER (ORDER BY msgId) AS new_msgId, msgId, mboxId
+				SELECT (
+					SELECT uidnext - ?
+					FROM mboxes
+					WHERE id = ?
+				) + row_number() OVER (ORDER BY msgId) AS new_msgId, msgId, mboxId
 				FROM msgs
 				WHERE mboxId = ?
 				AND msgId BETWEEN ? AND ?
@@ -611,11 +622,11 @@ func (b *Backend) prepareStmts() error {
 	if b.db.mysql57 {
 		b.copyMsgsSeq, err = b.db.Prepare(`
 			INSERT INTO msgs
-			SELECT ? AS mboxId, coalesce((
-				SELECT max(msgId)
-				FROM msgs
-				WHERE mboxId = ?
-			), 0) + (@rownum := @rownum + 1), date, bodyLen, body
+			SELECT ? AS mboxId, (
+				SELECT uidnext
+				FROM mboxes
+				WHERE id = ?
+			) + (@rownum := @rownum + 1), date, bodyLen, body
 			FROM (
 				SELECT msgId, date, bodyLen, body
 				FROM msgs
@@ -626,11 +637,11 @@ func (b *Backend) prepareStmts() error {
 	} else {
 		b.copyMsgsSeq, err = b.db.Prepare(`
 			INSERT INTO msgs
-			SELECT ? AS mboxId, coalesce((
-				SELECT max(msgId)
-				FROM msgs
-				WHERE mboxId = ?
-			), 0) + row_number() OVER (ORDER BY msgId), date, bodyLen, body
+			SELECT ? AS mboxId, (
+				SELECT uidnext
+				FROM mboxes
+				WHERE id = ?
+			) + row_number() OVER (ORDER BY msgId), date, bodyLen, body
 			FROM (
 				SELECT msgId, date, bodyLen, body
 				FROM msgs
@@ -647,11 +658,11 @@ func (b *Backend) prepareStmts() error {
 			SELECT ?, new_msgId AS msgId, flag
 			FROM flags
 			INNER JOIN (
-				SELECT coalesce((
-					SELECT max(msgId) - ?
-					FROM msgs
-					WHERE mboxId = ?
-				), 0) + (@rownum := @rownum + 1) AS new_msgId, msgId
+				SELECT (
+					SELECT uidnext - ?
+					FROM mboxes
+					WHERE id = ?
+				) + (@rownum := @rownum + 1) AS new_msgId, msgId
 				FROM (
 					SELECT msgId
 					FROM msgs
@@ -666,9 +677,9 @@ func (b *Backend) prepareStmts() error {
 			FROM flags
 			INNER JOIN (
 				SELECT coalesce((
-					SELECT max(msgId) - ?
-					FROM msgs
-					WHERE mboxId = ?
+					SELECT uidnext - ?
+					FROM mboxes
+					WHERE id = ?
 				), 0) + row_number() OVER (ORDER BY msgId) AS new_msgId, msgId
 				FROM (
 					SELECT msgId
@@ -985,6 +996,11 @@ func (b *Backend) prepareStmts() error {
 }
 
 func (b *Backend) Updates() <-chan backend.Update {
+	b.updatesLck.Lock()
+	defer b.updatesLck.Unlock()
+
+	// Suitable value for tests.
+	b.updates = make(chan backend.Update, 20)
 	return b.updates
 }
 

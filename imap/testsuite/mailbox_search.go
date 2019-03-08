@@ -181,7 +181,7 @@ var flagsTests = []struct {
 	},
 }
 
-func Mailbox_SearchMessages_Body(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func Mailbox_SearchMessages_Body(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
 	err := b.CreateUser("username1", "password1")
@@ -215,7 +215,7 @@ func Mailbox_SearchMessages_Body(t *testing.T, newBack newBackFunc, closeBack cl
 	}
 }
 
-func Mailbox_SearchMessages_Flags(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func Mailbox_SearchMessages_Flags(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
 	err := b.CreateUser("username1", "password1")

@@ -8,7 +8,7 @@ import (
 	is "gotest.tools/assert/cmp"
 )
 
-func User_Username(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func User_Username(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
 	err := b.CreateUser("username1", "password1")
@@ -20,7 +20,7 @@ func User_Username(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
 	assert.Equal(t, u.Username(), "username1", "Username mismatch")
 }
 
-func User_CreateMailbox(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func User_CreateMailbox(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
 	err := b.CreateUser("username1", "password1")
@@ -45,7 +45,7 @@ func User_CreateMailbox(t *testing.T, newBack newBackFunc, closeBack closeBackFu
 	assert.Equal(t, mbox.Name(), "INBOX", "Mailbox name mismatch")
 }
 
-func User_CreateMailbox_Parents(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func User_CreateMailbox_Parents(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
 	err := b.CreateUser("username1", "password1")
@@ -73,7 +73,7 @@ func User_CreateMailbox_Parents(t *testing.T, newBack newBackFunc, closeBack clo
 	assert.Equal(t, mbox.Name(), "INBOX", "Mailbox name mismatch")
 }
 
-func User_DeleteMailbox(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func User_DeleteMailbox(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
 	err := b.CreateUser("username1", "password1")
@@ -87,7 +87,7 @@ func User_DeleteMailbox(t *testing.T, newBack newBackFunc, closeBack closeBackFu
 	assert.Error(t, u.DeleteMailbox("TEST"), backend.ErrNoSuchMailbox.Error(), "User.DeleteMailbox succeed")
 }
 
-func User_DeleteMailbox_Parents(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func User_DeleteMailbox_Parents(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
 	err := b.CreateUser("username1", "password1")
@@ -104,7 +104,7 @@ func User_DeleteMailbox_Parents(t *testing.T, newBack newBackFunc, closeBack clo
 	assert.NilError(t, err)
 }
 
-func User_RenameMailbox(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func User_RenameMailbox(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
 	err := b.CreateUser("username1", "password1")
@@ -122,7 +122,7 @@ func User_RenameMailbox(t *testing.T, newBack newBackFunc, closeBack closeBackFu
 	assert.Equal(t, mbox.Name(), "TEST2", "Mailbox name dismatch in returned object")
 }
 
-func User_RenameMailbox_Childrens(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func User_RenameMailbox_Childrens(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
 	err := b.CreateUser("username1", "password1")
@@ -140,7 +140,7 @@ func User_RenameMailbox_Childrens(t *testing.T, newBack newBackFunc, closeBack c
 	assert.Equal(t, mbox.Name(), "TEST2.FOOBAR", "Mailbox name dismatch in returned object")
 }
 
-func User_RenameMailbox_INBOX(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func User_RenameMailbox_INBOX(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
 	err := b.CreateUser("username1", "password1")
@@ -154,7 +154,7 @@ func User_RenameMailbox_INBOX(t *testing.T, newBack newBackFunc, closeBack close
 	assert.NilError(t, err, "INBOX doesn't exists anymore")
 }
 
-func User_ListMailboxes(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func User_ListMailboxes(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
 	err := b.CreateUser("username1", "password1")

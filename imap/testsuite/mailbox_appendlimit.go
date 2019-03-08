@@ -12,7 +12,7 @@ import (
 	"gotest.tools/assert"
 )
 
-func Backend_AppendLimit(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func Backend_AppendLimit(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
 
@@ -50,7 +50,7 @@ func Backend_AppendLimit(t *testing.T, newBack newBackFunc, closeBack closeBackF
 	})
 }
 
-func User_AppendLimit(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func User_AppendLimit(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
 	u := getUser(t, b)
@@ -112,7 +112,7 @@ func User_AppendLimit(t *testing.T, newBack newBackFunc, closeBack closeBackFunc
 	})
 }
 
-func Mailbox_AppendLimit(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func Mailbox_AppendLimit(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
 	u := getUser(t, b)

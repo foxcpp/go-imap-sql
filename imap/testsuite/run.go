@@ -15,10 +15,10 @@ type Backend interface {
 	sqlmail.IMAPUsersDB
 }
 
-type newBackFunc func() Backend
-type closeBackFunc func(Backend)
+type NewBackFunc func() Backend
+type CloseBackFunc func(Backend)
 
-type testFunc func(*testing.T, newBackFunc, closeBackFunc)
+type testFunc func(*testing.T, NewBackFunc, CloseBackFunc)
 
 func GetFunctionName(i interface{}) string {
 	parts := strings.Split(runtime.FuncForPC(reflect.ValueOf(i).Pointer()).Name(), "/")
@@ -26,7 +26,7 @@ func GetFunctionName(i interface{}) string {
 	return parts[len(parts)-1][len(prefix):]
 }
 
-func RunTests(t *testing.T, newBackend newBackFunc, closeBackend closeBackFunc) {
+func RunTests(t *testing.T, newBackend NewBackFunc, closeBackend CloseBackFunc) {
 	addTest := func(f testFunc) {
 		t.Run(GetFunctionName(f), func(t *testing.T) {
 			f(t, newBackend, closeBackend)
@@ -70,7 +70,7 @@ func RunTests(t *testing.T, newBackend newBackFunc, closeBackend closeBackFunc) 
 	addTest(Mailbox_AppendLimit)
 }
 
-func TestInit(t *testing.T, newBackend newBackFunc, closeBackend closeBackFunc) {
+func TestInit(t *testing.T, newBackend NewBackFunc, closeBackend CloseBackFunc) {
 	b := newBackend()
 	closeBackend(b)
 }

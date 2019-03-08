@@ -14,7 +14,7 @@ import (
 	is "gotest.tools/assert/cmp"
 )
 
-func Mailbox_Info(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func Mailbox_Info(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
 	u := getUser(t, b)
@@ -100,7 +100,7 @@ X-CustomHeader: foo
 Test! Test! Test! Test!
 `
 
-func Mailbox_Status(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func Mailbox_Status(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	t.Run("UidNext", func(t *testing.T) {
 		b := newBack()
 		defer closeBack(b)
@@ -167,7 +167,7 @@ func Mailbox_Status(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) 
 	})
 }
 
-func Mailbox_SetSubscribed(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func Mailbox_SetSubscribed(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	t.Run("SetSubscribed true", func(t *testing.T) {
 		b := newBack()
 		defer closeBack(b)
@@ -196,7 +196,7 @@ func Mailbox_SetSubscribed(t *testing.T, newBack newBackFunc, closeBack closeBac
 	})
 }
 
-func Mailbox_CreateMessage(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func Mailbox_CreateMessage(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
 	u := getUser(t, b)
@@ -228,7 +228,7 @@ func Mailbox_CreateMessage(t *testing.T, newBack newBackFunc, closeBack closeBac
 	}
 }
 
-func Mailbox_ListMessages(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func Mailbox_ListMessages(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
 	u := getUser(t, b)
@@ -438,7 +438,7 @@ Test! Test! Test! Test!
 	})
 }
 
-func Mailbox_SetMessageFlags(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func Mailbox_SetMessageFlags(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	t.Run("AddFlags", func(t *testing.T) {
 		b := newBack()
 		defer closeBack(b)
@@ -604,7 +604,7 @@ func Mailbox_SetMessageFlags(t *testing.T, newBack newBackFunc, closeBack closeB
 	})
 }
 
-func Mailbox_Expunge(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func Mailbox_Expunge(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
 	u := getUser(t, b)
@@ -631,7 +631,7 @@ func Mailbox_Expunge(t *testing.T, newBack newBackFunc, closeBack closeBackFunc)
 	assert.Assert(t, isNthMsg(msg, 1), "Wrong messages deleted")
 }
 
-func Mailbox_CopyMessages(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func Mailbox_CopyMessages(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	t.Run("Seq", func(t *testing.T) {
 		b := newBack()
 		defer closeBack(b)
@@ -681,7 +681,7 @@ func Mailbox_CopyMessages(t *testing.T, newBack newBackFunc, closeBack closeBack
 	})
 }
 
-func Mailbox_MoveMessages(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func Mailbox_MoveMessages(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	//t.Run("Non-Existent Dest", func(t *testing.T) {
 	//	seq, _ := imap.ParseSeqSet("2:3")
 	//	assert.Error(t, mboxMove.MoveMessages(false, seq, "TEST112341324132"), "MoveMessages: No such mailbox")
@@ -762,7 +762,7 @@ func Mailbox_MoveMessages(t *testing.T, newBack newBackFunc, closeBack closeBack
 	})
 }
 
-func Mailbox_MonotonicUid(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func Mailbox_MonotonicUid(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
 	u := getUser(t, b)

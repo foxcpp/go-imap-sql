@@ -8,7 +8,7 @@ import (
 	"gotest.tools/assert"
 )
 
-func UserDB_CreateUser(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func UserDB_CreateUser(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
 
@@ -23,7 +23,7 @@ func UserDB_CreateUser(t *testing.T, newBack newBackFunc, closeBack closeBackFun
 	assert.Error(t, err, sqlmail.ErrUserDoesntExists.Error(), "GetUser username2 failed")
 }
 
-func UserDB_Login(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func UserDB_Login(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
 
@@ -34,7 +34,7 @@ func UserDB_Login(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
 	assert.NilError(t, u.Logout())
 }
 
-func UserDB_SetPassword(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func UserDB_SetPassword(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
 
@@ -54,7 +54,7 @@ func UserDB_SetPassword(t *testing.T, newBack newBackFunc, closeBack closeBackFu
 	assert.NilError(t, u.Logout())
 }
 
-func UserDB_DeleteUser(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func UserDB_DeleteUser(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
 

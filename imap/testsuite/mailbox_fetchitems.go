@@ -95,7 +95,7 @@ var bodyTests = []struct {
 	},
 }
 
-func Mailbox_ListMessages_Body(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func Mailbox_ListMessages_Body(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
 	err := b.CreateUser("username1", "password1")
@@ -179,7 +179,7 @@ var testBodyStructure = &imap.BodyStructure{
 	Extended: true,
 }
 
-func Mailbox_ListMessages_BodyStruct(t *testing.T, newBack newBackFunc, closeBack closeBackFunc) {
+func Mailbox_ListMessages_BodyStruct(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
 	err := b.CreateUser("username1", "password1")

@@ -88,6 +88,9 @@ func (m *Mailbox) Status(items []imap.StatusItem) (*imap.MailboxStatus, error) {
 		if err != sql.ErrNoRows {
 			return nil, errors.Wrapf(err, "Status %s", m.name)
 		}
+
+		// Don't return it if there is no unseen messages.
+		delete(res.Items, imap.StatusUnseen)
 		res.UnseenSeqNum = 0
 	}
 
@@ -459,7 +462,33 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, body imap.Litera
 		}
 	}
 
-	return errors.Wrap(tx.Commit(), "CreateMessage (tx commit)")
+	row := tx.Stmt(m.parent.msgsCount).QueryRow(m.id)
+	newCount := uint32(0)
+	if err := row.Scan(&newCount); err != nil {
+		return errors.Wrap(err, "CreateMessage (exists read)")
+	}
+
+	row = tx.Stmt(m.parent.recentCount).QueryRow(m.id)
+	newRecent := uint32(0)
+	if err := row.Scan(&newCount); err != nil {
+		return errors.Wrap(err, "CreateMessage (recent read)")
+	}
+
+	upd := backend.MailboxUpdate{
+		Update:        backend.NewUpdate(m.user.username, m.name),
+		MailboxStatus: imap.NewMailboxStatus(m.name, []imap.StatusItem{imap.StatusMessages, imap.StatusRecent}),
+	}
+	upd.MailboxStatus.Messages = newCount
+	upd.MailboxStatus.Recent = newRecent
+
+	if err := tx.Commit(); err != nil {
+		return errors.Wrap(err, "CreateMessage (tx commit)")
+	}
+
+	// Send update after commiting transaction,
+	// just in case reading side will block us for some time.
+	m.parent.updates <- &upd
+	return nil
 }
 
 func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation imap.FlagsOp, flags []string) error {
@@ -519,6 +548,7 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 
 		for _, seq := range seqset.Set {
 			start, stop := sqlRange(seq)
+
 			// How horrible variable arguments in Go are...
 			if uid {
 				params := make([]interface{}, 0, 4+len(flags))
@@ -539,6 +569,7 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 						params = append(params, flag)
 					}
 				}
+
 				_, err = query.Exec(params...)
 			}
 			if err != nil {
@@ -616,7 +647,82 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 		query.Close()
 	}
 
-	return errors.Wrap(tx.Commit(), "UpdateMessagesFlags")
+	// We buffer updates before transaction commit so we
+	// will not send them if tx.Commit fails.
+	var updatesBuffer []backend.Update
+
+	for _, seq := range seqset.Set {
+		var err error
+		var rows *sql.Rows
+		start, stop := sqlRange(seq)
+
+		if uid {
+			rows, err = tx.Stmt(m.parent.msgFlagsUid).Query(m.id, m.id, start, stop)
+		} else {
+			rows, err = tx.Stmt(m.parent.msgFlagsSeq).Query(m.id, m.id, start, stop)
+		}
+		if err != nil {
+			return errors.Wrap(err, "UpdateMessagesFlags")
+		}
+
+		for rows.Next() {
+			var seqnum uint32
+			var msgId uint32
+			var flagsJoined string
+
+			if err := rows.Scan(&seqnum, &msgId, &flagsJoined); err != nil {
+				return errors.Wrap(err, "UpdateMessagesFlags")
+			}
+
+			flags := strings.Split(flagsJoined, flagsSep)
+
+			updatesBuffer = append(updatesBuffer, &backend.MessageUpdate{
+				Update: backend.NewUpdate(m.user.username, m.name),
+				Message: &imap.Message{
+					SeqNum: seqnum,
+					Items:  map[imap.FetchItem]interface{}{imap.FetchFlags: nil},
+					Flags:  flags,
+				},
+			})
+		}
+		if err := rows.Err(); err != nil {
+			return errors.Wrap(err, "UpdateMessagesFlags")
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return errors.Wrap(err, "UpdateMessagesFlags")
+	}
+
+	for _, update := range updatesBuffer {
+		m.parent.updates <- update
+	}
+	return nil
+}
+
+func (m *Mailbox) affectedSeqnums(tx *sql.Tx, uid bool, seq imap.Seq) ([]uint32, error) {
+	var res []uint32
+	var rows *sql.Rows
+	var err error
+	start, stop := sqlRange(seq)
+	if uid {
+		rows, err = tx.Stmt(m.parent.affectedSeqnumsUid).Query(m.id, start, stop)
+	} else {
+		rows, err = tx.Stmt(m.parent.affectedSeqnumsSeq).Query(m.id, start, stop)
+	}
+	if err != nil {
+		return res, err
+	}
+
+	for rows.Next() {
+		value := uint32(0)
+		if err := rows.Scan(&value); err != nil {
+			return res, err
+		}
+
+		res = append(res, value)
+	}
+	return res, rows.Err()
 }
 
 func (m *Mailbox) valuesSubquery(rows []string) string {
@@ -752,8 +858,46 @@ func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest s
 }
 
 func (m *Mailbox) Expunge() error {
-	_, err := m.parent.expungeMbox.Exec(m.id, m.id)
-	return errors.Wrapf(err, "Expunge %s", m.name)
+	tx, err := m.parent.db.Begin()
+	if err != nil {
+		return errors.Wrap(err, "Expunge")
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	var seqnums []uint32
+	// Query returns seqnum in reversed order.
+	rows, err := tx.Stmt(m.parent.deletedSeqnums).Query(m.id, m.id)
+	if err != nil {
+		return errors.Wrap(err, "Expunge")
+	}
+	for rows.Next() {
+		var seqnum uint32
+		if err := rows.Scan(&seqnum); err != nil {
+			return errors.Wrap(err, "Expunge")
+		}
+		seqnums = append(seqnums, seqnum)
+	}
+	if err := rows.Err(); err != nil {
+		return errors.Wrap(err, "Expunge")
+	}
+
+	_, err = tx.Stmt(m.parent.expungeMbox).Exec(m.id, m.id)
+	if err != nil {
+		return errors.Wrap(err, "Expunge")
+	}
+
+	if err := tx.Commit(); err != nil {
+		return errors.Wrap(err, "Expunge")
+	}
+
+	for _, seqnum := range seqnums {
+		m.parent.updates <- &backend.ExpungeUpdate{
+			Update: backend.NewUpdate(m.user.username, m.name),
+			SeqNum: seqnum,
+		}
+	}
+
+	return nil
 }
 
 func sqlRange(seq imap.Seq) (x, y uint32) {
@@ -761,6 +905,9 @@ func sqlRange(seq imap.Seq) (x, y uint32) {
 	y = seq.Stop
 	if seq.Stop == 0 {
 		y = 4294967295
+	}
+	if seq.Start == 0 {
+		x = 1
 	}
 	return
 }

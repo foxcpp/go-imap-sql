@@ -1,8 +1,8 @@
 package imap
 
 import (
-	"bytes"
 	"crypto/rand"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
 	"strconv"
@@ -100,6 +100,8 @@ type Backend struct {
 
 	childrenExt bool
 
+	updates chan backend.Update
+
 	// Shitton of pre-compiled SQL statements.
 	userCreds          *sql.Stmt
 	addUser            *sql.Stmt
@@ -120,6 +122,9 @@ type Backend struct {
 	msgsCount          *sql.Stmt
 	recentCount        *sql.Stmt
 	firstUnseenSeqNum  *sql.Stmt
+	deletedSeqnums     *sql.Stmt
+	affectedSeqnumsUid *sql.Stmt
+	affectedSeqnumsSeq *sql.Stmt
 	expungeMbox        *sql.Stmt
 	mboxId             *sql.Stmt
 	addMsg             *sql.Stmt
@@ -133,6 +138,8 @@ type Backend struct {
 	getMsgsNoBodySeq   *sql.Stmt
 	massClearFlagsUid  *sql.Stmt
 	massClearFlagsSeq  *sql.Stmt
+	msgFlagsUid        *sql.Stmt
+	msgFlagsSeq        *sql.Stmt
 
 	// For MOVE extension
 	delMsgsUid *sql.Stmt
@@ -150,6 +157,7 @@ func NewBackend(driver, dsn string, opts Opts) (*Backend, error) {
 	var err error
 
 	b.opts = opts
+	b.updates = make(chan backend.Update, 5)
 
 	if driver == "sqlite3" {
 		if !strings.HasPrefix(dsn, "file:") {
@@ -401,9 +409,9 @@ func (b *Backend) prepareStmts() error {
 	if b.db.mysql57 {
 		// MySQL 5.7 doesn't have row_number() function.
 		b.firstUnseenSeqNum, err = b.db.Prepare(`
-		SELECT rownr
+		SELECT coalesce(rownr, 0)
 		FROM (
-			SELECT (@rownum:=@rownum + 1) AS rownr, msgId
+			SELECT (@rownum := @rownum + 1) AS rownr, msgId
 			FROM msgs, (SELECT @rownum := 0) counter
 			WHERE mboxId = ?
 			ORDER BY msgId
@@ -431,6 +439,88 @@ func (b *Backend) prepareStmts() error {
 	}
 	if err != nil {
 		return errors.Wrap(err, "firstUnseenSeqNum prep")
+	}
+	if b.db.mysql57 {
+		b.deletedSeqnums, err = b.db.Prepare(`
+			SELECT seqnum
+			FROM (
+				SELECT (@rownum := @rownum + 1) AS seqnum, msgId
+				FROM msgs, (SELECT @rownum := 0) counter
+				WHERE mboxId = ?
+			) seqnums
+			WHERE msgId IN (
+				SELECT msgId
+				FROM flags
+				WHERE mboxId = ?
+				AND flag = '\Deleted'
+			)
+			ORDER BY seqnum DESC`)
+	} else {
+		b.deletedSeqnums, err = b.db.Prepare(`
+			SELECT seqnum
+			FROM (
+				SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId
+				FROM msgs
+				WHERE mboxId = ?
+			) seqnums
+			WHERE msgId IN (
+				SELECT msgId
+				FROM flags
+				WHERE mboxId = ?
+				AND flag = '\Deleted'
+			)
+			ORDER BY seqnum DESC`)
+	}
+	if err != nil {
+		return errors.Wrap(err, "deletedSeqnums prep")
+	}
+	if b.db.mysql57 {
+		b.affectedSeqnumsUid, err = b.db.Prepare(`
+			SELECT seqnum
+			FROM (
+				SELECT (@rownum := @rownum + 1) AS seqnum, msgId
+				FROM msgs, (SELECT @rownum := 0) counter
+				WHERE mboxId = ?
+			) seqnums
+			WHERE msgId BETWEEN ? AND ?
+			ORDER BY seqnum DESC`)
+	} else {
+		b.affectedSeqnumsUid, err = b.db.Prepare(`
+			SELECT seqnum
+			FROM (
+				SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId
+				FROM msgs
+				WHERE mboxId = ?
+			) seqnums
+			WHERE msgId BETWEEN ? AND ?
+			ORDER BY seqnum DESC`)
+	}
+	if err != nil {
+		return errors.Wrap(err, "affectedSeqnumsUid prep")
+	}
+	if b.db.mysql57 {
+		b.affectedSeqnumsSeq, err = b.db.Prepare(`
+			SELECT seqnum
+			FROM (
+				SELECT (@rownum := @rownum + 1) AS seqnum
+				FROM msgs, (SELECT @rownum := 0) counter
+				WHERE mboxId = ?
+			) seqnums
+			WHERE seqnum BETWEEN ? AND ?
+			ORDER BY seqnum DESC`)
+	} else {
+		b.affectedSeqnumsSeq, err = b.db.Prepare(`
+			SELECT seqnum
+			FROM (
+				SELECT row_number() OVER (ORDER BY msgId) AS seqnum
+				FROM msgs
+				WHERE mboxId = ?
+			) seqnums
+			WHERE seqnum BETWEEN ? AND ?
+			ORDER BY seqnum DESC`)
+	}
+	if err != nil {
+		return errors.Wrap(err, "affectedSeqnumsSeq prep")
 	}
 	b.expungeMbox, err = b.db.Prepare(`
 		DELETE FROM msgs
@@ -822,7 +912,80 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "userMsgSizeLimit prep")
 	}
 
+	if b.db.mysql57 {
+		b.msgFlagsUid, err = b.db.Prepare(`
+			SELECT seqnum, msgs.msgId, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
+			FROM msgs
+			INNER JOIN (
+				SELECT (@rownum := @rownum + 1) AS seqnum, msgId, mboxId
+				FROM msgs, (SELECT @rownum := 0) counter
+				WHERE mboxId = ?
+			) map
+			ON map.msgId = msgs.msgId
+			LEFT JOIN flags
+			ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId AND msgs.mboxId = flags.mboxId
+			WHERE msgs.mboxId = ? AND msgs.msgId BETWEEN ? AND ?
+			GROUP BY msgs.mboxId, msgs.msgId, seqnum
+			ORDER BY seqnum DESC`)
+	} else {
+		b.msgFlagsUid, err = b.db.Prepare(`
+			SELECT seqnum, msgs.msgId, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
+			FROM msgs
+			INNER JOIN (
+				SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
+				FROM msgs
+				WHERE mboxId = ?
+			) map
+			ON map.msgId = msgs.msgId
+			LEFT JOIN flags
+			ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId AND msgs.mboxId = flags.mboxId
+			WHERE msgs.mboxId = ? AND msgs.msgId BETWEEN ? AND ?
+			GROUP BY msgs.mboxId, msgs.msgId, seqnum
+			ORDER BY seqnum DESC`)
+	}
+	if err != nil {
+		return errors.Wrap(err, "msgFlagsUid prep")
+	}
+	if b.db.mysql57 {
+		b.msgFlagsSeq, err = b.db.Prepare(`
+			SELECT seqnum, msgs.msgId, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
+			FROM msgs
+			INNER JOIN (
+				SELECT (@rownum := @rownum + 1) AS seqnum, msgId, mboxId
+				FROM msgs, (SELECT @rownum := 0) counter
+				WHERE mboxId = ?
+			) map
+			ON map.msgId = msgs.msgId
+			LEFT JOIN flags
+			ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId AND msgs.mboxId = flags.mboxId
+			WHERE msgs.mboxId = ? AND seqnum BETWEEN ? AND ?
+			GROUP BY msgs.mboxId, msgs.msgId, seqnum
+			ORDER BY seqnum DESC`)
+	} else {
+		b.msgFlagsSeq, err = b.db.Prepare(`
+			SELECT seqnum, msgs.msgId, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
+			FROM msgs
+			INNER JOIN (
+				SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
+				FROM msgs
+				WHERE mboxId = ?
+			) map
+			ON map.msgId = msgs.msgId
+			LEFT JOIN flags
+			ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId AND msgs.mboxId = flags.mboxId
+			WHERE msgs.mboxId = ? AND seqnum BETWEEN ? AND ?
+			GROUP BY msgs.mboxId, msgs.msgId, seqnum
+			ORDER BY seqnum DESC`)
+	}
+	if err != nil {
+		return errors.Wrap(err, "msgFlagsSeq prep")
+	}
+
 	return nil
+}
+
+func (b *Backend) Updates() <-chan backend.Update {
+	return b.updates
 }
 
 func (b *Backend) groupConcatFn(expr, separator string) string {
@@ -937,7 +1100,7 @@ func (b *Backend) Login(username, password string) (backend.User, error) {
 	pass = append(pass, []byte(password)...)
 	pass = append(pass, passSalt...)
 	digest := sha3.Sum512(pass)
-	if !bytes.Equal(digest[:], passHash) {
+	if subtle.ConstantTimeCompare(digest[:], passHash) != 1 {
 		return nil, backend.ErrInvalidCredentials
 	}
 

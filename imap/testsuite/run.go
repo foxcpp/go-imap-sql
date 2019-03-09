@@ -61,6 +61,10 @@ func RunTests(t *testing.T, newBackend NewBackFunc, closeBackend CloseBackFunc) 
 	addTest(Mailbox_Expunge)
 	addTest(Mailbox_CopyMessages)
 
+	addTest(Mailbox_ExpungeUpdate)
+	addTest(Mailbox_StatusUpdate)
+	addTest(Mailbox_MessageUpdate)
+
 	// MOVE extension
 	addTest(Mailbox_MoveMessages)
 

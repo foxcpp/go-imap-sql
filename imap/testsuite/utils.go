@@ -15,6 +15,7 @@ import (
 )
 
 func getNamedUser(t *testing.T, b Backend, name string) backend.User {
+	t.Helper()
 	err := b.CreateUser(name, "password1")
 	assert.NilError(t, err)
 	u, err := b.GetUser(name)
@@ -23,11 +24,13 @@ func getNamedUser(t *testing.T, b Backend, name string) backend.User {
 }
 
 func getUser(t *testing.T, b Backend) backend.User {
+	t.Helper()
 	name := fmt.Sprintf("%s-%v", t.Name(), time.Now().UnixNano())
 	return getNamedUser(t, b, name)
 }
 
 func getNamedMbox(t *testing.T, u backend.User, name string) backend.Mailbox {
+	t.Helper()
 	assert.NilError(t, u.CreateMailbox(name))
 	mbox, err := u.GetMailbox(name)
 	assert.NilError(t, err)
@@ -35,6 +38,7 @@ func getNamedMbox(t *testing.T, u backend.User, name string) backend.Mailbox {
 }
 
 func getMbox(t *testing.T, u backend.User) backend.Mailbox {
+	t.Helper()
 	name := fmt.Sprintf("%s-%v", t.Name(), time.Now().UnixNano())
 	return getNamedMbox(t, u, name)
 }
@@ -42,6 +46,7 @@ func getMbox(t *testing.T, u backend.User) backend.Mailbox {
 var baseDate = time.Time{}
 
 func createMsgs(t *testing.T, mbox backend.Mailbox, count int) {
+	t.Helper()
 	for i := 0; i < count; i++ {
 		assert.NilError(t, mbox.CreateMessage(
 			[]string{
@@ -55,6 +60,7 @@ func createMsgs(t *testing.T, mbox backend.Mailbox, count int) {
 }
 
 func createMsgsUids(t *testing.T, mbox backend.Mailbox, count int) (res []uint32) {
+	t.Helper()
 	for i := 0; i < count; i++ {
 		stat, err := mbox.Status([]imap.StatusItem{imap.StatusUidNext})
 		assert.NilError(t, err)

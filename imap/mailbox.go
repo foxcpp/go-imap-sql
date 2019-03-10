@@ -444,7 +444,8 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, body imap.Litera
 			SELECT ?, msgId, column1 AS flag
 			FROM msgs
 			CROSS JOIN (` + m.valuesSubquery(flags) + `) flagset
-			WHERE mboxId = ? AND msgId = ?`)
+			WHERE mboxId = ? AND msgId = ?
+			ON CONFLICT DO NOTHING`)
 
 		// How horrible variable arguments in Go are...
 		params := make([]interface{}, 0, 3+len(flags))
@@ -775,6 +776,9 @@ func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error
 	defer tx.Rollback() //nolint:errcheck
 
 	if err := m.copyMessages(tx, uid, seqset, dest); err != nil {
+		if err == backend.ErrNoSuchMailbox {
+			return err
+		}
 		return errors.Wrap(err, "MoveMessages")
 	}
 	if err := m.delMessages(tx, uid, seqset); err != nil {
@@ -792,6 +796,9 @@ func (m *Mailbox) CopyMessages(uid bool, seqset *imap.SeqSet, dest string) error
 	defer tx.Rollback() //nolint:errcheck
 
 	if err := m.copyMessages(tx, uid, seqset, dest); err != nil {
+		if err == backend.ErrNoSuchMailbox {
+			return err
+		}
 		return errors.Wrap(err, "CopyMessages")
 	}
 
@@ -804,16 +811,17 @@ func (m *Mailbox) delMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet) error {
 
 		var err error
 		if uid {
-			_, err = tx.Stmt(m.parent.delMsgsUid).Exec(m.id, start, stop)
+			_, err = tx.Stmt(m.parent.markUid).Exec(m.id, start, stop)
 		} else {
-			_, err = tx.Stmt(m.parent.delMsgsSeq).Exec(m.id, m.id, start, stop)
+			_, err = tx.Stmt(m.parent.markSeq).Exec(m.id, m.id, start, stop)
 		}
 		if err != nil {
 			return err
 		}
 	}
 
-	return nil
+	_, err := tx.Stmt(m.parent.delMarked).Exec()
+	return err
 }
 
 func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest string) error {
@@ -831,50 +839,44 @@ func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest s
 	for _, seq := range seqset.Set {
 		start, stop := sqlRange(seq)
 
+		var stats sql.Result
+		var err error
 		if uid {
-			if stats, err := tx.Stmt(m.parent.copyMsgsUid).Exec(destID, destID, srcId, start, stop); err != nil {
+			stats, err = tx.Stmt(m.parent.copyMsgsUid).Exec(destID, destID, srcId, start, stop)
+			if err != nil {
 				if strings.Contains(err.Error(), "foreign") {
 					return backend.ErrNoSuchMailbox
 				}
 				return err
-			} else {
-				affected, err := stats.RowsAffected()
-				if err != nil {
-					return err
-				}
-
-				if _, err := tx.Stmt(m.parent.addUidNext).Exec(affected, destID); err != nil {
-					return err
-				}
 			}
-			if _, err := tx.Stmt(m.parent.copyMsgFlagsUid).Exec(destID, stop-start+1, destID, srcId, start, stop); err != nil {
+			if _, err := tx.Stmt(m.parent.copyMsgFlagsUid).Exec(destID, destID, srcId, start, stop); err != nil {
 				if strings.Contains(err.Error(), "foreign") || strings.Contains(err.Error(), "FOREIGN") {
 					return backend.ErrNoSuchMailbox
 				}
 				return err
 			}
 		} else {
-			if stats, err := tx.Stmt(m.parent.copyMsgsSeq).Exec(destID, destID, srcId, stop-start+1, start-1); err != nil {
+			stats, err = tx.Stmt(m.parent.copyMsgsSeq).Exec(destID, destID, srcId, stop-start+1, start-1)
+			if err != nil {
 				if strings.Contains(err.Error(), "foreign") || strings.Contains(err.Error(), "FOREIGN") {
 					return backend.ErrNoSuchMailbox
 				}
 				return err
-			} else {
-				affected, err := stats.RowsAffected()
-				if err != nil {
-					return err
+			}
+			if _, err := tx.Stmt(m.parent.copyMsgFlagsSeq).Exec(destID, destID, srcId, stop-start+1, start-1); err != nil {
+				if strings.Contains(err.Error(), "foreign") || strings.Contains(err.Error(), "FOREIGN") {
+					return backend.ErrNoSuchMailbox
 				}
+				return err
+			}
+		}
+		affected, err := stats.RowsAffected()
+		if err != nil {
+			return err
+		}
 
-				if _, err := tx.Stmt(m.parent.addUidNext).Exec(affected, destID); err != nil {
-					return err
-				}
-			}
-			if _, err := tx.Stmt(m.parent.copyMsgFlagsSeq).Exec(destID, stop-start+1, destID, srcId, stop-start+1, start-1); err != nil {
-				if strings.Contains(err.Error(), "foreign") || strings.Contains(err.Error(), "FOREIGN") {
-					return backend.ErrNoSuchMailbox
-				}
-				return err
-			}
+		if _, err := tx.Stmt(m.parent.addUidNext).Exec(affected, destID); err != nil {
+			return err
 		}
 	}
 

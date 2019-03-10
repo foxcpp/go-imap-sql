@@ -152,9 +152,26 @@ type Backend struct {
 	msgFlagsUid        *sql.Stmt
 	msgFlagsSeq        *sql.Stmt
 
+	// 'mark' column for messages is used to keep track of messages selected
+	// by sequence numbers during operations that may cause seqence numbers to
+	// change (e.g. message deletion)
+	//
+	// Consider following request: Delete messages with seqnum 1 and 3.
+	// Naive implementation will delete 1st and then 3rd messages in mailbox.
+	// However, after first operation 3rd message will become 2nd and
+	// code will end up deleting the wrong message (4th actually).
+	//
+	// Solution is to "mark" 1st and 3rd message and then delete all "marked"
+	// message.
+	//
+	// One could use \Deleted flag for this purpose, but this
+	// requires more expensive operations at SQL engine side, so 'mark' column
+	// is basically a optimization.
+
 	// For MOVE extension
-	delMsgsUid *sql.Stmt
-	delMsgsSeq *sql.Stmt
+	markUid   *sql.Stmt
+	markSeq   *sql.Stmt
+	delMarked *sql.Stmt
 
 	// For APPEND-LIMIT extension
 	setUserMsgSizeLimit *sql.Stmt
@@ -270,6 +287,7 @@ func (b *Backend) initSchema() error {
 			date BIGINT NOT NULL,
 			bodyLen INTEGER NOT NULL,
 			body BLOB NOT NULL,
+			mark INTEGER NOT NULL DEFAULT 0,
 
 			PRIMARY KEY(mboxId, msgId)
 		)`)
@@ -283,7 +301,7 @@ func (b *Backend) initSchema() error {
 			flag VARCHAR(255) NOT NULL,
 
 			FOREIGN KEY (mboxId, msgId) REFERENCES msgs(mboxId, msgId) ON DELETE CASCADE,
-			UNIQUE(mboxId, msgId, flag)
+			UNIQUE (mboxId, msgId, flag)
 		)`)
 	if err != nil {
 		return errors.Wrap(err, "create table flags")
@@ -571,10 +589,10 @@ func (b *Backend) prepareStmts() error {
 		b.copyMsgsUid, err = b.db.Prepare(`
 			INSERT INTO msgs
 			SELECT ? AS mboxId, (
-				SELECT uidnext
+				SELECT uidnext - 1
 				FROM mboxes
 				WHERE id = ?
-			) + (@rownum := @rownum + 1), date, bodyLen, body
+			) + (@rownum := @rownum + 1), date, bodyLen, body, 0 AS mark
 			FROM msgs, (SELECT @rownum := 0) counter
 			WHERE mboxId = ? AND msgId BETWEEN ? AND ?
 			ORDER BY msgId`)
@@ -582,10 +600,10 @@ func (b *Backend) prepareStmts() error {
 		b.copyMsgsUid, err = b.db.Prepare(`
 			INSERT INTO msgs
 			SELECT ? AS mboxId, (
-				SELECT uidnext
+				SELECT uidnext - 1
 				FROM mboxes
 				WHERE id = ?
-			) + row_number() OVER (ORDER BY msgId), date, bodyLen, body
+			) + row_number() OVER (ORDER BY msgId), date, bodyLen, body, 0 AS mark
 			FROM msgs
 			WHERE mboxId = ? AND msgId BETWEEN ? AND ?`)
 	}
@@ -599,7 +617,7 @@ func (b *Backend) prepareStmts() error {
 			FROM flags
 			INNER JOIN (
 				SELECT (
-					SELECT uidnext - ?
+					SELECT uidnext - 1
 					FROM mboxes
 					WHERE id = ?
 				) + (@rownum := @rownum + 1) AS new_msgId, msgId, mboxId
@@ -616,7 +634,7 @@ func (b *Backend) prepareStmts() error {
 			FROM flags
 			INNER JOIN (
 				SELECT (
-					SELECT uidnext - ?
+					SELECT uidnext - 1
 					FROM mboxes
 					WHERE id = ?
 				) + row_number() OVER (ORDER BY msgId) AS new_msgId, msgId, mboxId
@@ -633,14 +651,15 @@ func (b *Backend) prepareStmts() error {
 		b.copyMsgsSeq, err = b.db.Prepare(`
 			INSERT INTO msgs
 			SELECT ? AS mboxId, (
-				SELECT uidnext
+				SELECT uidnext - 1
 				FROM mboxes
 				WHERE id = ?
-			) + (@rownum := @rownum + 1), date, bodyLen, body
+			) + (@rownum := @rownum + 1), date, bodyLen, body, 0 AS mark
 			FROM (
 				SELECT msgId, date, bodyLen, body
 				FROM msgs
 				WHERE mboxId = ?
+				ORDER BY msgId
 				LIMIT ? OFFSET ?
 			) subset, (SELECT @rownum := 0) counter
 			ORDER BY msgId`)
@@ -648,14 +667,15 @@ func (b *Backend) prepareStmts() error {
 		b.copyMsgsSeq, err = b.db.Prepare(`
 			INSERT INTO msgs
 			SELECT ? AS mboxId, (
-				SELECT uidnext
+				SELECT uidnext - 1
 				FROM mboxes
 				WHERE id = ?
-			) + row_number() OVER (ORDER BY msgId), date, bodyLen, body
+			) + row_number() OVER (ORDER BY msgId), date, bodyLen, body, 0 AS mark
 			FROM (
 				SELECT msgId, date, bodyLen, body
 				FROM msgs
 				WHERE mboxId = ?
+				ORDER BY msgId
 				LIMIT ? OFFSET ?
 			) subset`)
 	}
@@ -669,35 +689,39 @@ func (b *Backend) prepareStmts() error {
 			FROM flags
 			INNER JOIN (
 				SELECT (
-					SELECT uidnext - ?
+					SELECT uidnext - 1
 					FROM mboxes
 					WHERE id = ?
-				) + (@rownum := @rownum + 1) AS new_msgId, msgId
+				) + (@rownum := @rownum + 1) AS new_msgId, msgId, mboxId
 				FROM (
-					SELECT msgId
+					SELECT msgId, mboxId
 					FROM msgs
 					WHERE mboxId = ?
+					ORDER BY msgId
 					LIMIT ? OFFSET ?
 				) subset, (SELECT @rownum := 0) counter
-			) map ON map.msgId = flags.msgId`)
+			) map ON map.msgId = flags.msgId
+			AND map.mboxId = flags.mboxId`)
 	} else {
 		b.copyMsgFlagsSeq, err = b.db.Prepare(`
 			INSERT INTO flags
 			SELECT ?, new_msgId AS msgId, flag
 			FROM flags
 			INNER JOIN (
-				SELECT coalesce((
-					SELECT uidnext - ?
+				SELECT (
+					SELECT uidnext - 1
 					FROM mboxes
 					WHERE id = ?
-				), 0) + row_number() OVER (ORDER BY msgId) AS new_msgId, msgId
+				) + row_number() OVER (ORDER BY msgId) AS new_msgId, msgId, mboxId
 				FROM (
-					SELECT msgId
+					SELECT msgId, mboxId
 					FROM msgs
 					WHERE mboxId = ?
+					ORDER BY msgId
 					LIMIT ? OFFSET ?
 				) subset
-			) map ON map.msgId = flags.msgId`)
+			) map ON map.msgId = flags.msgId
+			AND map.mboxId = flags.mboxId`)
 	}
 	if err != nil {
 		return errors.Wrap(err, "copyMsgFlagsSeq prep")
@@ -715,7 +739,8 @@ func (b *Backend) prepareStmts() error {
 			LEFT JOIN flags
 			ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId AND msgs.mboxId = flags.mboxId
 			WHERE msgs.mboxId = ? AND msgs.msgId BETWEEN ? AND ?
-			GROUP BY msgs.mboxId, msgs.msgId, seqnum`)
+			GROUP BY msgs.mboxId, msgs.msgId, seqnum
+			ORDER BY msgs.msgId`)
 	} else {
 		b.getMsgsNoBodyUid, err = b.db.Prepare(`
 			SELECT seqnum, msgs.msgId, date, bodyLen, NULL, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
@@ -729,7 +754,8 @@ func (b *Backend) prepareStmts() error {
 			LEFT JOIN flags
 			ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId AND msgs.mboxId = flags.mboxId
 			WHERE msgs.mboxId = ? AND msgs.msgId BETWEEN ? AND ?
-			GROUP BY msgs.mboxId, msgs.msgId, seqnum`)
+			GROUP BY msgs.mboxId, msgs.msgId, seqnum
+			ORDER BY msgs.msgId`)
 	}
 	if err != nil {
 		return errors.Wrap(err, "getMsgsNoBodyUid prep")
@@ -747,7 +773,8 @@ func (b *Backend) prepareStmts() error {
 			LEFT JOIN flags
 			ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId AND msgs.mboxId = flags.mboxId
 			WHERE msgs.mboxId = ? AND msgs.msgId BETWEEN ? AND ?
-			GROUP BY seqnum, msgs.mboxId, msgs.msgId`)
+			GROUP BY seqnum, msgs.mboxId, msgs.msgId
+			ORDER BY msgs.msgId`)
 	} else {
 		b.getMsgsBodyUid, err = b.db.Prepare(`
 			SELECT seqnum, msgs.msgId, date, bodyLen, body, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
@@ -761,7 +788,8 @@ func (b *Backend) prepareStmts() error {
 			LEFT JOIN flags
 			ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId AND msgs.mboxId = flags.mboxId
 			WHERE msgs.mboxId = ? AND msgs.msgId BETWEEN ? AND ?
-			GROUP BY seqnum, msgs.mboxId, msgs.msgId`)
+			GROUP BY seqnum, msgs.mboxId, msgs.msgId
+			ORDER BY msgs.msgId`)
 	}
 	if err != nil {
 		return errors.Wrap(err, "getMsgsBodyUid prep")
@@ -774,12 +802,14 @@ func (b *Backend) prepareStmts() error {
 				SELECT (@rownum := @rownum + 1) AS seqnum, msgId, mboxId
 				FROM msgs, (SELECT @rownum := 0) counter
 				WHERE mboxId = ?
+				ORDER BY msgId
 			) map
 			ON map.msgId = msgs.msgId
 			LEFT JOIN flags
 			ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId AND msgs.mboxId = flags.mboxId
 			WHERE msgs.mboxId = ? AND seqnum BETWEEN ? AND ?
-			GROUP BY seqnum, msgs.mboxId, msgs.msgId`)
+			GROUP BY seqnum, msgs.mboxId, msgs.msgId
+			ORDER BY msgs.msgId`)
 	} else {
 		b.getMsgsNoBodySeq, err = b.db.Prepare(`
 			SELECT seqnum, msgs.msgId, date, bodyLen, NULL, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
@@ -793,7 +823,8 @@ func (b *Backend) prepareStmts() error {
 			LEFT JOIN flags
 			ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId AND msgs.mboxId = flags.mboxId
 			WHERE msgs.mboxId = ? AND seqnum BETWEEN ? AND ?
-			GROUP BY seqnum, msgs.mboxId, msgs.msgId`)
+			GROUP BY seqnum, msgs.mboxId, msgs.msgId
+			ORDER BY msgs.msgId`)
 	}
 	if err != nil {
 		return errors.Wrap(err, "getMsgsNoBodySeq prep")
@@ -806,12 +837,14 @@ func (b *Backend) prepareStmts() error {
 				SELECT (@rownum := @rownum + 1) AS seqnum, msgId, mboxId
 				FROM msgs, (SELECT @rownum := 0) counter
 				WHERE mboxId = ?
+				ORDER BY msgId
 			) map
 			ON map.msgId = msgs.msgId
 			LEFT JOIN flags
 			ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId
 			WHERE msgs.mboxId = ? AND seqnum BETWEEN ? AND ? AND msgs.mboxId = map.mboxId
-			GROUP BY seqnum, msgs.mboxId, msgs.msgId`)
+			GROUP BY seqnum, msgs.mboxId, msgs.msgId
+			ORDER BY msgs.msgId`)
 	} else {
 		b.getMsgsBodySeq, err = b.db.Prepare(`
 			SELECT seqnum, msgs.msgId, date, bodyLen, body, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
@@ -825,7 +858,8 @@ func (b *Backend) prepareStmts() error {
 			LEFT JOIN flags
 			ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId
 			WHERE msgs.mboxId = ? AND seqnum BETWEEN ? AND ? AND msgs.mboxId = map.mboxId
-			GROUP BY seqnum, msgs.mboxId, msgs.msgId`)
+			GROUP BY seqnum, msgs.mboxId, msgs.msgId
+			ORDER BY msgs.msgId`)
 	}
 	if err != nil {
 		return errors.Wrap(err, "getMsgsBodySeq prep")
@@ -867,15 +901,18 @@ func (b *Backend) prepareStmts() error {
 	if err != nil {
 		return errors.Wrap(err, "massClearFlagsSeq prep")
 	}
-	b.delMsgsUid, err = b.db.Prepare(`
-		DELETE FROM msgs
-		WHERE mboxId = ? ANd msgId BETWEEN ? AND ?`)
+	b.markUid, err = b.db.Prepare(`
+		UPDATE msgs
+		SET mark = 1
+		WHERE mboxId = ?
+		AND msgId BETWEEN ? AND ?`)
 	if err != nil {
 		return errors.Wrap(err, "delMsgsUid prep")
 	}
 	if b.db.mysql57 {
-		b.delMsgsSeq, err = b.db.Prepare(`
-			DELETE FROM msgs
+		b.markSeq, err = b.db.Prepare(`
+			UPDATE msgs
+			SET mark = 1
 			WHERE mboxId = ?
 			AND msgId IN (
 				SELECT msgId
@@ -887,8 +924,9 @@ func (b *Backend) prepareStmts() error {
 				WHERE seqnum BETWEEN ? AND ?
 			)`)
 	} else {
-		b.delMsgsSeq, err = b.db.Prepare(`
-			DELETE FROM msgs
+		b.markSeq, err = b.db.Prepare(`
+			UPDATE msgs
+			SET mark = 1
 			WHERE mboxId = ?
 			AND msgId IN (
 				SELECT msgId
@@ -902,6 +940,12 @@ func (b *Backend) prepareStmts() error {
 	}
 	if err != nil {
 		return errors.Wrap(err, "delMsgsSeq prep")
+	}
+	b.delMarked, err = b.db.Prepare(`
+		DELETE FROM msgs
+		WHERE mark = 1`)
+	if err != nil {
+		return errors.Wrap(err, "delMarked prep")
 	}
 
 	b.setUserMsgSizeLimit, err = b.db.Prepare(`

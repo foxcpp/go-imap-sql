@@ -135,11 +135,7 @@ func (m *Mailbox) UidNext(tx *sql.Tx) (uint32, error) {
 	}
 	res := sql.NullInt64{}
 	if err := row.Scan(&res); err != nil {
-		if err == sql.ErrNoRows {
-			return 1, nil
-		} else {
-			return 999, errors.Wrapf(err, "Status %s", m.name)
-		}
+		return 0, err
 	}
 	if res.Valid {
 		return uint32(res.Int64), nil
@@ -707,31 +703,6 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 	return nil
 }
 
-func (m *Mailbox) affectedSeqnums(tx *sql.Tx, uid bool, seq imap.Seq) ([]uint32, error) {
-	var res []uint32
-	var rows *sql.Rows
-	var err error
-	start, stop := sqlRange(seq)
-	if uid {
-		rows, err = tx.Stmt(m.parent.affectedSeqnumsUid).Query(m.id, start, stop)
-	} else {
-		rows, err = tx.Stmt(m.parent.affectedSeqnumsSeq).Query(m.id, start, stop)
-	}
-	if err != nil {
-		return res, err
-	}
-
-	for rows.Next() {
-		value := uint32(0)
-		if err := rows.Scan(&value); err != nil {
-			return res, err
-		}
-
-		res = append(res, value)
-	}
-	return res, rows.Err()
-}
-
 func (m *Mailbox) valuesSubquery(rows []string) string {
 	count := len(rows)
 	sqlList := ""
@@ -844,29 +815,17 @@ func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest s
 		if uid {
 			stats, err = tx.Stmt(m.parent.copyMsgsUid).Exec(destID, destID, srcId, start, stop)
 			if err != nil {
-				if strings.Contains(err.Error(), "foreign") {
-					return backend.ErrNoSuchMailbox
-				}
 				return err
 			}
 			if _, err := tx.Stmt(m.parent.copyMsgFlagsUid).Exec(destID, destID, srcId, start, stop); err != nil {
-				if strings.Contains(err.Error(), "foreign") || strings.Contains(err.Error(), "FOREIGN") {
-					return backend.ErrNoSuchMailbox
-				}
 				return err
 			}
 		} else {
 			stats, err = tx.Stmt(m.parent.copyMsgsSeq).Exec(destID, destID, srcId, stop-start+1, start-1)
 			if err != nil {
-				if strings.Contains(err.Error(), "foreign") || strings.Contains(err.Error(), "FOREIGN") {
-					return backend.ErrNoSuchMailbox
-				}
 				return err
 			}
 			if _, err := tx.Stmt(m.parent.copyMsgFlagsSeq).Exec(destID, destID, srcId, stop-start+1, start-1); err != nil {
-				if strings.Contains(err.Error(), "foreign") || strings.Contains(err.Error(), "FOREIGN") {
-					return backend.ErrNoSuchMailbox
-				}
 				return err
 			}
 		}

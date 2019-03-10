@@ -134,8 +134,6 @@ type Backend struct {
 	recentCount        *sql.Stmt
 	firstUnseenSeqNum  *sql.Stmt
 	deletedSeqnums     *sql.Stmt
-	affectedSeqnumsUid *sql.Stmt
-	affectedSeqnumsSeq *sql.Stmt
 	expungeMbox        *sql.Stmt
 	mboxId             *sql.Stmt
 	addMsg             *sql.Stmt
@@ -151,6 +149,8 @@ type Backend struct {
 	massClearFlagsSeq  *sql.Stmt
 	msgFlagsUid        *sql.Stmt
 	msgFlagsSeq        *sql.Stmt
+
+	addRecentToLast *sql.Stmt
 
 	// 'mark' column for messages is used to keep track of messages selected
 	// by sequence numbers during operations that may cause seqence numbers to
@@ -512,54 +512,6 @@ func (b *Backend) prepareStmts() error {
 	}
 	if err != nil {
 		return errors.Wrap(err, "deletedSeqnums prep")
-	}
-	if b.db.mysql57 {
-		b.affectedSeqnumsUid, err = b.db.Prepare(`
-			SELECT seqnum
-			FROM (
-				SELECT (@rownum := @rownum + 1) AS seqnum, msgId
-				FROM msgs, (SELECT @rownum := 0) counter
-				WHERE mboxId = ?
-			) seqnums
-			WHERE msgId BETWEEN ? AND ?
-			ORDER BY seqnum DESC`)
-	} else {
-		b.affectedSeqnumsUid, err = b.db.Prepare(`
-			SELECT seqnum
-			FROM (
-				SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId
-				FROM msgs
-				WHERE mboxId = ?
-			) seqnums
-			WHERE msgId BETWEEN ? AND ?
-			ORDER BY seqnum DESC`)
-	}
-	if err != nil {
-		return errors.Wrap(err, "affectedSeqnumsUid prep")
-	}
-	if b.db.mysql57 {
-		b.affectedSeqnumsSeq, err = b.db.Prepare(`
-			SELECT seqnum
-			FROM (
-				SELECT (@rownum := @rownum + 1) AS seqnum
-				FROM msgs, (SELECT @rownum := 0) counter
-				WHERE mboxId = ?
-			) seqnums
-			WHERE seqnum BETWEEN ? AND ?
-			ORDER BY seqnum DESC`)
-	} else {
-		b.affectedSeqnumsSeq, err = b.db.Prepare(`
-			SELECT seqnum
-			FROM (
-				SELECT row_number() OVER (ORDER BY msgId) AS seqnum
-				FROM msgs
-				WHERE mboxId = ?
-			) seqnums
-			WHERE seqnum BETWEEN ? AND ?
-			ORDER BY seqnum DESC`)
-	}
-	if err != nil {
-		return errors.Wrap(err, "affectedSeqnumsSeq prep")
 	}
 	b.expungeMbox, err = b.db.Prepare(`
 		DELETE FROM msgs

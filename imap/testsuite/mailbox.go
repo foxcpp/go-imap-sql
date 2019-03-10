@@ -822,6 +822,28 @@ func Mailbox_CopyMessages(t *testing.T, newBack NewBackFunc, closeBack CloseBack
 	for _, case_ := range cases {
 		testCopy(case_.uid, case_.seqset, case_.expectedRes)
 	}
+
+	t.Run("Recent flag", func(t *testing.T) {
+		srcMbox, tgtMbox := getMbox(t, u), getMbox(t, u)
+		createMsgs(t, srcMbox, 1)
+
+		seq, err := imap.ParseSeqSet("1")
+		if err != nil {
+			panic(err)
+		}
+
+		assert.NilError(t, srcMbox.UpdateMessagesFlags(false, seq, imap.SetFlags, []string{"$Test1"}))
+		assert.NilError(t, srcMbox.CopyMessages(false, seq, tgtMbox.Name()))
+
+		ch := make(chan *imap.Message, 10)
+		err = tgtMbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags}, ch)
+		assert.NilError(t, err)
+		assert.Assert(t, is.Len(ch, 1), "Wrong amount of messages copied")
+
+		msg := <-ch
+		sort.Strings(msg.Flags)
+		assert.Check(t, is.DeepEqual(msg.Flags, []string{"$Test1", imap.RecentFlag}), "Recent flag is not set on copied messages")
+	})
 }
 
 func Mailbox_MoveMessages(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
@@ -927,6 +949,30 @@ func Mailbox_MoveMessages(t *testing.T, newBack NewBackFunc, closeBack CloseBack
 	for _, case_ := range cases {
 		testMove(case_.uid, case_.seqset, case_.expectedSrcRes, case_.expectedTgtRes)
 	}
+
+	t.Run("Recent flag", func(t *testing.T) {
+		srcMbox, tgtMbox := getMbox(t, u), getMbox(t, u)
+		createMsgs(t, srcMbox, 1)
+
+		moveMbox := srcMbox.(move.Mailbox)
+
+		seq, err := imap.ParseSeqSet("1")
+		if err != nil {
+			panic(err)
+		}
+
+		assert.NilError(t, srcMbox.UpdateMessagesFlags(false, seq, imap.SetFlags, []string{"$Test1"}))
+		assert.NilError(t, moveMbox.MoveMessages(false, seq, tgtMbox.Name()))
+
+		ch := make(chan *imap.Message, 10)
+		err = tgtMbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags}, ch)
+		assert.NilError(t, err)
+		assert.Assert(t, is.Len(ch, 1), "Wrong amount of messages copied")
+
+		msg := <-ch
+		sort.Strings(msg.Flags)
+		assert.Check(t, is.DeepEqual(msg.Flags, []string{"$Test1", imap.RecentFlag}), "Recent flag is not set on moved messages")
+	})
 }
 
 func Mailbox_MonotonicUid(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {

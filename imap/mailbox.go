@@ -834,6 +834,10 @@ func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest s
 			return err
 		}
 
+		if _, err := tx.Stmt(m.parent.addRecentToLast).Exec(destID, destID, affected); err != nil {
+			return err
+		}
+
 		if _, err := tx.Stmt(m.parent.addUidNext).Exec(affected, destID); err != nil {
 			return err
 		}

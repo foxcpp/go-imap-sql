@@ -79,6 +79,10 @@ func (d db) rewriteSQL(req string) (res string) {
 		if strings.HasPrefix(res, "CREATE TABLE") {
 			res = strings.Replace(res, "BIGSERIAL", "INTEGER", -1)
 		}
+		if strings.HasSuffix(res, "ON CONFLICT DO NOTHING") && strings.HasPrefix(res, "INSERT") {
+			res = strings.Replace(res, "ON CONFLICT DO NOTHING", "", -1)
+			res = strings.Replace(res, "INSERT", "INSERT OR IGNORE", 1)
+		}
 	}
 	return
 }
@@ -853,6 +857,17 @@ func (b *Backend) prepareStmts() error {
 	if err != nil {
 		return errors.Wrap(err, "massClearFlagsSeq prep")
 	}
+
+	b.addRecentToLast, err = b.db.Prepare(`
+		INSERT INTO flags
+		SELECT ? AS mboxId, msgId, '\Recent'
+		FROM (SELECT msgId FROM msgs WHERE mboxId = ? ORDER BY msgId DESC LIMIT ?) targets
+		ON CONFLICT DO NOTHING
+		`)
+	if err != nil {
+		return errors.Wrap(err, "addRecenttoLast prep")
+	}
+
 	b.markUid, err = b.db.Prepare(`
 		UPDATE msgs
 		SET mark = 1

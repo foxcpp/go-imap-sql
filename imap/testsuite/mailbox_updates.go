@@ -1,6 +1,10 @@
 package testsuite
 
 import (
+	"fmt"
+	"math/rand"
+	"os"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -107,44 +111,59 @@ func Mailbox_MessageUpdate(t *testing.T, newBack NewBackFunc, closeBack CloseBac
 	defer assert.NilError(t, u.Logout())
 
 	testFlagsUpdate := func(
-		t *testing.T, seqset string, expectedUpdates int,
+		seqset string, expectedUpdates int,
 		initialFlags map[uint32][]string, op imap.FlagsOp,
 		opArg []string, expectedNewFlags map[uint32][]string) {
 
-		mbox := getMbox(t, u)
+		t.Run(fmt.Sprintf("seqset=%v op=%v opArg=%v", seqset, op, opArg), func(t *testing.T) {
+			mbox := getMbox(t, u)
 
-		for i := 1; i <= len(initialFlags); i++ {
-			assert.NilError(t, mbox.CreateMessage(initialFlags[uint32(i)], time.Now(), strings.NewReader(testMsg)))
-			consumeUpdates(t, upds, 1)
+			for i := 1; i <= len(initialFlags); i++ {
+				assert.NilError(t, mbox.CreateMessage(initialFlags[uint32(i)], time.Now(), strings.NewReader(testMsg)))
+				consumeUpdates(t, upds, 1)
 
-			seq := imap.SeqSet{}
-			seq.AddNum(uint32(i))
-			assert.NilError(t, mbox.UpdateMessagesFlags(false, &seq, imap.RemoveFlags, []string{imap.RecentFlag}))
-			consumeUpdates(t, upds, 1)
-		}
-
-		seq, _ := imap.ParseSeqSet(seqset)
-		assert.NilError(t, mbox.UpdateMessagesFlags(false, seq, op, opArg))
-
-		for i := 0; i < expectedUpdates; i++ {
-			upd := readUpdate(t, upds)
-			switch upd := upd.(type) {
-			case *backend.MessageUpdate:
-				flags, ok := expectedNewFlags[upd.SeqNum]
-				if !ok {
-					t.Error("Unexpected update for SeqNum =", upd.SeqNum)
-				}
-
-				assert.Check(t, is.DeepEqual(flags, upd.Flags), "Flags mismatch")
-			default:
-				t.Errorf("Non-message update sent by backend: %#v\n", upd)
+				seq := imap.SeqSet{}
+				seq.AddNum(uint32(i))
+				assert.NilError(t, mbox.UpdateMessagesFlags(false, &seq, imap.RemoveFlags, []string{imap.RecentFlag}))
+				consumeUpdates(t, upds, 1)
 			}
-		}
+
+			seq, _ := imap.ParseSeqSet(seqset)
+			assert.NilError(t, mbox.UpdateMessagesFlags(false, seq, op, opArg))
+
+			for i := 0; i < expectedUpdates; i++ {
+				upd := readUpdate(t, upds)
+				switch upd := upd.(type) {
+				case *backend.MessageUpdate:
+					flags, ok := expectedNewFlags[upd.SeqNum]
+					if !ok {
+						t.Error("Unexpected update for SeqNum =", upd.SeqNum)
+					}
+
+					sort.Strings(flags)
+					sort.Strings(upd.Flags)
+
+					if !assert.Check(t, is.DeepEqual(flags, upd.Flags), "Flags mismatch on message %d", upd.SeqNum) {
+						t.Log("upd.Flags:", upd.Flags)
+						t.Log("Reference flag set:", flags)
+					}
+				default:
+					t.Errorf("Non-message update sent by backend: %#v\n", upd)
+				}
+			}
+		})
 	}
 
-	t.Run("Set 1,3,5", func(t *testing.T) {
-		testFlagsUpdate(
-			t, "1,3,5", 3, map[uint32][]string{
+	cases := []struct {
+		seqset           string
+		expectedUpdates  int
+		initialFlags     map[uint32][]string
+		op               imap.FlagsOp
+		opArg            []string
+		expectedNewFlags map[uint32][]string
+	}{
+		{
+			"1,3,5", 3, map[uint32][]string{
 				1: []string{"t1-1", "t1-2"},
 				2: []string{"t2-3", "t2-4"},
 				3: []string{"t3-5", "t3-6"},
@@ -157,11 +176,9 @@ func Mailbox_MessageUpdate(t *testing.T, newBack NewBackFunc, closeBack CloseBac
 				3: []string{"t0-1", "t0-2"},
 				5: []string{"t0-1", "t0-2"},
 			},
-		)
-	})
-	t.Run("Add 1,3,5", func(t *testing.T) {
-		testFlagsUpdate(
-			t, "1,3,5", 3, map[uint32][]string{
+		},
+		{
+			"1,3,5", 3, map[uint32][]string{
 				1: []string{"t1-1", "t1-2"},
 				2: []string{"t2-3", "t2-4"},
 				3: []string{"t3-5", "t3-6"},
@@ -174,11 +191,9 @@ func Mailbox_MessageUpdate(t *testing.T, newBack NewBackFunc, closeBack CloseBac
 				3: []string{"t0-1", "t0-2", "t3-5", "t3-6"},
 				5: []string{"t0-1", "t0-2", "t5-10", "t5-9"},
 			},
-		)
-	})
-	t.Run("Remove 2,3,5", func(t *testing.T) {
-		testFlagsUpdate(
-			t, "2,3,5", 3, map[uint32][]string{
+		},
+		{
+			"2,3,5", 3, map[uint32][]string{
 				1: []string{"t1-1", "t1-2"},
 				2: []string{"t0-0", "t2-4"},
 				3: []string{"t3-5", "t0-0"},
@@ -191,8 +206,18 @@ func Mailbox_MessageUpdate(t *testing.T, newBack NewBackFunc, closeBack CloseBac
 				3: []string{"t3-5"},
 				5: []string{"t5-10"},
 			},
-		)
-	})
+		},
+	}
+
+	if os.Getenv("SHUFFLE_CASES") == "1" {
+		rand.Shuffle(len(cases), func(i, j int) {
+			cases[i], cases[j] = cases[j], cases[i]
+		})
+	}
+
+	for _, case_ := range cases {
+		testFlagsUpdate(case_.seqset, case_.expectedUpdates, case_.initialFlags, case_.op, case_.opArg, case_.expectedNewFlags)
+	}
 }
 
 func readUpdate(t *testing.T, upds <-chan backend.Update) backend.Update {
@@ -221,33 +246,44 @@ func Mailbox_ExpungeUpdate(t *testing.T, newBack NewBackFunc, closeBack CloseBac
 	u := getUser(t, b)
 	defer assert.NilError(t, u.Logout())
 
-	testSlots := func(t *testing.T, msgsCount int, seqset string, matchedMsgs int, expectedSlots []uint32) {
-		mbox := getMbox(t, u)
-		createMsgs(t, mbox, msgsCount)
-		consumeUpdates(t, upds, msgsCount)
-		msgs := makeMsgSlots(msgsCount)
+	testSlots := func(msgsCount int, seqset string, matchedMsgs int, expectedSlots []uint32) {
+		t.Run(seqset, func(t *testing.T) {
+			mbox := getMbox(t, u)
+			createMsgs(t, mbox, msgsCount)
+			consumeUpdates(t, upds, msgsCount)
+			msgs := makeMsgSlots(msgsCount)
 
-		seq, _ := imap.ParseSeqSet(seqset)
-		assert.NilError(t, mbox.UpdateMessagesFlags(false, seq, imap.AddFlags, []string{imap.DeletedFlag}))
-		consumeUpdates(t, upds, matchedMsgs)
+			seq, _ := imap.ParseSeqSet(seqset)
+			assert.NilError(t, mbox.UpdateMessagesFlags(false, seq, imap.AddFlags, []string{imap.DeletedFlag}))
+			consumeUpdates(t, upds, matchedMsgs)
 
-		assert.NilError(t, mbox.Expunge())
-		checkExpungeEvents(t, upds, &msgs, uint32(msgsCount-matchedMsgs))
+			assert.NilError(t, mbox.Expunge())
+			checkExpungeEvents(t, upds, &msgs, uint32(msgsCount-matchedMsgs))
 
-		assert.DeepEqual(t, msgs, expectedSlots)
+			assert.DeepEqual(t, msgs, expectedSlots)
+		})
 	}
 
-	t.Run("Delete *", func(t *testing.T) {
-		testSlots(t, 5, "*", 5, []uint32{})
-	})
+	cases := []struct {
+		msgsCount     int
+		seqset        string
+		matchedMsgs   int
+		expectedSlots []uint32
+	}{
+		{5, "*", 5, []uint32{}},
+		{5, "1", 1, []uint32{2, 3, 4, 5}},
+		{5, "2,1,5", 3, []uint32{3, 4}},
+	}
 
-	t.Run("Delete 1,", func(t *testing.T) {
-		testSlots(t, 5, "1", 1, []uint32{2, 3, 4, 5})
-	})
+	if os.Getenv("SHUFFLE_CASES") == "1" {
+		rand.Shuffle(len(cases), func(i, j int) {
+			cases[i], cases[j] = cases[j], cases[i]
+		})
+	}
 
-	t.Run("Delete 2,1,5,", func(t *testing.T) {
-		testSlots(t, 5, "2,1,5", 3, []uint32{3, 4})
-	})
+	for _, case_ := range cases {
+		testSlots(case_.msgsCount, case_.seqset, case_.matchedMsgs, case_.expectedSlots)
+	}
 
 	// Make sure backend returns seqnums, not UIDs.
 	t.Run("Not UIDs", func(t *testing.T) {

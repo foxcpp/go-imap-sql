@@ -2,6 +2,9 @@ package testsuite
 
 import (
 	"fmt"
+	"math/rand"
+	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -50,8 +53,8 @@ func createMsgs(t *testing.T, mbox backend.Mailbox, count int) {
 	for i := 0; i < count; i++ {
 		assert.NilError(t, mbox.CreateMessage(
 			[]string{
-				"$Test" + strconv.Itoa(1+2*i),
-				"$Test" + strconv.Itoa(2+2*i),
+				"$Test" + strconv.Itoa(i+1) + "-1",
+				"$Test" + strconv.Itoa(i+1) + "-2",
 			},
 			baseDate.Add(time.Duration((i+1)*24)*time.Hour),
 			strings.NewReader(testMailString),
@@ -68,8 +71,8 @@ func createMsgsUids(t *testing.T, mbox backend.Mailbox, count int) (res []uint32
 
 		assert.NilError(t, mbox.CreateMessage(
 			[]string{
-				"$Test" + strconv.Itoa(1+2*i),
-				"$Test" + strconv.Itoa(2+2*i),
+				"$Test" + strconv.Itoa(i+1) + "-1",
+				"$Test" + strconv.Itoa(i+1) + "-2",
 			},
 			baseDate.Add(time.Duration((i+1)*24)*time.Hour),
 			strings.NewReader(testMailString),
@@ -88,12 +91,17 @@ func isNthMsg(msg *imap.Message, indx int, args ...cmp.Option) is.Comparison {
 }
 
 func isNthMsgFlags(msg *imap.Message, indx int, args ...cmp.Option) is.Comparison {
-	indx = indx - 1
-
+	sort.Strings(msg.Flags)
 	flags := []string{
-		"$Test" + strconv.Itoa(1+2*indx),
-		"$Test" + strconv.Itoa(2+2*indx),
+		"$Test" + strconv.Itoa(indx) + "-1",
+		"$Test" + strconv.Itoa(indx) + "-2",
 		imap.RecentFlag,
 	}
 	return is.DeepEqual(msg.Flags, []string{flags[0], flags[1], imap.RecentFlag})
+}
+
+func init() {
+	if os.Getenv("SHUFFLE_CASES") == "1" {
+		rand.Seed(time.Now().Unix())
+	}
 }

@@ -1,7 +1,12 @@
 package testsuite
 
 import (
+	"fmt"
 	"io/ioutil"
+	"math/rand"
+	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -218,6 +223,8 @@ func Mailbox_CreateMessage(t *testing.T, newBack NewBackFunc, closeBack CloseBac
 	assert.NilError(t, err)
 	msg := <-ch
 
+	sort.Strings(msg.Flags)
+
 	assert.Assert(t, msg.InternalDate.Truncate(time.Second).Equal(date.Truncate(time.Second)), "InternalDate is not same")
 	assert.DeepEqual(t, msg.Flags, []string{"$Test1", "$Test2", imap.RecentFlag})
 	assert.Equal(t, uint32(len(testMsg)), msg.Size, "RFC822 size mismatch")
@@ -235,373 +242,490 @@ func Mailbox_ListMessages(t *testing.T, newBack NewBackFunc, closeBack CloseBack
 	defer assert.NilError(t, u.Logout())
 	mbox := getMbox(t, u)
 
-	date := time.Now().Truncate(time.Second)
-	body := `To: test@test
-From: test <test@test>
-Subject: test
-Date: Tue, 8 May 2018 20:48:21 +0000
-Content-Type: text/plain; charset=utf-8
-Content-Transfer-Encoding: 7bit
-Cc: foo <foo@foo>, bar <bar@bar>
-X-CustomHeader: foo
+	createMsgs(t, mbox, 3)
 
-Test! Test! Test! Test!
-`
+	testMsgs := func(uid bool, seqset string, expectedIndxes []int) {
+		namePrefix := "Seq "
+		if uid {
+			namePrefix = "Uid "
+		}
 
-	err := mbox.CreateMessage([]string{"$Test1", "$Test2"}, date, strings.NewReader(body))
-	assert.NilError(t, err)
+		t.Run(namePrefix+seqset, func(t *testing.T) {
+			seq, _ := imap.ParseSeqSet(seqset)
 
-	err = mbox.CreateMessage([]string{"$Test3", "$Test4"}, date, strings.NewReader(body))
-	assert.NilError(t, err)
+			ch := make(chan *imap.Message, 10)
+			assert.NilError(t, mbox.ListMessages(uid, seq, []imap.FetchItem{imap.FetchInternalDate, imap.FetchFlags}, ch))
+			assert.Assert(t, is.Len(ch, len(expectedIndxes)), "Wrong number of messages returned")
 
-	err = mbox.CreateMessage([]string{}, date, strings.NewReader(body))
-	assert.NilError(t, err)
-
-	firstUid, secondUid, thirdUid := uint32(0), uint32(0), uint32(0)
-
-	if !t.Run("Seq1:3", func(t *testing.T) {
-		seq, _ := imap.ParseSeqSet("1:3")
-		ch := make(chan *imap.Message, 10)
-		assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchInternalDate, imap.FetchUid}, ch))
-		assert.Assert(t, is.Len(ch, 3), "Wrong number of messages returned")
-		msg := <-ch
-		assert.DeepEqual(t, msg.Flags, []string{"$Test1", "$Test2", imap.RecentFlag})
-		assert.Equal(t, msg.SeqNum, uint32(1))
-		assert.Equal(t, msg.InternalDate, date)
-		firstUid = msg.Uid
-		msg = <-ch
-		assert.DeepEqual(t, msg.Flags, []string{"$Test3", "$Test4", imap.RecentFlag})
-		assert.Equal(t, msg.SeqNum, uint32(2))
-		assert.Equal(t, msg.InternalDate, date)
-		secondUid = msg.Uid
-		msg = <-ch
-		assert.DeepEqual(t, msg.Flags, []string{imap.RecentFlag})
-		assert.Equal(t, msg.SeqNum, uint32(3))
-		assert.Equal(t, msg.InternalDate, date)
-		thirdUid = msg.Uid
-	}) {
-		t.FailNow()
+			for i := 1; i <= len(expectedIndxes); i++ {
+				msg, ok := <-ch
+				assert.Check(t, ok, "Unexpected channel close")
+				assert.Check(t, is.Equal(msg.SeqNum, uint32(expectedIndxes[i-1])), "SeqNum mismatch")
+				assert.Check(t, isNthMsg(msg, expectedIndxes[i-1]), "Wrong message")
+				assert.Check(t, isNthMsgFlags(msg, expectedIndxes[i-1]), "Wrong message flags")
+			}
+		})
 	}
 
-	// Invalid seqnums should be ignored.
-	t.Run("Seq1:5 (4,5 invalid)", func(t *testing.T) {
-		seq, _ := imap.ParseSeqSet("1:5")
-		ch := make(chan *imap.Message, 10)
-		assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch))
-		assert.Assert(t, is.Len(ch, 3), "Wrong number of messages returned")
-		msg := <-ch
-		assert.DeepEqual(t, msg.Flags, []string{"$Test1", "$Test2", imap.RecentFlag})
-		assert.Equal(t, msg.SeqNum, uint32(1))
-		assert.Equal(t, msg.Uid, firstUid)
-		msg = <-ch
-		assert.DeepEqual(t, msg.Flags, []string{"$Test3", "$Test4", imap.RecentFlag})
-		assert.Equal(t, msg.SeqNum, uint32(2))
-		assert.Equal(t, msg.Uid, secondUid)
-		msg = <-ch
-		assert.DeepEqual(t, msg.Flags, []string{imap.RecentFlag})
-		assert.Equal(t, msg.SeqNum, uint32(3))
-		assert.Equal(t, msg.Uid, thirdUid)
-	})
+	cases := []struct {
+		uid         bool
+		seqset      string
+		expectedIds []int
+	}{
+		{false, "1:5", []int{1, 2, 3}},
+		{false, "1:*", []int{1, 2, 3}},
+		{false, "*", []int{1, 2, 3}},
+		{false, "1", []int{1}},
+		{false, "2", []int{2}},
+		{false, "3", []int{3}},
+		{false, "1,3", []int{1, 3}},
+		{false, "45:30", []int{}},
+		{true, "1:3", []int{1, 2, 3}},
+		{true, "1:5", []int{1, 2, 3}},
+		{true, "1:*", []int{1, 2, 3}},
+		{true, "*", []int{1, 2, 3}},
+		{true, "1", []int{1}},
+		{true, "2", []int{2}},
+		{true, "3", []int{3}},
+		{true, "1,3", []int{1, 3}},
+		{true, "45:30", []int{}},
+	}
 
-	// Return all messages.
-	t.Run("Seq1:*", func(t *testing.T) {
-		seq, _ := imap.ParseSeqSet("1:*")
-		ch := make(chan *imap.Message, 10)
-		assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch))
-		assert.Assert(t, is.Len(ch, 3), "Wrong number of messages returned")
-		msg := <-ch
-		assert.DeepEqual(t, msg.Flags, []string{"$Test1", "$Test2", imap.RecentFlag})
-		assert.Equal(t, msg.SeqNum, uint32(1))
-		assert.Equal(t, msg.Uid, firstUid)
-		msg = <-ch
-		assert.DeepEqual(t, msg.Flags, []string{"$Test3", "$Test4", imap.RecentFlag})
-		assert.Equal(t, msg.SeqNum, uint32(2))
-		assert.Equal(t, msg.Uid, secondUid)
-		msg = <-ch
-		assert.DeepEqual(t, msg.Flags, []string{imap.RecentFlag})
-		assert.Equal(t, msg.SeqNum, uint32(3))
-		assert.Equal(t, msg.Uid, thirdUid)
-	})
+	if os.Getenv("SHUFFLE_CASES") == "1" {
+		rand.Shuffle(len(cases), func(i, j int) {
+			cases[i], cases[j] = cases[j], cases[i]
+		})
+	}
 
-	// Return only one message.
-	t.Run("Seq1", func(t *testing.T) {
-		seq, _ := imap.ParseSeqSet("1")
-		ch := make(chan *imap.Message, 10)
-		assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch))
-		assert.Assert(t, is.Len(ch, 1), "Wrong number of messages returned")
-		msg := <-ch
-		assert.DeepEqual(t, msg.Flags, []string{"$Test1", "$Test2", imap.RecentFlag})
-		assert.Equal(t, msg.SeqNum, uint32(1))
-		assert.Equal(t, msg.Uid, firstUid)
-	})
-
-	t.Run("Seq25:30 (fully invalid)", func(t *testing.T) {
-		seq, _ := imap.ParseSeqSet("25:30")
-		ch := make(chan *imap.Message, 10)
-		assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch))
-		assert.Assert(t, is.Len(ch, 0), "Wrong number of messages returned")
-	})
-
-	// Return all messages.
-	t.Run("Uid1:*", func(t *testing.T) {
-		seq, _ := imap.ParseSeqSet("1:*")
-		ch := make(chan *imap.Message, 10)
-		assert.NilError(t, mbox.ListMessages(true, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch))
-		assert.Assert(t, is.Len(ch, 3), "Wrong number of messages returned")
-		msg := <-ch
-		assert.DeepEqual(t, msg.Flags, []string{"$Test1", "$Test2", imap.RecentFlag})
-		assert.Equal(t, msg.SeqNum, uint32(1))
-		msg = <-ch
-		assert.DeepEqual(t, msg.Flags, []string{"$Test3", "$Test4", imap.RecentFlag})
-		assert.Equal(t, msg.SeqNum, uint32(2))
-		msg = <-ch
-		assert.DeepEqual(t, msg.Flags, []string{imap.RecentFlag})
-		assert.Equal(t, msg.SeqNum, uint32(3))
-	})
-
-	// Return first two messages using UID.
-	t.Run("Uid1,2", func(t *testing.T) {
-		seq := imap.SeqSet{}
-		seq.AddNum(firstUid)
-		seq.AddNum(secondUid)
-		ch := make(chan *imap.Message, 10)
-		assert.NilError(t, mbox.ListMessages(true, &seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch))
-		assert.Assert(t, is.Len(ch, 2), "Wrong number of messages returned")
-		msg := <-ch
-		assert.DeepEqual(t, msg.Flags, []string{"$Test1", "$Test2", imap.RecentFlag})
-		assert.Equal(t, msg.SeqNum, uint32(1))
-		msg = <-ch
-		assert.DeepEqual(t, msg.Flags, []string{"$Test3", "$Test4", imap.RecentFlag})
-		assert.Equal(t, msg.SeqNum, uint32(2))
-	})
-
-	// Return all three messages using UID range.
-	t.Run("Uid1:3", func(t *testing.T) {
-		seq := imap.SeqSet{}
-		seq.AddRange(firstUid, thirdUid)
-		ch := make(chan *imap.Message, 10)
-		assert.NilError(t, mbox.ListMessages(true, &seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch))
-		assert.Assert(t, is.Len(ch, 3), "Wrong number of messages returned")
-		msg := <-ch
-		assert.DeepEqual(t, msg.Flags, []string{"$Test1", "$Test2", imap.RecentFlag})
-		assert.Equal(t, msg.SeqNum, uint32(1))
-		msg = <-ch
-		assert.DeepEqual(t, msg.Flags, []string{"$Test3", "$Test4", imap.RecentFlag})
-		assert.Equal(t, msg.SeqNum, uint32(2))
-		msg = <-ch
-		assert.DeepEqual(t, msg.Flags, []string{imap.RecentFlag})
-		assert.Equal(t, msg.SeqNum, uint32(3))
-	})
-
-	// Return all three messages using UID range with invalid entires.
-	t.Run("Uid1:5", func(t *testing.T) {
-		seq := imap.SeqSet{}
-		seq.AddRange(firstUid, thirdUid+2)
-		ch := make(chan *imap.Message, 10)
-		assert.NilError(t, mbox.ListMessages(true, &seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch))
-		assert.Assert(t, is.Len(ch, 3), "Wrong number of messages returned")
-		msg := <-ch
-		assert.DeepEqual(t, msg.Flags, []string{"$Test1", "$Test2", imap.RecentFlag})
-		assert.Equal(t, msg.Uid, firstUid)
-		msg = <-ch
-		assert.DeepEqual(t, msg.Flags, []string{"$Test3", "$Test4", imap.RecentFlag})
-		assert.Equal(t, msg.Uid, secondUid)
-		msg = <-ch
-		assert.DeepEqual(t, msg.Flags, []string{imap.RecentFlag})
-		assert.Equal(t, msg.Uid, thirdUid)
-	})
-
-	t.Run("Uid51:53 (fully invalid)", func(t *testing.T) {
-		seq := imap.SeqSet{}
-		seq.AddRange(firstUid+50, thirdUid+50)
-		ch := make(chan *imap.Message, 10)
-		assert.NilError(t, mbox.ListMessages(true, &seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch))
-		assert.Assert(t, is.Len(ch, 0), "Wrong number of messages returned")
-	})
-
-	t.Run("Uid51:53,1:3", func(t *testing.T) {
-		seq := imap.SeqSet{}
-		seq.AddRange(firstUid+50, thirdUid+50)
-		seq.AddRange(firstUid, thirdUid)
-		ch := make(chan *imap.Message, 10)
-		assert.NilError(t, mbox.ListMessages(true, &seq, []imap.FetchItem{imap.FetchFlags, imap.FetchUid}, ch))
-		assert.Assert(t, is.Len(ch, 3), "Wrong number of messages returned")
-		msg := <-ch
-		assert.DeepEqual(t, msg.Flags, []string{"$Test1", "$Test2", imap.RecentFlag})
-		assert.Equal(t, msg.Uid, firstUid)
-		msg = <-ch
-		assert.DeepEqual(t, msg.Flags, []string{"$Test3", "$Test4", imap.RecentFlag})
-		assert.Equal(t, msg.Uid, secondUid)
-		msg = <-ch
-		assert.DeepEqual(t, msg.Flags, []string{imap.RecentFlag})
-		assert.Equal(t, msg.Uid, thirdUid)
-	})
+	for _, case_ := range cases {
+		testMsgs(case_.uid, case_.seqset, case_.expectedIds)
+	}
 }
 
 func Mailbox_SetMessageFlags(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
-	t.Run("AddFlags", func(t *testing.T) {
-		b := newBack()
-		defer closeBack(b)
-		u := getUser(t, b)
-		defer assert.NilError(t, u.Logout())
+	b := newBack()
+	defer closeBack(b)
+	u := getUser(t, b)
+	defer assert.NilError(t, u.Logout())
 
-		t.Run("Uid", func(t *testing.T) {
+	testFlags := func(
+		initialFlags [][]string, seqset string,
+		uid bool, op imap.FlagsOp, opArgs []string,
+		finalFlags [][]string) bool {
+
+		return t.Run(fmt.Sprintf("uid=%v seqset=%v op=%v opArgs=%v", uid, seqset, op, opArgs), func(t *testing.T) {
 			mbox := getMbox(t, u)
-			uids := createMsgsUids(t, mbox, 1) // $Test1, $Test2
+			for _, flagset := range initialFlags {
+				assert.NilError(t, mbox.CreateMessage(flagset, time.Now(), strings.NewReader(testMsg)))
+			}
 
-			seq := imap.SeqSet{}
-			seq.AddNum(uids[0])
-			assert.NilError(t, mbox.UpdateMessagesFlags(true, &seq, imap.AddFlags, []string{"$Test3"}))
+			seq, err := imap.ParseSeqSet(seqset)
+			if err != nil {
+				panic(err)
+			}
+			assert.NilError(t, mbox.UpdateMessagesFlags(uid, seq, op, opArgs))
 
-			ch := make(chan *imap.Message, 10)
-			assert.NilError(t, mbox.ListMessages(true, &seq, []imap.FetchItem{imap.FetchFlags}, ch))
-			assert.Assert(t, is.Len(ch, 1), "Wrong number of messages returned")
-			msg := <-ch
+			seq, _ = imap.ParseSeqSet("*")
+			ch := make(chan *imap.Message, len(initialFlags)+5)
+			mbox.ListMessages(uid, seq, []imap.FetchItem{imap.FetchUid, imap.FetchFlags}, ch)
+			assert.Assert(t, is.Len(ch, len(finalFlags)))
 
-			assert.DeepEqual(t, []string{"$Test1", "$Test2", "$Test3", imap.RecentFlag}, msg.Flags)
-		})
-		t.Run("Seq", func(t *testing.T) {
-			mbox := getMbox(t, u)
-			createMsgs(t, mbox, 1) // $Test1, $Test2
-
-			seq, _ := imap.ParseSeqSet("1")
-
-			date := time.Now()
-			assert.NilError(t, mbox.CreateMessage([]string{"$Test1", "$Test2"}, date, strings.NewReader(testMsg)))
-
-			assert.NilError(t, mbox.UpdateMessagesFlags(false, seq, imap.AddFlags, []string{"$Test3"}))
-
-			ch := make(chan *imap.Message, 10)
-			assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags}, ch))
-			assert.Assert(t, is.Len(ch, 1), "Wrong number of messages returned")
-			msg := <-ch
-
-			assert.DeepEqual(t, []string{"$Test1", "$Test2", "$Test3", imap.RecentFlag}, msg.Flags)
-		})
-	})
-
-	t.Run("RemoveFlags", func(t *testing.T) {
-		b := newBack()
-		defer closeBack(b)
-		u := getUser(t, b)
-		defer assert.NilError(t, u.Logout())
-
-		t.Run("Uid", func(t *testing.T) {
-			mbox := getMbox(t, u)
-			createMsgs(t, mbox, 1) // $Test1, $Test2
-
-			seq, _ := imap.ParseSeqSet("1")
-			ch := make(chan *imap.Message, 10)
-			assert.NilError(t, mbox.ListMessages(true, seq, []imap.FetchItem{imap.FetchUid}, ch))
-			assert.Assert(t, is.Len(ch, 1), "Wrong number of messages returned")
-			msg := <-ch
-			seq = &imap.SeqSet{}
-			seq.AddNum(msg.Uid)
-
-			assert.NilError(t, mbox.UpdateMessagesFlags(true, seq, imap.RemoveFlags, []string{"$Test2"}))
-
-			ch = make(chan *imap.Message, 10)
-			assert.NilError(t, mbox.ListMessages(true, seq, []imap.FetchItem{imap.FetchFlags}, ch))
-			assert.Assert(t, is.Len(ch, 1), "Wrong number of messages returned")
-			msg = <-ch
-
-			assert.DeepEqual(t, []string{"$Test1", imap.RecentFlag}, msg.Flags)
-
-			t.Run("repeat", func(t *testing.T) {
-				assert.NilError(t, mbox.UpdateMessagesFlags(true, seq, imap.RemoveFlags, []string{"$Test2"}))
-
-				ch := make(chan *imap.Message, 10)
-				assert.NilError(t, mbox.ListMessages(true, seq, []imap.FetchItem{imap.FetchFlags}, ch))
-				assert.Assert(t, is.Len(ch, 1), "Wrong number of messages returned")
-				msg = <-ch
-
-				assert.DeepEqual(t, []string{"$Test1", imap.RecentFlag}, msg.Flags)
-			})
-		})
-		t.Run("Seq", func(t *testing.T) {
-			mbox := getMbox(t, u)
-			createMsgs(t, mbox, 1) // $Test1, $Test2
-
-			seq, _ := imap.ParseSeqSet("1")
-			assert.NilError(t, mbox.UpdateMessagesFlags(false, seq, imap.RemoveFlags, []string{"$Test2"}))
-
-			ch := make(chan *imap.Message, 10)
-			assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags}, ch))
-			assert.Assert(t, is.Len(ch, 1), "Wrong number of messages returned")
-			msg := <-ch
-
-			assert.DeepEqual(t, []string{"$Test1", imap.RecentFlag}, msg.Flags)
-
-			t.Run("repeat", func(t *testing.T) {
-				assert.NilError(t, mbox.UpdateMessagesFlags(false, seq, imap.RemoveFlags, []string{"$Test2"}))
-
-				ch := make(chan *imap.Message, 10)
-				assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags}, ch))
-				assert.Assert(t, is.Len(ch, 1), "Wrong number of messages returned")
+			for i, flagset := range finalFlags {
 				msg := <-ch
 
-				assert.DeepEqual(t, []string{"$Test1", imap.RecentFlag}, msg.Flags)
-			})
+				sort.Strings(msg.Flags)
+				sort.Strings(flagset)
+
+				if !assert.Check(t, is.DeepEqual(msg.Flags, flagset), "Flags mismatch on %d message", i+1) {
+					t.Log("msg.SeqNum:", msg.SeqNum)
+					t.Log("msg.Uid:", msg.Uid)
+					t.Log("msg.Flags:", msg.Flags)
+					t.Log("Reference flag set:", flagset)
+				}
+			}
 		})
-	})
+	}
 
-	t.Run("SetFlags", func(t *testing.T) {
-		b := newBack()
-		defer closeBack(b)
-		u := getUser(t, b)
-		defer assert.NilError(t, u.Logout())
+	cases := []struct {
+		initialFlags [][]string
+		seqset       string
+		uid          bool
+		op           imap.FlagsOp
+		opArgs       []string
+		finalFlags   [][]string
+	}{
+		// imap.AddFlags (uid = true)
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{imap.RecentFlag},
+				{"$Test1", imap.RecentFlag},
+			},
+			"*", true, imap.AddFlags, []string{"$Test3"},
+			[][]string{
+				{"$Test1", "$Test2", "$Test3", imap.RecentFlag},
+				{"$Test3", imap.RecentFlag},
+				{"$Test1", "$Test3", imap.RecentFlag},
+			},
+		},
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{imap.RecentFlag},
+				{"$Test1", imap.RecentFlag},
+			},
+			"2:*", true, imap.AddFlags, []string{"$Test3"},
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{"$Test3", imap.RecentFlag},
+				{"$Test1", "$Test3", imap.RecentFlag},
+			},
+		},
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{imap.RecentFlag},
+				{"$Test1", imap.RecentFlag},
+			},
+			"1", true, imap.AddFlags, []string{"$Test3"},
+			[][]string{
+				{"$Test1", "$Test2", "$Test3", imap.RecentFlag},
+				{imap.RecentFlag},
+				{"$Test1", imap.RecentFlag},
+			},
+		},
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{imap.RecentFlag},
+				{"$Test1", imap.RecentFlag},
+			},
+			"2", true, imap.AddFlags, []string{"$Test3"},
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{"$Test3", imap.RecentFlag},
+				{"$Test1", imap.RecentFlag},
+			},
+		},
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{imap.RecentFlag},
+				{"$Test1", imap.RecentFlag},
+			},
+			"3", true, imap.AddFlags, []string{"$Test3"},
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{imap.RecentFlag},
+				{"$Test1", "$Test3", imap.RecentFlag},
+			},
+		},
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{imap.RecentFlag},
+				{"$Test1", imap.RecentFlag},
+			},
+			"1,3", true, imap.AddFlags, []string{"$Test3"},
+			[][]string{
+				{"$Test1", "$Test2", "$Test3", imap.RecentFlag},
+				{imap.RecentFlag},
+				{"$Test1", "$Test3", imap.RecentFlag},
+			},
+		},
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{imap.RecentFlag},
+				{"$Test1", imap.RecentFlag},
+			},
+			"2,3", true, imap.AddFlags, []string{"$Test3"},
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{"$Test3", imap.RecentFlag},
+				{"$Test1", "$Test3", imap.RecentFlag},
+			},
+		},
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{imap.RecentFlag},
+				{"$Test1", imap.RecentFlag},
+			},
+			"2,3", true, imap.AddFlags, []string{"$Test3", "$Test4"},
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{"$Test3", "$Test4", imap.RecentFlag},
+				{"$Test1", "$Test3", "$Test4", imap.RecentFlag},
+			},
+		},
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{imap.RecentFlag},
+				{"$Test1", imap.RecentFlag},
+			},
+			"2:3", true, imap.AddFlags, []string{"$Test3", "$Test4"},
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{"$Test3", "$Test4", imap.RecentFlag},
+				{"$Test1", "$Test3", "$Test4", imap.RecentFlag},
+			},
+		},
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{imap.RecentFlag},
+				{"$Test1", imap.RecentFlag},
+			},
+			"1:3", true, imap.AddFlags, []string{"$Test3", "$Test4"},
+			[][]string{
+				{"$Test1", "$Test2", "$Test3", "$Test4", imap.RecentFlag},
+				{"$Test3", "$Test4", imap.RecentFlag},
+				{"$Test1", "$Test3", "$Test4", imap.RecentFlag},
+			},
+		},
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{imap.RecentFlag},
+				{"$Test1", imap.RecentFlag},
+			},
+			"1:5", true, imap.AddFlags, []string{"$Test3", "$Test4"},
+			[][]string{
+				{"$Test1", "$Test2", "$Test3", "$Test4", imap.RecentFlag},
+				{"$Test3", "$Test4", imap.RecentFlag},
+				{"$Test1", "$Test3", "$Test4", imap.RecentFlag},
+			},
+		},
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{imap.RecentFlag},
+				{"$Test1", imap.RecentFlag},
+			},
+			"45:50", true, imap.AddFlags, []string{"$Test3", "$Test4"},
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{imap.RecentFlag},
+				{"$Test1", imap.RecentFlag},
+			},
+		},
 
-		t.Run("Uid", func(t *testing.T) {
-			mbox := getMbox(t, u)
-			uids := createMsgsUids(t, mbox, 1) // $Test1, $Test2
+		// imap.RemoveFlags (uid = false)
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{imap.RecentFlag},
+				{"$Test2", imap.RecentFlag},
+			},
+			"*", true, imap.RemoveFlags, []string{"$Test2"},
+			[][]string{
+				{"$Test1", imap.RecentFlag},
+				{imap.RecentFlag},
+				{imap.RecentFlag},
+			},
+		},
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{imap.RecentFlag},
+				{"$Test2", imap.RecentFlag},
+			},
+			"2:*", true, imap.RemoveFlags, []string{"$Test2"},
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{imap.RecentFlag},
+				{imap.RecentFlag},
+			},
+		},
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{imap.RecentFlag},
+				{"$Test2", imap.RecentFlag},
+			},
+			"1", true, imap.RemoveFlags, []string{"$Test2"},
+			[][]string{
+				{"$Test1", imap.RecentFlag},
+				{imap.RecentFlag},
+				{"$Test2", imap.RecentFlag},
+			},
+		},
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{"$Test2", imap.RecentFlag},
+				{"$Test2", imap.RecentFlag},
+			},
+			"2", true, imap.RemoveFlags, []string{"$Test2"},
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{imap.RecentFlag},
+				{"$Test2", imap.RecentFlag},
+			},
+		},
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{"$Test2", imap.RecentFlag},
+				{"$Test2", imap.RecentFlag},
+			},
+			"1,3", true, imap.RemoveFlags, []string{"$Test2"},
+			[][]string{
+				{"$Test1", imap.RecentFlag},
+				{"$Test2", imap.RecentFlag},
+				{imap.RecentFlag},
+			},
+		},
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{"$Test2", imap.RecentFlag},
+				{"$Test2", imap.RecentFlag},
+			},
+			"1,3", true, imap.RemoveFlags, []string{"$Test2"},
+			[][]string{
+				{"$Test1", imap.RecentFlag},
+				{"$Test2", imap.RecentFlag},
+				{imap.RecentFlag},
+			},
+		},
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{"$Test2", imap.RecentFlag},
+				{"$Test3", imap.RecentFlag},
+			},
+			"1:3", true, imap.RemoveFlags, []string{"$Test2"},
+			[][]string{
+				{"$Test1", imap.RecentFlag},
+				{imap.RecentFlag},
+				{"$Test3", imap.RecentFlag},
+			},
+		},
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{"$Test2", imap.RecentFlag},
+				{"$Test3", imap.RecentFlag},
+			},
+			"2:3", true, imap.RemoveFlags, []string{"$Test2"},
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{imap.RecentFlag},
+				{"$Test3", imap.RecentFlag},
+			},
+		},
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{"$Test2", imap.RecentFlag},
+				{"$Test3", imap.RecentFlag},
+			},
+			"1:5", true, imap.RemoveFlags, []string{"$Test2"},
+			[][]string{
+				{"$Test1", imap.RecentFlag},
+				{imap.RecentFlag},
+				{"$Test3", imap.RecentFlag},
+			},
+		},
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{"$Test2", imap.RecentFlag},
+				{"$Test3", imap.RecentFlag},
+			},
+			"45:50", true, imap.RemoveFlags, []string{"$Test2"},
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{"$Test2", imap.RecentFlag},
+				{"$Test3", imap.RecentFlag},
+			},
+		},
 
-			seq := imap.SeqSet{}
-			seq.AddNum(uids[0])
-			assert.NilError(t, mbox.UpdateMessagesFlags(true, &seq, imap.SetFlags, []string{"$Test3", "$Test4"}))
+		// imap.SetFlags (uid = true)
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{"$Test2", imap.RecentFlag},
+				{"$Test3", imap.RecentFlag},
+			},
+			"*", true, imap.SetFlags, []string{"$Test2", "$Test3"},
+			[][]string{
+				{"$Test2", "$Test3"},
+				{"$Test2", "$Test3"},
+				{"$Test2", "$Test3"},
+			},
+		},
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{"$Test2", imap.RecentFlag},
+				{"$Test3", imap.RecentFlag},
+			},
+			"2:*", true, imap.SetFlags, []string{"$Test2", "$Test3"},
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{"$Test2", "$Test3"},
+				{"$Test2", "$Test3"},
+			},
+		},
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{"$Test2", imap.RecentFlag},
+				{"$Test3", imap.RecentFlag},
+			},
+			"1", true, imap.SetFlags, []string{"$Test2", "$Test3"},
+			[][]string{
+				{"$Test2", "$Test3"},
+				{"$Test2", imap.RecentFlag},
+				{"$Test3", imap.RecentFlag},
+			},
+		},
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{"$Test2", imap.RecentFlag},
+				{"$Test3", imap.RecentFlag},
+			},
+			"2:3", true, imap.SetFlags, []string{"$Test2", "$Test3"},
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{"$Test2", "$Test3"},
+				{"$Test2", "$Test3"},
+			},
+		},
+		{
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{"$Test2", imap.RecentFlag},
+				{"$Test3", imap.RecentFlag},
+			},
+			"2", true, imap.SetFlags, []string{"$Test2", "$Test3"},
+			[][]string{
+				{"$Test1", "$Test2", imap.RecentFlag},
+				{"$Test2", "$Test3"},
+				{"$Test3", imap.RecentFlag},
+			},
+		},
+	}
 
-			ch := make(chan *imap.Message, 10)
-			assert.NilError(t, mbox.ListMessages(true, &seq, []imap.FetchItem{imap.FetchFlags}, ch))
-			assert.Assert(t, is.Len(ch, 1), "Wrong number of messages returned")
-			msg := <-ch
-			assert.DeepEqual(t, []string{"$Test3", "$Test4"}, msg.Flags)
+	for _, case_ := range cases {
+		case_.uid = false
+		cases = append(cases, case_)
+	}
 
-			t.Run("repeat", func(t *testing.T) {
-				assert.NilError(t, mbox.UpdateMessagesFlags(true, &seq, imap.SetFlags, []string{"$Test3", "$Test4"}))
-
-				ch := make(chan *imap.Message, 10)
-				assert.NilError(t, mbox.ListMessages(true, &seq, []imap.FetchItem{imap.FetchFlags}, ch))
-				assert.Assert(t, is.Len(ch, 1), "Wrong number of messages returned")
-				msg = <-ch
-
-				assert.DeepEqual(t, []string{"$Test3", "$Test4"}, msg.Flags)
-			})
+	if os.Getenv("SHUFFLE_CASES") == "1" {
+		rand.Shuffle(len(cases), func(i, j int) {
+			cases[i], cases[j] = cases[j], cases[i]
 		})
-		t.Run("Seq", func(t *testing.T) {
-			mbox := getMbox(t, u)
-			createMsgs(t, mbox, 1) // $Test1, $Test2
+	}
 
-			seq, _ := imap.ParseSeqSet("1")
-			assert.NilError(t, mbox.UpdateMessagesFlags(false, seq, imap.SetFlags, []string{"$Test3", "$Test4"}))
-
-			ch := make(chan *imap.Message, 10)
-			assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags}, ch))
-			assert.Assert(t, is.Len(ch, 1), "Wrong number of messages returned")
-			msg := <-ch
-
-			assert.DeepEqual(t, []string{"$Test3", "$Test4"}, msg.Flags)
-
-			t.Run("repeat", func(t *testing.T) {
-				assert.NilError(t, mbox.UpdateMessagesFlags(false, seq, imap.SetFlags, []string{"$Test3", "$Test4"}))
-
-				ch := make(chan *imap.Message, 10)
-				assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags}, ch))
-				assert.Assert(t, is.Len(ch, 1), "Wrong number of messages returned")
-				msg = <-ch
-
-				assert.DeepEqual(t, []string{"$Test3", "$Test4"}, msg.Flags)
-			})
-		})
-	})
+	for _, case_ := range cases {
+		testFlags(case_.initialFlags, case_.seqset, case_.uid, case_.op, case_.opArgs, case_.finalFlags)
+	}
 }
 
 func Mailbox_Expunge(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
@@ -632,134 +756,177 @@ func Mailbox_Expunge(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc)
 }
 
 func Mailbox_CopyMessages(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
-	t.Run("Seq", func(t *testing.T) {
-		b := newBack()
-		defer closeBack(b)
-		u := getUser(t, b)
-		defer assert.NilError(t, u.Logout())
-		mboxSrc, mboxTgt := getMbox(t, u), getMbox(t, u)
+	b := newBack()
+	defer closeBack(b)
+	u := getUser(t, b)
+	defer assert.NilError(t, u.Logout())
 
-		createMsgs(t, mboxSrc, 3)
+	testCopy := func(uid bool, seqset string, expectedTgtRes []int) bool {
+		return t.Run(fmt.Sprintf("uid=%v seqset=%v", uid, seqset), func(t *testing.T) {
+			srcMbox, tgtMbox := getMbox(t, u), getMbox(t, u)
+			createMsgs(t, srcMbox, 3)
 
+			seq, err := imap.ParseSeqSet(seqset)
+			if err != nil {
+				panic(err)
+			}
+			assert.NilError(t, srcMbox.CopyMessages(uid, seq, tgtMbox.Name()))
+
+			seq, _ = imap.ParseSeqSet("*")
+			ch := make(chan *imap.Message, len(expectedTgtRes)+10)
+			err = tgtMbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchInternalDate, imap.FetchFlags}, ch)
+			assert.NilError(t, err)
+			assert.Assert(t, is.Len(ch, len(expectedTgtRes)), "Wrong amount of messages copied")
+
+			for i, indx := range expectedTgtRes {
+				msg := <-ch
+				assert.Check(t, isNthMsg(msg, indx), "Message %d in target mbox is not same as %d in source mbox", i+1, indx)
+				assert.Check(t, isNthMsgFlags(msg, indx), "Message %d in target mbox is not same as %d in source mbox (flags don't match)", i+1, indx)
+			}
+		})
+	}
+
+	t.Run("Non-Existent Dest", func(t *testing.T) {
+		srcMbox := getMbox(t, u)
+		createMsgs(t, srcMbox, 3)
 		seq, _ := imap.ParseSeqSet("2:3")
-		assert.NilError(t, mboxSrc.CopyMessages(false, seq, mboxTgt.Name()))
-
-		ch := make(chan *imap.Message, 10)
-		seq, _ = imap.ParseSeqSet("*")
-		assert.NilError(t, mboxTgt.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchInternalDate}, ch))
-		assert.Assert(t, is.Len(ch, 2), "Extra or no messages created in dest mailbox")
-		msg := <-ch
-		assert.Check(t, isNthMsg(msg, 2), "Messages copied in wrong order")
-		assert.Check(t, isNthMsgFlags(msg, 2), "Flags are not copied")
-		msg = <-ch
-		assert.Check(t, isNthMsg(msg, 3), "Messages copied in wrong order")
-		assert.Check(t, isNthMsgFlags(msg, 3), "Flags are not copied")
+		assert.Error(t, srcMbox.CopyMessages(false, seq, "NONEXISTENT"), backend.ErrNoSuchMailbox.Error())
 	})
-	t.Run("Uid", func(t *testing.T) {
-		b := newBack()
-		defer closeBack(b)
-		u := getUser(t, b)
-		defer assert.NilError(t, u.Logout())
-		mboxSrc, mboxTgt := getMbox(t, u), getMbox(t, u)
 
-		uids := createMsgsUids(t, mboxSrc, 3)
+	cases := []struct {
+		uid         bool
+		seqset      string
+		expectedRes []int
+	}{
+		{false, "*", []int{1, 2, 3}},
+		{false, "2:*", []int{2, 3}},
+		{false, "1", []int{1}},
+		{false, "1,3", []int{1, 3}},
+		{false, "2", []int{2}},
+		{false, "1:5", []int{1, 2, 3}},
+		{false, "1,1:3", []int{1, 2, 3}},
+		{false, "45:30", []int{}},
+	}
 
-		seq := &imap.SeqSet{}
-		seq.AddNum(uids[1], uids[2])
-		assert.NilError(t, mboxSrc.CopyMessages(true, seq, mboxTgt.Name()))
+	for _, case_ := range cases {
+		case_.uid = true
+		cases = append(cases, case_)
+	}
 
-		ch := make(chan *imap.Message, 10)
-		seq, _ = imap.ParseSeqSet("*")
-		assert.NilError(t, mboxTgt.ListMessages(true, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchInternalDate}, ch))
-		assert.Assert(t, is.Len(ch, 2), "Extra or no messages created in dest mailbox")
-		msg := <-ch
-		assert.Check(t, isNthMsg(msg, 2), "Messages copied in wrong order")
-		assert.Check(t, isNthMsgFlags(msg, 2), "Flags are not copied")
-		msg = <-ch
-		assert.Check(t, isNthMsg(msg, 3), "Messages copied in wrong order")
-		assert.Check(t, isNthMsgFlags(msg, 3), "Flags are not copied")
-	})
+	if os.Getenv("SHUFFLE_CASES") == "1" {
+		rand.Shuffle(len(cases), func(i, j int) {
+			cases[i], cases[j] = cases[j], cases[i]
+		})
+	}
+
+	for _, case_ := range cases {
+		testCopy(case_.uid, case_.seqset, case_.expectedRes)
+	}
 }
 
 func Mailbox_MoveMessages(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
-	//t.Run("Non-Existent Dest", func(t *testing.T) {
-	//	seq, _ := imap.ParseSeqSet("2:3")
-	//	assert.Error(t, mboxMove.MoveMessages(false, seq, "TEST112341324132"), "MoveMessages: No such mailbox")
-	//})
-	t.Run("Uid", func(t *testing.T) {
-		b := newBack()
-		defer closeBack(b)
-		u := getUser(t, b)
-		defer assert.NilError(t, u.Logout())
-		mboxSrc, mboxTgt := getMbox(t, u), getMbox(t, u)
+	b := newBack()
+	defer closeBack(b)
+	u := getUser(t, b)
+	defer assert.NilError(t, u.Logout())
 
-		moveSrc, ok := mboxSrc.(move.Mailbox)
-		if !ok {
-			t.Skip("MOVE extension it not supported")
-			t.SkipNow()
-		}
+	tMbox := getMbox(t, u)
+	if _, ok := tMbox.(move.Mailbox); !ok {
+		t.Skip("MOVE extension is not implemented (need move.Mailbox extension)")
+		t.SkipNow()
+	}
 
-		uids := createMsgsUids(t, mboxSrc, 3)
+	testMove := func(uid bool, seqset string, expectedSrcRes, expectedTgtRes []int) bool {
+		return t.Run(fmt.Sprintf("uid=%v seqset=%v", uid, seqset), func(t *testing.T) {
+			srcMbox, tgtMbox := getMbox(t, u), getMbox(t, u)
+			createMsgs(t, srcMbox, 3)
 
-		seq := &imap.SeqSet{}
-		seq.AddNum(uids[1], uids[2])
-		assert.NilError(t, moveSrc.MoveMessages(true, seq, mboxTgt.Name()))
+			moveMbox := srcMbox.(move.Mailbox)
 
-		ch := make(chan *imap.Message, 10)
-		seq, _ = imap.ParseSeqSet("*")
-		assert.NilError(t, mboxTgt.ListMessages(true, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchInternalDate}, ch))
-		assert.Assert(t, is.Len(ch, 2), "Extra or no messages created in dest mailbox")
-		msg := <-ch
-		assert.Check(t, isNthMsg(msg, 2), "Messages moved in wrong order")
-		assert.Check(t, isNthMsgFlags(msg, 2), "Flags are not moved")
-		msg = <-ch
-		assert.Check(t, isNthMsg(msg, 3), "Messages moved in wrong order")
-		assert.Check(t, isNthMsgFlags(msg, 3), "Flags are not moved")
+			seq, err := imap.ParseSeqSet(seqset)
+			if err != nil {
+				panic(err)
+			}
+			assert.NilError(t, moveMbox.MoveMessages(uid, seq, tgtMbox.Name()))
 
-		ch = make(chan *imap.Message, 10)
-		assert.NilError(t, mboxSrc.ListMessages(true, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchInternalDate}, ch))
-		assert.Assert(t, is.Len(ch, 1), "Wrong number of messages moved")
-		msg = <-ch
-		assert.Check(t, isNthMsg(msg, 1), "Wrong message moved")
-		assert.Check(t, isNthMsgFlags(msg, 1), "Wrong message moved")
+			seq, _ = imap.ParseSeqSet("*")
+			ch := make(chan *imap.Message, len(expectedTgtRes)+10)
+			err = tgtMbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchInternalDate, imap.FetchFlags}, ch)
+			assert.NilError(t, err)
+			assert.Assert(t, is.Len(ch, len(expectedTgtRes)), "Wrong amount of messages created in tgt mbox")
+
+			for i, indx := range expectedTgtRes {
+				msg := <-ch
+				assert.Check(t, isNthMsg(msg, indx), "Message %d in target mbox is not same as %d in source mbox", i+1, indx)
+				if !assert.Check(t, isNthMsgFlags(msg, indx), "Message %d in target mbox is not same as %d in source mbox (flags don't match)", i+1, indx) {
+					t.Log("msg.Flags:", msg.Flags)
+					t.Log("Wanted flags:", []string{
+						"$Test" + strconv.Itoa(indx+1) + "-1",
+						"$Test" + strconv.Itoa(indx+1) + "-2",
+						imap.RecentFlag,
+					})
+				}
+			}
+
+			ch = make(chan *imap.Message, len(expectedSrcRes)+10)
+			err = srcMbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchInternalDate, imap.FetchFlags}, ch)
+			assert.NilError(t, err)
+			assert.Assert(t, is.Len(ch, len(expectedSrcRes)), "Wrong amount of messages left in src mbox")
+
+			for i, indx := range expectedSrcRes {
+				msg := <-ch
+				assert.Check(t, isNthMsg(msg, indx), "Message #%d left in src mbox is not #%d originally", i+1, indx)
+				if !assert.Check(t, isNthMsgFlags(msg, indx), "Message #%d left in src mbox is not #%d originally (flags don't match)", i+1, indx) {
+					t.Log("msg.Flags:", msg.Flags)
+					t.Log("Wanted flags:", []string{
+						"$Test" + strconv.Itoa(indx+1) + "-1",
+						"$Test" + strconv.Itoa(indx+1) + "-2",
+						imap.RecentFlag,
+					})
+				}
+			}
+		})
+	}
+
+	t.Run("Non-Existent Dest", func(t *testing.T) {
+		srcMbox := getMbox(t, u)
+		moveMbox := srcMbox.(move.Mailbox)
+		createMsgs(t, srcMbox, 3)
+		seq, _ := imap.ParseSeqSet("2:3")
+		assert.Error(t, moveMbox.MoveMessages(false, seq, "NONEXISTENT"), backend.ErrNoSuchMailbox.Error())
 	})
-	t.Run("Seq", func(t *testing.T) {
-		b := newBack()
-		defer closeBack(b)
-		u := getUser(t, b)
-		defer assert.NilError(t, u.Logout())
-		mboxSrc, mboxTgt := getMbox(t, u), getMbox(t, u)
 
-		moveSrc, ok := mboxSrc.(move.Mailbox)
-		if !ok {
-			t.Skip("MOVE extension it not supported")
-			t.SkipNow()
-		}
+	cases := []struct {
+		uid            bool
+		seqset         string
+		expectedSrcRes []int
+		expectedTgtRes []int
+	}{
+		{false, "*", []int{}, []int{1, 2, 3}},
+		{false, "2:*", []int{1}, []int{2, 3}},
+		{false, "1", []int{2, 3}, []int{1}},
+		{false, "1,2", []int{3}, []int{1, 2}},
+		{false, "1,3", []int{2}, []int{1, 3}},
+		{false, "2", []int{1, 3}, []int{2}},
+		{false, "1:5", []int{}, []int{1, 2, 3}},
+		{false, "1,1:3", []int{}, []int{1, 2, 3}},
+		{false, "45:30", []int{1, 2, 3}, []int{}},
+	}
 
-		createMsgs(t, mboxSrc, 3)
+	for _, case_ := range cases {
+		case_.uid = true
+		cases = append(cases, case_)
+	}
 
-		seq := &imap.SeqSet{}
-		seq.AddRange(2, 3)
-		assert.NilError(t, moveSrc.MoveMessages(true, seq, mboxTgt.Name()))
+	if os.Getenv("SHUFFLE_CASES") == "1" {
+		rand.Shuffle(len(cases), func(i, j int) {
+			cases[i], cases[j] = cases[j], cases[i]
+		})
+	}
 
-		ch := make(chan *imap.Message, 10)
-		seq, _ = imap.ParseSeqSet("*")
-		assert.NilError(t, mboxTgt.ListMessages(true, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchInternalDate}, ch))
-		assert.Assert(t, is.Len(ch, 2), "Extra or no messages created in dest mailbox")
-		msg := <-ch
-		assert.Check(t, isNthMsg(msg, 2), "Messages moved in wrong order")
-		assert.Check(t, isNthMsgFlags(msg, 2), "Flags are not moved")
-		msg = <-ch
-		assert.Check(t, isNthMsg(msg, 3), "Messages moved in wrong order")
-		assert.Check(t, isNthMsgFlags(msg, 3), "Flags are not moved")
-
-		ch = make(chan *imap.Message, 10)
-		assert.NilError(t, mboxSrc.ListMessages(true, seq, []imap.FetchItem{imap.FetchFlags, imap.FetchInternalDate}, ch))
-		assert.Assert(t, is.Len(ch, 1), "Wrong number of messages moved")
-		msg = <-ch
-		assert.Check(t, isNthMsg(msg, 1), "Wrong message moved")
-		assert.Check(t, isNthMsgFlags(msg, 1), "Wrong message moved")
-	})
+	for _, case_ := range cases {
+		testMove(case_.uid, case_.seqset, case_.expectedSrcRes, case_.expectedTgtRes)
+	}
 }
 
 func Mailbox_MonotonicUid(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {

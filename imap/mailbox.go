@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"database/sql"
 	"io/ioutil"
-	"sort"
 	"strings"
 	"time"
 
@@ -308,7 +307,6 @@ func scanMessage(rows *sql.Rows, items []imap.FetchItem) (*imap.Message, error) 
 			if len(res.Flags) == 1 && res.Flags[0] == "" {
 				res.Flags = []string{}
 			}
-			sort.Strings(res.Flags)
 		case imap.FetchInternalDate:
 			res.InternalDate = time.Unix(date, 0)
 		case imap.FetchRFC822Size:

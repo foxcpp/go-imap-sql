@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/emersion/go-imap"
+	move "github.com/emersion/go-imap-move"
 	"github.com/emersion/go-imap/backend"
 	"gotest.tools/assert"
 	is "gotest.tools/assert/cmp"
@@ -94,6 +95,104 @@ func Mailbox_StatusUpdate(t *testing.T, newBack NewBackFunc, closeBack CloseBack
 			t.Errorf("Non-mailbox update sent by backend: %#v\n", upd)
 		}
 	}
+}
+
+func Mailbox_StatusUpdate_Copy(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
+	b := newBack()
+	defer closeBack(b)
+
+	updater, ok := b.(backend.BackendUpdater)
+	if !ok {
+		t.Skip("Backend doesn't supports unilateral updates (need backend.BackendUpdater interface)")
+		t.SkipNow()
+	}
+	upds := updater.Updates()
+
+	u := getUser(t, b)
+	defer assert.NilError(t, u.Logout())
+
+	srcMbox := getMbox(t, u)
+	tgtMbox := getMbox(t, u)
+
+	createMsgs(t, srcMbox, 3)
+	consumeUpdates(t, upds, 3)
+
+	seq, _ := imap.ParseSeqSet("2:3")
+	assert.NilError(t, srcMbox.CopyMessages(false, seq, tgtMbox.Name()))
+
+	upd := readUpdate(t, upds)
+	switch upd := upd.(type) {
+	case *backend.MailboxUpdate:
+		assert.Check(t, is.Equal(upd.Mailbox(), tgtMbox.Name()), "Update is for wrong mailbox")
+		assert.Check(t, is.Equal(upd.Messages, uint32(2)), "Wrong amount of messages in mailbox reported in update")
+		assert.Check(t, is.Equal(upd.Recent, uint32(2)), "Wrong amount of recent messages in mailbox reported in update")
+	default:
+		t.Errorf("Non-mailbox update sent by backend: %#v\n", upd)
+	}
+}
+
+func Mailbox_StatusUpdate_Move(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
+	b := newBack()
+	defer closeBack(b)
+
+	updater, ok := b.(backend.BackendUpdater)
+	if !ok {
+		t.Skip("Backend doesn't supports unilateral updates (need backend.BackendUpdater interface)")
+		t.SkipNow()
+	}
+	upds := updater.Updates()
+
+	u := getUser(t, b)
+	defer assert.NilError(t, u.Logout())
+
+	srcMbox := getMbox(t, u)
+	tgtMbox := getMbox(t, u)
+
+	createMsgs(t, srcMbox, 3)
+	consumeUpdates(t, upds, 3)
+
+	moveMbox, ok := srcMbox.(move.Mailbox)
+	if !ok {
+		t.Skip("Backend doesn't supports MOVE (need move.Mailbox interface)")
+		t.SkipNow()
+	}
+
+	seq, _ := imap.ParseSeqSet("2:3")
+	assert.NilError(t, moveMbox.MoveMessages(false, seq, tgtMbox.Name()))
+
+	// We expect 1 status update for target mailbox and two expunge updates
+	// for source mailbox.
+	msgs := makeMsgSlots(3)
+
+	for i := 0; i < 3; i++ {
+		upd := readUpdate(t, upds)
+		if upd.Mailbox() == tgtMbox.Name() {
+			mboxUpd, ok := upd.(*backend.MailboxUpdate)
+			if !ok {
+				t.Fatal("Non-MailboxUpdate received for target mailbox")
+			}
+
+			assert.Check(t, is.Equal(mboxUpd.Messages, uint32(2)), "Wrong amount of messages in mailbox reported in update for target")
+		} else if upd.Mailbox() == srcMbox.Name() {
+			expungeUpd, ok := upd.(*backend.ExpungeUpdate)
+			if !ok {
+				t.Fatalf("Non-ExpungeUpdate received for source mailbox: %#v", upd)
+			}
+
+			if expungeUpd.SeqNum > uint32(len(msgs)) {
+				t.Errorf("Update's SeqNum is out of range: %v > %v", expungeUpd.SeqNum, len(msgs))
+			} else if expungeUpd.SeqNum == 0 {
+				t.Error("Update's SeqNum is zero.")
+			} else {
+				//t.Logf("Got ExpungeUpdate, SeqNum = %d, remaining slots = %d\n", expungeUpd.SeqNum, len(msgs))
+				msgs = append(msgs[:expungeUpd.SeqNum-1], msgs[expungeUpd.SeqNum:]...)
+			}
+		} else {
+			t.Fatal("Update received for nither target nor source mailbox")
+		}
+	}
+
+	assert.Check(t, is.DeepEqual(msgs, []uint32{1}), "Wrong sequence of expunge updates received")
 }
 
 func Mailbox_MessageUpdate(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {

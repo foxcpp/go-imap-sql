@@ -461,16 +461,34 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, body imap.Litera
 		return errors.Wrap(err, "CreateMessage (uidnext bump)")
 	}
 
+	upd, err := m.statusUpdate(tx)
+	if err != nil {
+		return errors.Wrap(err, "CreateMessage (status query)")
+	}
+
+	if err := tx.Commit(); err != nil {
+		return errors.Wrap(err, "CreateMessage (tx commit)")
+	}
+
+	// Send update after commiting transaction,
+	// just in case reading side will block us for some time.
+	if m.parent.updates != nil {
+		m.parent.updates <- upd
+	}
+	return nil
+}
+
+func (m *Mailbox) statusUpdate(tx *sql.Tx) (backend.Update, error) {
 	row := tx.Stmt(m.parent.msgsCount).QueryRow(m.id)
 	newCount := uint32(0)
 	if err := row.Scan(&newCount); err != nil {
-		return errors.Wrap(err, "CreateMessage (exists read)")
+		return nil, errors.Wrap(err, "CreateMessage (exists read)")
 	}
 
 	row = tx.Stmt(m.parent.recentCount).QueryRow(m.id)
 	newRecent := uint32(0)
 	if err := row.Scan(&newRecent); err != nil {
-		return errors.Wrap(err, "CreateMessage (recent read)")
+		return nil, errors.Wrap(err, "CreateMessage (recent read)")
 	}
 
 	upd := backend.MailboxUpdate{
@@ -480,16 +498,7 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, body imap.Litera
 	upd.MailboxStatus.Messages = newCount
 	upd.MailboxStatus.Recent = newRecent
 
-	if err := tx.Commit(); err != nil {
-		return errors.Wrap(err, "CreateMessage (tx commit)")
-	}
-
-	// Send update after commiting transaction,
-	// just in case reading side will block us for some time.
-	if m.parent.updates != nil {
-		m.parent.updates <- &upd
-	}
-	return nil
+	return &upd, nil
 }
 
 func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation imap.FlagsOp, flags []string) error {
@@ -746,17 +755,28 @@ func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	if err := m.copyMessages(tx, uid, seqset, dest); err != nil {
+	updatesBuffer := make([]backend.Update, 0, 16)
+
+	if err := m.copyMessages(tx, uid, seqset, dest, &updatesBuffer); err != nil {
 		if err == backend.ErrNoSuchMailbox {
 			return err
 		}
 		return errors.Wrap(err, "MoveMessages")
 	}
-	if err := m.delMessages(tx, uid, seqset); err != nil {
+	if err := m.delMessages(tx, uid, seqset, &updatesBuffer); err != nil {
 		return errors.Wrap(err, "MoveMessages")
 	}
 
-	return errors.Wrap(tx.Commit(), "MoveMessages")
+	if err := tx.Commit(); err != nil {
+		return errors.Wrap(err, "MoveMessages")
+	}
+
+	if m.parent.updates != nil {
+		for _, upd := range updatesBuffer {
+			m.parent.updates <- upd
+		}
+	}
+	return nil
 }
 
 func (m *Mailbox) CopyMessages(uid bool, seqset *imap.SeqSet, dest string) error {
@@ -766,17 +786,55 @@ func (m *Mailbox) CopyMessages(uid bool, seqset *imap.SeqSet, dest string) error
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	if err := m.copyMessages(tx, uid, seqset, dest); err != nil {
+	updatesBuffer := make([]backend.Update, 0, 16)
+
+	if err := m.copyMessages(tx, uid, seqset, dest, &updatesBuffer); err != nil {
 		if err == backend.ErrNoSuchMailbox {
 			return err
 		}
 		return errors.Wrap(err, "CopyMessages")
 	}
 
-	return errors.Wrap(tx.Commit(), "CopyMessages")
+	if err := tx.Commit(); err != nil {
+		return errors.Wrap(err, "CopyMessages")
+	}
+
+	if m.parent.updates != nil {
+		for _, upd := range updatesBuffer {
+			m.parent.updates <- upd
+		}
+	}
+	return nil
 }
 
-func (m *Mailbox) delMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet) error {
+func (m *Mailbox) DelMessages(uid bool, seqset *imap.SeqSet) error {
+	tx, err := m.parent.db.Begin()
+	if err != nil {
+		return errors.Wrap(err, "DelMessages")
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	updatesBuffer := make([]backend.Update, 0, 16)
+	if err := m.delMessages(tx, uid, seqset, &updatesBuffer); err != nil {
+		if err == backend.ErrNoSuchMailbox {
+			return err
+		}
+		return errors.Wrap(err, "DelMessages")
+	}
+
+	if err := tx.Commit(); err != nil {
+		return errors.Wrap(err, "DelMessages")
+	}
+
+	if m.parent.updates != nil {
+		for _, upd := range updatesBuffer {
+			m.parent.updates <- upd
+		}
+	}
+	return nil
+}
+
+func (m *Mailbox) delMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, updsBuffer *[]backend.Update) error {
 	for _, seq := range seqset.Set {
 		start, stop := sqlRange(seq)
 
@@ -791,19 +849,39 @@ func (m *Mailbox) delMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet) error {
 		}
 	}
 
-	_, err := tx.Stmt(m.parent.delMarked).Exec()
+	rows, err := tx.Stmt(m.parent.markedSeqnums).Query(m.id)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var seqnum uint32
+		if err := rows.Scan(&seqnum); err != nil {
+			return err
+		}
+
+		*updsBuffer = append(*updsBuffer, &backend.ExpungeUpdate{
+			Update: backend.NewUpdate(m.user.username, m.name),
+			SeqNum: seqnum,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	_, err = tx.Stmt(m.parent.delMarked).Exec()
 	return err
 }
 
-func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest string) error {
-	destID := 0
+func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest string, updsBuffer *[]backend.Update) error {
+	destID := uint64(0)
 	row := tx.Stmt(m.parent.mboxId).QueryRow(m.uid, dest)
 	if err := row.Scan(&destID); err != nil {
 		if err == sql.ErrNoRows {
 			return backend.ErrNoSuchMailbox
 		}
-		return err
 	}
+
+	destMbox := Mailbox{user: m.user, id: destID, name: dest, parent: m.parent}
 
 	srcId := m.id
 
@@ -842,6 +920,12 @@ func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest s
 			return err
 		}
 	}
+
+	upd, err := destMbox.statusUpdate(tx)
+	if err != nil {
+		return err
+	}
+	*updsBuffer = append(*updsBuffer, upd)
 
 	return nil
 }

@@ -118,6 +118,7 @@ type Backend struct {
 
 	// Shitton of pre-compiled SQL statements.
 	userCreds          *sql.Stmt
+	listUsers          *sql.Stmt
 	addUser            *sql.Stmt
 	delUser            *sql.Stmt
 	setUserPass        *sql.Stmt
@@ -176,6 +177,8 @@ type Backend struct {
 	markUid   *sql.Stmt
 	markSeq   *sql.Stmt
 	delMarked *sql.Stmt
+
+	markedSeqnums *sql.Stmt
 
 	// For APPEND-LIMIT extension
 	setUserMsgSizeLimit *sql.Stmt
@@ -321,7 +324,13 @@ func (b *Backend) prepareStmts() error {
 		FROM users
 		WHERE username = ?`)
 	if err != nil {
-		return errors.Wrap(err, "userId prep")
+		return errors.Wrap(err, "userCreds prep")
+	}
+	b.listUsers, err = b.db.Prepare(`
+		SELECT id, username
+		FROM users`)
+	if err != nil {
+		return errors.Wrap(err, "listUsers prep")
 	}
 	b.addUser, err = b.db.Prepare(`
 		INSERT INTO users(username, password, password_salt)
@@ -914,6 +923,30 @@ func (b *Backend) prepareStmts() error {
 	if err != nil {
 		return errors.Wrap(err, "delMarked prep")
 	}
+	if b.db.mysql57 {
+		b.markedSeqnums, err = b.db.Prepare(`
+			SELECT seqnum
+			FROM (
+				SELECT (@rownum := @rownum + 1) AS seqnum, msgId, mark
+				FROM msgs, (SELECT @rownum := 0) counter
+				WHERE mboxId = ?
+			) seqnums
+			WHERE mark = 1
+			ORDER BY seqnum DESC`)
+	} else {
+		b.markedSeqnums, err = b.db.Prepare(`
+			SELECT seqnum
+			FROM (
+				SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mark
+				FROM msgs
+				WHERE mboxId = ?
+			) seqnums
+			WHERE mark = 1
+			ORDER BY seqnum DESC`)
+	}
+	if err != nil {
+		return errors.Wrap(err, "deletedSeqnums prep")
+	}
 
 	b.setUserMsgSizeLimit, err = b.db.Prepare(`
 		UPDATE users
@@ -1120,6 +1153,26 @@ func (b *Backend) SetUserPassword(username, newPassword string) error {
 		return sqlmail.ErrUserDoesntExists
 	}
 	return nil
+}
+
+func (b *Backend) ListUsers() ([]string, error) {
+	var res []string
+	rows, err := b.listUsers.Query()
+	if err != nil {
+		return res, errors.Wrap(err, "ListUsers")
+	}
+	for rows.Next() {
+		var id uint64
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return res, errors.Wrap(err, "ListUsers")
+		}
+		res = append(res, name)
+	}
+	if err := rows.Err(); err != nil {
+		return res, errors.Wrap(err, "ListUsers")
+	}
+	return res, nil
 }
 
 func (b *Backend) GetUser(username string) (backend.User, error) {

@@ -29,10 +29,9 @@ when possible.
 Due to go-imap architecture, some extensions require support from used backend.
 Here are extensions supported by go-sqlmail:
 - [CHILDREN]
-- ~~[APPEND-LIMIT]~~ _(planned)_
+- [APPEND-LIMIT]
 - ~~[UIDPLUS]~~ _(planned)_
 - [MOVE]
-- ~~[IDLE]~~ _(planned)_
 
 #### Maddy
 
@@ -53,11 +52,18 @@ imap://127.0.0.1:1993 {
 }
 ```
 
+#### sqlmail-ctl
+
+For direct access to database you can use sqlmail-ctl. See more information in
+separate README [here](cmd/sqlmail-ctl).
+```
+go install github.com/foxcpp/go-sqlmail/cmd/sqlmail-ctl
+```
+
 [CHILDREN]: https://tools.ietf.org/html/rfc3348
 [APPEND-LIMIT]: https://tools.ietf.org/html/rfc7889
 [UIDPLUS]: https://tools.ietf.org/html/rfc4315
 [MOVE]: https://tools.ietf.org/html/rfc6851
-[IDLE]: https://tools.ietf.org/html/rfc2177
 [go-imap]: https://github.com/emersion/go-imap
 [go-smtp]: https://github.com/emersion/go-smtp
 [maddy]: https://github.com/emersion/maddy

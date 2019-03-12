@@ -95,7 +95,7 @@ func (u *User) CreateMailbox(name string) error {
 		return errors.Wrapf(err, "CreateMailbox (parents) %s", name)
 	}
 
-	if _, err := tx.Stmt(u.parent.createMbox).Exec(u.id, name, time.Now().Unix()); err != nil {
+	if _, err := tx.Stmt(u.parent.createMbox).Exec(u.id, name, u.parent.prng.Uint32()); err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "Duplicate entry") { // TODO: Check error messages for other RDBMS.
 			return backend.ErrMailboxAlreadyExists
 		}

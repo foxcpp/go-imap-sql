@@ -846,6 +846,36 @@ func Mailbox_CopyMessages(t *testing.T, newBack NewBackFunc, closeBack CloseBack
 	})
 }
 
+func Mailbox_UidValidity_On_Rename(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
+	// Server implementation may choice to maintain the same UIDNEXT and UIDVALIDITY
+	// or invalidate UIDNEXT and assign new value to UIDVALIDITY.
+
+	b := newBack()
+	defer closeBack(b)
+	u := getUser(t, b)
+	defer assert.NilError(t, u.Logout())
+
+	mboxSrc, mboxTgt := getMbox(t, u), getMbox(t, u)
+	createMsgs(t, mboxSrc, 5)
+	createMsgs(t, mboxTgt, 3)
+
+	oldStatus, err := mboxTgt.Status([]imap.StatusItem{imap.StatusUidValidity, imap.StatusUidNext})
+	assert.NilError(t, err)
+
+	assert.NilError(t, u.DeleteMailbox(mboxTgt.Name()))
+	assert.NilError(t, u.RenameMailbox(mboxSrc.Name(), mboxTgt.Name()))
+
+	mboxTgt, err = u.GetMailbox(mboxTgt.Name())
+	assert.NilError(t, err)
+
+	newStatus, err := mboxTgt.Status([]imap.StatusItem{imap.StatusUidValidity, imap.StatusUidNext})
+	assert.NilError(t, err)
+
+	if oldStatus.UidValidity == newStatus.UidValidity {
+		assert.Check(t, oldStatus.UidNext > newStatus.UidNext, "Older UIDNEXT is bigger than never, but UIDVALIDITY is same")
+	}
+}
+
 func Mailbox_MoveMessages(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)

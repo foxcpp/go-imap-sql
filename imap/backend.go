@@ -5,9 +5,11 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
+	mathrand "math/rand"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/emersion/go-imap/backend"
 	"github.com/foxcpp/go-sqlmail"
@@ -87,6 +89,10 @@ func (d db) rewriteSQL(req string) (res string) {
 	return
 }
 
+type Rand interface {
+	Uint32() uint32
+}
+
 // Opts structure specifies additional settings that may be set
 // for backend.
 //
@@ -104,6 +110,9 @@ type Opts struct {
 	// Second is useful for tests that don't consume values from Updates
 	// channel.
 	LazyUpdatesInit bool
+
+	// Custom randomness source for UIDVALIDITY values generation.
+	PRNG Rand
 }
 
 type Backend struct {
@@ -111,6 +120,8 @@ type Backend struct {
 	opts Opts
 
 	childrenExt bool
+
+	prng Rand
 
 	updates chan backend.Update
 	// updates channel is lazily initalized, so we need to ensure thread-safety.
@@ -194,6 +205,12 @@ func NewBackend(driver, dsn string, opts Opts) (*Backend, error) {
 	b.opts = opts
 	if !b.opts.LazyUpdatesInit {
 		b.updates = make(chan backend.Update, 20)
+	}
+
+	if b.opts.PRNG != nil {
+		b.prng = opts.PRNG
+	} else {
+		b.prng = mathrand.New(mathrand.NewSource(time.Now().Unix()))
 	}
 
 	if driver == "sqlite3" {
@@ -293,7 +310,7 @@ func (b *Backend) initSchema() error {
 			msgId BIGINT NOT NULL,
 			date BIGINT NOT NULL,
 			bodyLen INTEGER NOT NULL,
-			body BLOB NOT NULL,
+			body LONGTEXT NOT NULL,
 			mark INTEGER NOT NULL DEFAULT 0,
 
 			PRIMARY KEY(mboxId, msgId)

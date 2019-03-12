@@ -3,6 +3,7 @@ package imap
 import (
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"testing"
@@ -25,6 +26,9 @@ func initTestBackend() testsuite.Backend {
 		dsn = ":memory:"
 	}
 
+	randSrc := rand.NewSource(0)
+	prng := rand.New(randSrc)
+
 	// This is meant for DB debugging.
 	if os.Getenv("PRESERVE_SQLITE3_DB") == "1" {
 		log.Println("Using sqlite3 DB in temporary directory.")
@@ -36,7 +40,10 @@ func initTestBackend() testsuite.Backend {
 		dsn = filepath.Join(tempDir, "test.db")
 	}
 
-	b, err := NewBackend(driver, dsn, Opts{LazyUpdatesInit: true})
+	b, err := NewBackend(driver, dsn, Opts{
+		LazyUpdatesInit: true,
+		PRNG:            prng,
+	})
 	if err != nil {
 		panic(err)
 	}

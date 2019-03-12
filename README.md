@@ -33,6 +33,27 @@ Here are extensions supported by go-sqlmail:
 - ~~[UIDPLUS]~~ _(planned)_
 - [MOVE]
 
+#### UIDVALIDITY
+
+go-sqlmail never invalidates UIDs in an existing mailbox. If mailbox is
+DELETE'd then UIDVALIDITY value changes.
+
+Unlike many popular IMAP server implementations, go-sqlmail uses randomly
+generated UIDVALIDITY values instead of timestamps.
+
+This makes several things easier to implement with less edge cases. And answer
+to the question you are already probably asked: To make go-sqlmail malfunction
+you need to get Go's PRNG to generate two equal integers in range of [1,
+2^32-1] just at right moment (seems unlikely enough to ignore it). Even then,
+it will not cause much problems due to the way most client implementations
+work.
+
+go-sqlmail uses separate `math/rand.Rand` instance and seeds it with system
+time on initialization (in `NewBackend`).
+
+You can provide custom pre-seeded struct implementing `math/rand.Source` 
+in `Opts` struct (`PRNG` field).
+
 #### Maddy
 
 You can try go-sqlmail as part of [maddy] mail server.  Currently it is not

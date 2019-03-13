@@ -66,6 +66,7 @@ func (d db) rewriteSQL(req string) (res string) {
 		res = strings.TrimLeft(res, "\n\t")
 		if strings.HasPrefix(res, "CREATE TABLE") {
 			res = strings.Replace(res, "BLOB", "BYTEA", -1)
+			res = strings.Replace(res, "LONGTEXT", "BYTEA", -1)
 			res = strings.Replace(res, "AUTOINCREMENT", "", -1)
 		}
 	} else if d.driver == "mysql" {
@@ -297,7 +298,7 @@ func (b *Backend) initSchema() error {
 			mark INTEGER NOT NULL DEFAULT 0,
 			msgsizelimit INTEGER DEFAULT NULL,
 			uidnext INTEGER NOT NULL DEFAULT 1,
-			uidvalidity INTEGER NOT NULL,
+			uidvalidity BIGINT NOT NULL,
 
 			UNIQUE(uid, name)
 		)`)

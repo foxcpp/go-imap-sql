@@ -1196,15 +1196,25 @@ func (b *Backend) ListUsers() ([]string, error) {
 func (b *Backend) GetUser(username string) (backend.User, error) {
 	uid, _, _, err := b.UserCreds(username)
 	if err != nil {
-		return nil, sqlmail.ErrUserDoesntExists
+		if err == sql.ErrNoRows {
+			if err := b.CreateUser(username, ""); err != nil {
+				return nil, err
+			}
+			uid, _, _, err = b.UserCreds(username)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			return nil, err
+		}
 	}
 	return &User{id: uid, username: username, parent: b}, nil
 }
 
-func (b *Backend) Login(username, password string) (backend.User, error) {
+func (b *Backend) checkUser(username, password string) (uint64, error) {
 	uid, passHash, passSalt, err := b.UserCreds(username)
 	if err != nil {
-		return nil, backend.ErrInvalidCredentials
+		return 0, backend.ErrInvalidCredentials
 	}
 
 	pass := make([]byte, 0, len(password)+len(passSalt))
@@ -1212,7 +1222,21 @@ func (b *Backend) Login(username, password string) (backend.User, error) {
 	pass = append(pass, passSalt...)
 	digest := sha3.Sum512(pass)
 	if subtle.ConstantTimeCompare(digest[:], passHash) != 1 {
-		return nil, backend.ErrInvalidCredentials
+		return 0, backend.ErrInvalidCredentials
+	}
+
+	return uid, nil
+}
+
+func (b *Backend) CheckPlain(username, password string) bool {
+	_, err := b.checkUser(username, password)
+	return err == nil
+}
+
+func (b *Backend) Login(username, password string) (backend.User, error) {
+	uid, err := b.checkUser(username, password)
+	if err != nil {
+		return nil, err
 	}
 
 	return &User{id: uid, username: username, parent: b}, nil

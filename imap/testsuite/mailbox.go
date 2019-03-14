@@ -327,7 +327,7 @@ func Mailbox_SetMessageFlags(t *testing.T, newBack NewBackFunc, closeBack CloseB
 
 			seq, _ = imap.ParseSeqSet("*")
 			ch := make(chan *imap.Message, len(initialFlags)+5)
-			mbox.ListMessages(uid, seq, []imap.FetchItem{imap.FetchUid, imap.FetchFlags}, ch)
+			assert.NilError(t, mbox.ListMessages(uid, seq, []imap.FetchItem{imap.FetchUid, imap.FetchFlags}, ch))
 			assert.Assert(t, is.Len(ch, len(finalFlags)))
 
 			for i, flagset := range finalFlags {

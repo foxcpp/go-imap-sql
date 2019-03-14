@@ -18,7 +18,7 @@ import (
 
 func makeMsgSlots(count int) (res []uint32) {
 	res = make([]uint32, count)
-	for i, _ := range res {
+	for i := range res {
 		res[i] = uint32(i + 1)
 	}
 	return

@@ -134,6 +134,7 @@ func main() {
 					Usage:       "Rename mailbox (requires --unsafe)",
 					Description: "Rename may cause unexpected failures on client-side so be careful.",
 					ArgsUsage:   "USERNAME OLDNAME NEWNAME",
+					Action:      mboxesRename,
 				},
 				{
 					Name:      "appendlimit",

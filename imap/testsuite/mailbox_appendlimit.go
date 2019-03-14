@@ -26,7 +26,7 @@ func Backend_AppendLimit(t *testing.T, newBack NewBackFunc, closeBack CloseBackF
 	defer assert.NilError(t, u.Logout())
 
 	t.Run("No Limit", func(t *testing.T) {
-		bAL.SetMessageLimit(nil)
+		assert.NilError(t, bAL.SetMessageLimit(nil))
 		mbox := getMbox(t, u)
 
 		err := mbox.CreateMessage([]string{}, time.Now(), strings.NewReader(strings.Repeat("A", 300)))
@@ -34,7 +34,7 @@ func Backend_AppendLimit(t *testing.T, newBack NewBackFunc, closeBack CloseBackF
 	})
 	t.Run("Under Limit", func(t *testing.T) {
 		lim := uint32(500)
-		bAL.SetMessageLimit(&lim)
+		assert.NilError(t, bAL.SetMessageLimit(&lim))
 		mbox := getMbox(t, u)
 
 		err := mbox.CreateMessage([]string{}, time.Now(), strings.NewReader(strings.Repeat("A", 300)))
@@ -42,7 +42,7 @@ func Backend_AppendLimit(t *testing.T, newBack NewBackFunc, closeBack CloseBackF
 	})
 	t.Run("Over Limit", func(t *testing.T) {
 		lim := uint32(500)
-		bAL.SetMessageLimit(&lim)
+		assert.NilError(t, bAL.SetMessageLimit(&lim))
 		mbox := getMbox(t, u)
 
 		err := mbox.CreateMessage([]string{}, time.Now(), strings.NewReader(strings.Repeat("A", 700)))
@@ -68,7 +68,7 @@ func User_AppendLimit(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc
 	}
 
 	t.Run("No Limit", func(t *testing.T) {
-		uAL.SetMessageLimit(nil)
+		assert.NilError(t, uAL.SetMessageLimit(nil))
 		mbox := getMbox(t, u)
 
 		err := mbox.CreateMessage([]string{}, time.Now(), strings.NewReader(strings.Repeat("A", 300)))
@@ -76,7 +76,7 @@ func User_AppendLimit(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc
 	})
 	t.Run("Under Limit", func(t *testing.T) {
 		lim := uint32(500)
-		uAL.SetMessageLimit(&lim)
+		assert.NilError(t, uAL.SetMessageLimit(&lim))
 		mbox := getMbox(t, u)
 
 		err := mbox.CreateMessage([]string{}, time.Now(), strings.NewReader(strings.Repeat("A", 300)))
@@ -84,7 +84,7 @@ func User_AppendLimit(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc
 	})
 	t.Run("Over Limit", func(t *testing.T) {
 		lim := uint32(500)
-		uAL.SetMessageLimit(&lim)
+		assert.NilError(t, uAL.SetMessageLimit(&lim))
 		mbox := getMbox(t, u)
 
 		err := mbox.CreateMessage([]string{}, time.Now(), strings.NewReader(strings.Repeat("A", 700)))
@@ -92,9 +92,9 @@ func User_AppendLimit(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc
 	})
 	t.Run("Override backend - Under Limit", func(t *testing.T) {
 		lim := uint32(100)
-		bAL.SetMessageLimit(&lim)
+		assert.NilError(t, bAL.SetMessageLimit(&lim))
 		lim = 500
-		uAL.SetMessageLimit(&lim)
+		assert.NilError(t, uAL.SetMessageLimit(&lim))
 		mbox := getMbox(t, u)
 
 		err := mbox.CreateMessage([]string{}, time.Now(), strings.NewReader(strings.Repeat("A", 400)))
@@ -102,9 +102,9 @@ func User_AppendLimit(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc
 	})
 	t.Run("Override backend - Over Limit", func(t *testing.T) {
 		lim := uint32(1000)
-		bAL.SetMessageLimit(&lim)
+		assert.NilError(t, bAL.SetMessageLimit(&lim))
 		lim = 500
-		uAL.SetMessageLimit(&lim)
+		assert.NilError(t, uAL.SetMessageLimit(&lim))
 		mbox := getMbox(t, u)
 
 		err := mbox.CreateMessage([]string{}, time.Now(), strings.NewReader(strings.Repeat("A", 700)))
@@ -161,7 +161,7 @@ func Mailbox_AppendLimit(t *testing.T, newBack NewBackFunc, closeBack CloseBackF
 	})
 	t.Run("Override backend - Under Limit", func(t *testing.T) {
 		lim := uint32(100)
-		bAL.SetMessageLimit(&lim)
+		assert.NilError(t, bAL.SetMessageLimit(&lim))
 		mbox := getMbox(t, u)
 		setMboxLim(t, mbox, 500)
 
@@ -170,9 +170,9 @@ func Mailbox_AppendLimit(t *testing.T, newBack NewBackFunc, closeBack CloseBackF
 	})
 	t.Run("Override backend - Over Limit", func(t *testing.T) {
 		lim := uint32(1000)
-		bAL.SetMessageLimit(&lim)
+		assert.NilError(t, bAL.SetMessageLimit(&lim))
 		lim = 500
-		uAL.SetMessageLimit(&lim)
+		assert.NilError(t, uAL.SetMessageLimit(&lim))
 		mbox := getMbox(t, u)
 
 		err := mbox.CreateMessage([]string{}, time.Now(), strings.NewReader(strings.Repeat("A", 700)))
@@ -180,7 +180,7 @@ func Mailbox_AppendLimit(t *testing.T, newBack NewBackFunc, closeBack CloseBackF
 	})
 	t.Run("Override user - Under Limit", func(t *testing.T) {
 		lim := uint32(100)
-		uAL.SetMessageLimit(&lim)
+		assert.NilError(t, uAL.SetMessageLimit(&lim))
 		mbox := getMbox(t, u)
 		setMboxLim(t, mbox, 500)
 
@@ -189,9 +189,9 @@ func Mailbox_AppendLimit(t *testing.T, newBack NewBackFunc, closeBack CloseBackF
 	})
 	t.Run("Override user - Over Limit", func(t *testing.T) {
 		lim := uint32(1000)
-		uAL.SetMessageLimit(&lim)
+		assert.NilError(t, uAL.SetMessageLimit(&lim))
 		lim = 500
-		uAL.SetMessageLimit(&lim)
+		assert.NilError(t, uAL.SetMessageLimit(&lim))
 		mbox := getMbox(t, u)
 
 		err := mbox.CreateMessage([]string{}, time.Now(), strings.NewReader(strings.Repeat("A", 700)))
@@ -199,11 +199,11 @@ func Mailbox_AppendLimit(t *testing.T, newBack NewBackFunc, closeBack CloseBackF
 	})
 	t.Run("Override backend & user - Under Limit", func(t *testing.T) {
 		lim := uint32(200)
-		bAL.SetMessageLimit(&lim)
+		assert.NilError(t, bAL.SetMessageLimit(&lim))
 		lim = 1000
-		uAL.SetMessageLimit(&lim)
+		assert.NilError(t, uAL.SetMessageLimit(&lim))
 		lim = 100
-		uAL.SetMessageLimit(&lim)
+		assert.NilError(t, uAL.SetMessageLimit(&lim))
 		mbox := getMbox(t, u)
 		setMboxLim(t, mbox, 500)
 
@@ -212,9 +212,9 @@ func Mailbox_AppendLimit(t *testing.T, newBack NewBackFunc, closeBack CloseBackF
 	})
 	t.Run("Override backend & user - Over Limit", func(t *testing.T) {
 		lim := uint32(2000)
-		bAL.SetMessageLimit(&lim)
+		assert.NilError(t, bAL.SetMessageLimit(&lim))
 		lim = 1000
-		uAL.SetMessageLimit(&lim)
+		assert.NilError(t, uAL.SetMessageLimit(&lim))
 		mbox := getMbox(t, u)
 		setMboxLim(t, mbox, 500)
 

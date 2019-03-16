@@ -15,12 +15,12 @@ func UserDB_CreateUser(t *testing.T, newBack NewBackFunc, closeBack CloseBackFun
 	assert.NilError(t, b.CreateUser("username1", "password1"), "CreateUser username1 failed")
 	assert.Error(t, b.CreateUser("username1", "password1"), sqlmail.ErrUserAlreadyExists.Error(), "CreateUser username1 (again) failed")
 
-	u, err := b.GetUser("username1")
+	u, err := b.Login("username1", "password1")
 	assert.NilError(t, err, "GetUser username1 failed")
 	assert.NilError(t, u.Logout())
 
-	_, err = b.GetUser("username2")
-	assert.Error(t, err, sqlmail.ErrUserDoesntExists.Error(), "GetUser username2 failed")
+	_, err = b.Login("username2", "password1")
+	assert.Error(t, err, backend.ErrInvalidCredentials.Error(), "GetUser username2 failed")
 }
 
 func UserDB_Login(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {

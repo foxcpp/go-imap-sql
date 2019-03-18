@@ -80,11 +80,11 @@ func msgsRemove(ctx *cli.Context) error {
 		return errors.New("Error: USERNAME is required")
 	}
 	name := ctx.Args().Get(1)
-	if username == "" {
+	if name == "" {
 		return errors.New("Error: MAILBOX is required")
 	}
 	seqset := ctx.Args().Get(2)
-	if username == "" {
+	if seqset == "" {
 		return errors.New("Error: SEQSET is required")
 	}
 

@@ -56,19 +56,14 @@ in `Opts` struct (`PRNG` field).
 
 #### Maddy
 
-You can try go-sqlmail as part of [maddy] mail server.  Currently it is not
+You can try go-sqlmail as part of [maddy] mail server. Currently it is not
 merged into upstream yet so here is where you should get code from:
-https://github.com/foxcpp/maddy/tree/sqlmail
+https://github.com/foxcpp/maddy/tree/modular
 
-You need to execute this command prior to building to get lastest development version:
+Here is minimal example for testing, using SQLite (you need CGo for SQLite!) in
+current directory:
 ```
-go get github.com/foxcpp/go-sqlmail@dev
-```
-
-Here is minimal example for testing, using SQLite (you need CGo for SQLite!):
-```
-imap://127.0.0.1:1993 {
-    sql sqlite3 maddy.db
+imap imap://127.0.0.1:1993 {
     insecureauth
 }
 ```

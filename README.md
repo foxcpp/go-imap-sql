@@ -56,21 +56,11 @@ in `Opts` struct (`PRNG` field).
 
 #### Maddy
 
-You can try go-imap-sql as part of [maddy] mail server. Currently it is not
-merged into upstream yet so here is where you should get code from:
-https://github.com/foxcpp/maddy/tree/modular
-
-Here is minimal example for testing, using SQLite (you need CGo for SQLite!) in
-current directory:
-```
-imap imap://127.0.0.1:1993 {
-    insecureauth
-}
-```
+You can use go-imap-sql as part of the [maddy] mail server.
 
 #### imapsql-ctl
 
-For direct access to database you can use imapsql-ctl. See more information in
+For direct access to database you can use imapsql-ctl console utility. See more information in
 separate README [here](cmd/imapsql-ctl).
 ```
 go install github.com/foxcpp/go-imap-sql/cmd/imapsql-ctl

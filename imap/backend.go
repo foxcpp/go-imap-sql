@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/emersion/go-imap/backend"
-	"github.com/foxcpp/go-sqlmail"
+	"github.com/foxcpp/go-imap-sql"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/sha3"
 )
@@ -1126,7 +1126,7 @@ func (b *Backend) CreateUser(username, password string) error {
 
 	_, err := b.addUser.Exec(username, hex.EncodeToString(digest[:]), hex.EncodeToString(salt))
 	if err != nil && (strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "Duplicate entry") || strings.Contains(err.Error(), "unique")) {
-		return sqlmail.ErrUserAlreadyExists
+		return imapsql.ErrUserAlreadyExists
 	}
 	return errors.Wrap(err, "CreateUser")
 }
@@ -1141,7 +1141,7 @@ func (b *Backend) DeleteUser(username string) error {
 		return errors.Wrap(err, "SetUserPassword")
 	}
 	if affected == 0 {
-		return sqlmail.ErrUserDoesntExists
+		return imapsql.ErrUserDoesntExists
 	}
 	return nil
 }
@@ -1168,7 +1168,7 @@ func (b *Backend) SetUserPassword(username, newPassword string) error {
 		return errors.Wrap(err, "SetUserPassword")
 	}
 	if affected == 0 {
-		return sqlmail.ErrUserDoesntExists
+		return imapsql.ErrUserDoesntExists
 	}
 	return nil
 }
@@ -1197,7 +1197,7 @@ func (b *Backend) GetExistingUser(username string) (backend.User, error) {
 	uid, _, _, err := b.UserCreds(username)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, sqlmail.ErrUserDoesntExists
+			return nil, imapsql.ErrUserDoesntExists
 		}
 		return nil, err
 	}

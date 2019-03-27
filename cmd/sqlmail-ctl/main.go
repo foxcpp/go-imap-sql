@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/foxcpp/go-sqlmail"
-	"github.com/foxcpp/go-sqlmail/imap"
+	"github.com/foxcpp/go-imap-sql"
+	"github.com/foxcpp/go-imap-sql/imap"
 	"github.com/urfave/cli"
 )
 
@@ -63,8 +63,8 @@ func main() {
 	stdinScnr = bufio.NewScanner(os.Stdin)
 
 	app := cli.NewApp()
-	app.Usage = "go-sqlmail database management utility"
-	app.Version = sqlmail.VersionStr + " (go-sqlmail)"
+	app.Usage = "go-imap-sql database management utility"
+	app.Version = imapsql.VersionStr + " (go-imap-sql)"
 	app.HideVersion = true
 	app.Before = connectToDB
 	app.After = closeBackend

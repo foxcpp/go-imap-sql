@@ -1,4 +1,4 @@
-package sqlmail
+package imapsql
 
 import appendlimit "github.com/emersion/go-imap-appendlimit"
 

@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/emersion/go-imap/backend"
-	"github.com/foxcpp/go-sqlmail"
+	"github.com/foxcpp/go-imap-sql"
 	"gotest.tools/assert"
 )
 
@@ -13,7 +13,7 @@ func UserDB_CreateUser(t *testing.T, newBack NewBackFunc, closeBack CloseBackFun
 	defer closeBack(b)
 
 	assert.NilError(t, b.CreateUser("username1", "password1"), "CreateUser username1 failed")
-	assert.Error(t, b.CreateUser("username1", "password1"), sqlmail.ErrUserAlreadyExists.Error(), "CreateUser username1 (again) failed")
+	assert.Error(t, b.CreateUser("username1", "password1"), imapsql.ErrUserAlreadyExists.Error(), "CreateUser username1 (again) failed")
 
 	u, err := b.Login("username1", "password1")
 	assert.NilError(t, err, "GetUser username1 failed")
@@ -58,7 +58,7 @@ func UserDB_DeleteUser(t *testing.T, newBack NewBackFunc, closeBack CloseBackFun
 	b := newBack()
 	defer closeBack(b)
 
-	assert.Error(t, b.DeleteUser("username1"), sqlmail.ErrUserDoesntExists.Error(), "DeleteUser username1 (non existent) failed")
+	assert.Error(t, b.DeleteUser("username1"), imapsql.ErrUserDoesntExists.Error(), "DeleteUser username1 (non existent) failed")
 	assert.NilError(t, b.CreateUser("username1", "password1"), "CreateUser username1 failed")
 	assert.NilError(t, b.DeleteUser("username1"), "DeleteUser username1 failed")
 	_, err := b.Login("username1", "password1")

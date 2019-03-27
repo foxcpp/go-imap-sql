@@ -7,12 +7,12 @@ import (
 	"testing"
 
 	"github.com/emersion/go-imap/backend"
-	"github.com/foxcpp/go-sqlmail"
+	"github.com/foxcpp/go-imap-sql"
 )
 
 type Backend interface {
 	backend.Backend
-	sqlmail.IMAPUsersDB
+	imapsql.IMAPUsersDB
 }
 
 type NewBackFunc func() Backend

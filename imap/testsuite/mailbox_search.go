@@ -15,7 +15,7 @@ import (
 // https://github.com/emersion/go-imap/blob/v1/backend/backendutil
 //
 // Intended for backends using custom search implementation.
-// go-sqlmail uses backendutil, so this tests block is useless
+// go-imap-sql uses backendutil, so this tests block is useless
 // for it.
 
 var matchTests = []struct {

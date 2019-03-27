@@ -1,16 +1,16 @@
-sqlmail-ctl utility
+imapsql-ctl utility
 -------------------
 
-Low-level tool for go-sqlmail database management. Minimal wrapper for Backend methods.
+Low-level tool for go-imap-sql database management. Minimal wrapper for Backend methods.
 
 #### --help
 
 ```
 NAME:
-   sqlmail-ctl users - User accounts management
+   imapsql-ctl users - User accounts management
 
 USAGE:
-   sqlmail-ctl users [global options] command [command options] [arguments...]
+   imapsql-ctl users [global options] command [command options] [arguments...]
 
 COMMANDS:
      list         List created user accounts
@@ -24,10 +24,10 @@ GLOBAL OPTIONS:
 
 
 NAME:
-   sqlmail-ctl mboxes - Mailboxes (folders) management
+   imapsql-ctl mboxes - Mailboxes (folders) management
 
 USAGE:
-   sqlmail-ctl mboxes [global options] command [command options] [arguments...]
+   imapsql-ctl mboxes [global options] command [command options] [arguments...]
 
 COMMANDS:
      list         Show mailboxes of user
@@ -41,10 +41,10 @@ GLOBAL OPTIONS:
 
 
 NAME:
-   sqlmail-ctl users - User accounts management
+   imapsql-ctl users - User accounts management
 
 USAGE:
-   sqlmail-ctl users [global options] command [command options] [arguments...]
+   imapsql-ctl users [global options] command [command options] [arguments...]
 
 COMMANDS:
      list         List created user accounts
@@ -58,10 +58,10 @@ GLOBAL OPTIONS:
 
 
 NAME:
-   sqlmail-ctl - go-sqlmail database management utility
+   imapsql-ctl - go-imap-sql database management utility
 
 USAGE:
-   sqlmail-ctl [global options] command [command options] [arguments...]
+   imapsql-ctl [global options] command [command options] [arguments...]
 
 COMMANDS:
      mboxes   Mailboxes (folders) management
@@ -82,10 +82,10 @@ GLOBAL OPTIONS:
 #### --unsafe option
 
 Per RFC 3501, server must send notifications to clients about any mailboxes
-change. Since sqlmail-ctl is a low-level tool it doesn't implements any way to
+change. Since imapsql-ctl is a low-level tool it doesn't implements any way to
 tell server to send such notifications. Most popular SQL RDBMSs don't provide
 any means to detect database change and we currently have no plans on
-implementing anything for that on go-sqlmail level.
+implementing anything for that on go-imap-sql level.
 
 Therefore, you generally should avoid writting to mailboxes if client who owns
 this mailbox is connected to the server. Failure to send required notifications

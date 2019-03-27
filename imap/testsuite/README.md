@@ -2,7 +2,7 @@
 
 Tests moved to separate package because they are reusable.
 
-Tested backend must implement IMAPUsersDB interface defined in go-sqlmail package.
+Tested backend must implement IMAPUsersDB interface defined in go-imap-sql package.
 Tests for IMAP extensions may require other interfaces, check messages printed
 for skipped tests.
 

@@ -1,4 +1,4 @@
-module github.com/foxcpp/go-sqlmail
+module github.com/foxcpp/go-imap-sql
 
 require (
 	github.com/emersion/go-imap v1.0.0-beta.2

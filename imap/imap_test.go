@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/foxcpp/go-sqlmail/imap/testsuite"
+	"github.com/foxcpp/go-imap-sql/imap/testsuite"
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
@@ -32,7 +32,7 @@ func initTestBackend() testsuite.Backend {
 	// This is meant for DB debugging.
 	if os.Getenv("PRESERVE_SQLITE3_DB") == "1" {
 		log.Println("Using sqlite3 DB in temporary directory.")
-		tempDir, err := ioutil.TempDir("", "go-sqlmail-tests-")
+		tempDir, err := ioutil.TempDir("", "go-imap-sql-tests-")
 		if err != nil {
 			panic(err)
 		}

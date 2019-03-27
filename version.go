@@ -1,4 +1,4 @@
-package sqlmail
+package imapsql
 
 const VersionStr = "0.1"
 const VersionMajor = 0

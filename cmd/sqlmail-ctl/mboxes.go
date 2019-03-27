@@ -6,7 +6,7 @@ import (
 	"os"
 
 	eimap "github.com/emersion/go-imap"
-	sqlmail "github.com/foxcpp/go-sqlmail"
+	imapsql "github.com/foxcpp/go-imap-sql"
 	"github.com/urfave/cli"
 )
 
@@ -151,7 +151,7 @@ func mboxesAppendLimit(ctx *cli.Context) error {
 		return err
 	}
 
-	mboxAL := mbox.(sqlmail.AppendLimitMbox)
+	mboxAL := mbox.(imapsql.AppendLimitMbox)
 
 	if ctx.IsSet("value,v") {
 		val := ctx.Int("value,v")

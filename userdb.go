@@ -1,4 +1,4 @@
-package sqlmail
+package imapsql
 
 import (
 	"github.com/emersion/go-imap/backend"

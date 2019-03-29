@@ -850,7 +850,8 @@ func (b *Backend) prepareStmts() error {
 	b.massClearFlagsUid, err = b.db.Prepare(`
 		DELETE FROM flags
 		WHERE mboxId = ?
-		AND msgId BETWEEN ? AND ?`)
+		AND msgId BETWEEN ? AND ?
+		AND flag != '\Recent'`)
 	if err != nil {
 		return errors.Wrap(err, "massClearFlagsUid prep")
 	}
@@ -866,7 +867,8 @@ func (b *Backend) prepareStmts() error {
 					WHERE mboxId = ?
 				) seq
 				WHERE seqnum BETWEEN ? AND ?
-			)`)
+			)
+			AND flag != '\Recent'`)
 	} else {
 		b.massClearFlagsSeq, err = b.db.Prepare(`
 			DELETE FROM flags
@@ -879,7 +881,8 @@ func (b *Backend) prepareStmts() error {
 					WHERE mboxId = ?
 				) seq
 				WHERE seqnum BETWEEN ? AND ?
-			)`)
+			)
+			AND flag != '\Recent'`)
 	}
 	if err != nil {
 		return errors.Wrap(err, "massClearFlagsSeq prep")

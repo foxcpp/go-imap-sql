@@ -510,6 +510,15 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 
 	var query *sql.Stmt
 
+	newFlagSet := make([]string, 0, len(flags))
+	for _, flag := range flags {
+		if flag == imap.RecentFlag {
+			continue
+		}
+		newFlagSet = append(newFlagSet, flag)
+	}
+	flags = newFlagSet
+
 	switch operation {
 	case imap.SetFlags:
 		for _, seq := range seqset.Set {

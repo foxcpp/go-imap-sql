@@ -220,11 +220,6 @@ func Mailbox_MessageUpdate(t *testing.T, newBack NewBackFunc, closeBack CloseBac
 			for i := 1; i <= len(initialFlags); i++ {
 				assert.NilError(t, mbox.CreateMessage(initialFlags[uint32(i)], time.Now(), strings.NewReader(testMsg)))
 				consumeUpdates(t, upds, 1)
-
-				seq := imap.SeqSet{}
-				seq.AddNum(uint32(i))
-				assert.NilError(t, mbox.UpdateMessagesFlags(false, &seq, imap.RemoveFlags, []string{imap.RecentFlag}))
-				consumeUpdates(t, upds, 1)
 			}
 
 			seq, _ := imap.ParseSeqSet(seqset)
@@ -271,9 +266,9 @@ func Mailbox_MessageUpdate(t *testing.T, newBack NewBackFunc, closeBack CloseBac
 			},
 			imap.SetFlags, []string{"t0-1", "t0-2"},
 			map[uint32][]string{
-				1: []string{"t0-1", "t0-2"},
-				3: []string{"t0-1", "t0-2"},
-				5: []string{"t0-1", "t0-2"},
+				1: []string{imap.RecentFlag, "t0-1", "t0-2"},
+				3: []string{imap.RecentFlag, "t0-1", "t0-2"},
+				5: []string{imap.RecentFlag, "t0-1", "t0-2"},
 			},
 		},
 		{
@@ -286,9 +281,9 @@ func Mailbox_MessageUpdate(t *testing.T, newBack NewBackFunc, closeBack CloseBac
 			},
 			imap.AddFlags, []string{"t0-1", "t0-2"},
 			map[uint32][]string{
-				1: []string{"t0-1", "t0-2", "t1-1", "t1-2"},
-				3: []string{"t0-1", "t0-2", "t3-5", "t3-6"},
-				5: []string{"t0-1", "t0-2", "t5-10", "t5-9"},
+				1: []string{imap.RecentFlag, "t0-1", "t0-2", "t1-1", "t1-2"},
+				3: []string{imap.RecentFlag, "t0-1", "t0-2", "t3-5", "t3-6"},
+				5: []string{imap.RecentFlag, "t0-1", "t0-2", "t5-10", "t5-9"},
 			},
 		},
 		{
@@ -301,9 +296,9 @@ func Mailbox_MessageUpdate(t *testing.T, newBack NewBackFunc, closeBack CloseBac
 			},
 			imap.RemoveFlags, []string{"t0-0"},
 			map[uint32][]string{
-				2: []string{"t2-4"},
-				3: []string{"t3-5"},
-				5: []string{"t5-10"},
+				2: []string{imap.RecentFlag, "t2-4"},
+				3: []string{imap.RecentFlag, "t3-5"},
+				5: []string{imap.RecentFlag, "t5-10"},
 			},
 		},
 	}

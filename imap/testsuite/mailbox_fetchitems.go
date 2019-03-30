@@ -179,30 +179,96 @@ var testBodyStructure = &imap.BodyStructure{
 	Extended: true,
 }
 
-func Mailbox_ListMessages_BodyStruct(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
+var testEnvelope = &imap.Envelope{
+	Date: testDate,
+	From: []*imap.Address{
+		&imap.Address{
+			PersonalName: "Mitsuha Miyamizu",
+			MailboxName:  "mitsuha.miyamizu",
+			HostName:     "example.org",
+		},
+	},
+	To: []*imap.Address{
+		&imap.Address{
+			PersonalName: "Taki Tachibana",
+			MailboxName:  "taki.tachibana",
+			HostName:     "example.org",
+		},
+	},
+	Subject:   "Your Name.",
+	MessageId: "42@example.org",
+	Sender:    []*imap.Address{},
+	Cc:        []*imap.Address{},
+	Bcc:       []*imap.Address{},
+	ReplyTo:   []*imap.Address{},
+}
+
+func Mailbox_ListMessages_Meta(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
 	b := newBack()
 	defer closeBack(b)
-	err := b.CreateUser("username1", "password1")
-	assert.NilError(t, err)
-	u, err := b.GetUser("username1")
-	assert.NilError(t, err)
+	u := getUser(t, b)
 	defer assert.NilError(t, u.Logout())
+	mbox := getMbox(t, u)
+	createMsgs(t, mbox, 1)
 
-	assert.NilError(t, u.CreateMailbox("TEST"))
-	mbox, err := u.GetMailbox("TEST")
-	assert.NilError(t, err)
+	t.Run("fetch bodystruct", func(t *testing.T) {
+		seq, _ := imap.ParseSeqSet("1")
+		ch := make(chan *imap.Message, 10)
+		assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchBodyStructure}, ch))
+		assert.Assert(t, is.Len(ch, 1), "Wrong number of messages returned")
+		msg := <-ch
+		assert.Equal(t, msg.SeqNum, uint32(1))
 
-	date := time.Now()
-	err = mbox.CreateMessage([]string{"$Test1", "$Test2"}, date, strings.NewReader(testMailString))
-	assert.NilError(t, err)
+		assert.DeepEqual(t, msg.BodyStructure, testBodyStructure)
+	})
 
-	seq, _ := imap.ParseSeqSet("1")
+	t.Run("fetch envelope", func(t *testing.T) {
+		seq, _ := imap.ParseSeqSet("1")
+		ch := make(chan *imap.Message, 10)
+		assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchEnvelope}, ch))
+		assert.Assert(t, is.Len(ch, 1), "Wrong number of messages returned")
+		msg := <-ch
 
-	ch := make(chan *imap.Message, 10)
-	assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchBodyStructure}, ch))
-	assert.Assert(t, is.Len(ch, 1), "Wrong number of messages returned")
-	msg := <-ch
-	assert.Equal(t, msg.SeqNum, uint32(1))
+		assert.DeepEqual(t, msg.Envelope, testEnvelope)
+	})
+}
 
-	assert.DeepEqual(t, msg.BodyStructure, testBodyStructure)
+func Mailbox_ListMessages_Multi(t *testing.T, newBack NewBackFunc, closeBack CloseBackFunc) {
+	b := newBack()
+	defer closeBack(b)
+	u := getUser(t, b)
+	defer assert.NilError(t, u.Logout())
+	mbox := getMbox(t, u)
+	createMsgs(t, mbox, 1)
+
+	t.Run("fetch uid,body[]", func(t *testing.T) {
+		seq, _ := imap.ParseSeqSet("1")
+		ch := make(chan *imap.Message, 10)
+		assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchUid, imap.FetchItem("BODY[]")}, ch))
+		assert.Assert(t, is.Len(ch, 1), "Wrong number of messages returned")
+		msg := <-ch
+
+		assert.Check(t, is.Equal(msg.Uid, uint32(1)), "UID mismatch")
+		assert.Check(t, is.Len(msg.Body, 1), "Wrong amount of body sections")
+		for _, v := range msg.Body {
+			blob, err := ioutil.ReadAll(v)
+			assert.NilError(t, err, "Body ReadAll failed")
+			assert.Check(t, is.DeepEqual(testMailString, string(blob)))
+		}
+	})
+	t.Run("fetch uid,body[header]", func(t *testing.T) {
+		seq, _ := imap.ParseSeqSet("1")
+		ch := make(chan *imap.Message, 10)
+		assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchUid, imap.FetchItem("BODY[HEADER]")}, ch))
+		assert.Assert(t, is.Len(ch, 1), "Wrong number of messages returned")
+		msg := <-ch
+
+		assert.Check(t, is.Equal(msg.Uid, uint32(1)), "UID mismatch")
+		assert.Check(t, is.Len(msg.Body, 1), "Wrong amount of body sections")
+		for _, v := range msg.Body {
+			blob, err := ioutil.ReadAll(v)
+			assert.NilError(t, err, "Body ReadAll failed")
+			assert.Check(t, is.DeepEqual(testHeaderString, string(blob)))
+		}
+	})
 }

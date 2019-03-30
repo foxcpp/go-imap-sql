@@ -278,6 +278,7 @@ func scanMessage(rows *sql.Rows, items []imap.FetchItem) (*imap.Message, error) 
 			if ent == nil {
 				ent, err = message.Read(bytes.NewReader(body))
 				if err != nil {
+					res.Envelope = new(imap.Envelope)
 					continue
 				}
 			}
@@ -290,6 +291,7 @@ func scanMessage(rows *sql.Rows, items []imap.FetchItem) (*imap.Message, error) 
 			if ent == nil {
 				ent, err = message.Read(bytes.NewReader(body))
 				if err != nil {
+					res.BodyStructure = new(imap.BodyStructure)
 					continue
 				}
 			}
@@ -310,16 +312,17 @@ func scanMessage(rows *sql.Rows, items []imap.FetchItem) (*imap.Message, error) 
 		case imap.FetchUid:
 			res.Uid = msgId
 		default:
-			if ent == nil {
-				ent, err = message.Read(bytes.NewReader(body))
-				if err != nil {
-					continue
-				}
-			}
-
 			sect, err := imap.ParseBodySectionName(item)
 			if err != nil {
 				break
+			}
+
+			if ent == nil {
+				ent, err = message.Read(bytes.NewReader(body))
+				if err != nil {
+					res.Body[sect] = bytes.NewReader([]byte{})
+					continue
+				}
 			}
 
 			res.Body[sect], err = backendutil.FetchBodySection(ent, sect)
@@ -330,6 +333,7 @@ func scanMessage(rows *sql.Rows, items []imap.FetchItem) (*imap.Message, error) 
 			}
 		}
 	}
+
 	return res, nil
 }
 

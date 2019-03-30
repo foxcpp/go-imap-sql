@@ -3,6 +3,7 @@ package imapsql
 import (
 	"bytes"
 	"database/sql"
+	"io"
 	"io/ioutil"
 	"strings"
 	"time"
@@ -169,14 +170,16 @@ func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uin
 		var seqNum uint32
 		var msgId uint32
 		var date int64
+		var headerLen uint32
+		var header []byte
 		var bodyLen uint32
 		var body []byte
 		var flagsStr string
-		if err := rows.Scan(&seqNum, &msgId, &date, &bodyLen, &body, &flagsStr); err != nil {
+		if err := rows.Scan(&seqNum, &msgId, &date, &headerLen, &header, &bodyLen, &body, &flagsStr); err != nil {
 			return res, errors.Wrap(err, "SearchMessages")
 		}
 
-		ent, err := message.Read(bytes.NewReader(body))
+		ent, err := message.Read(io.MultiReader(bytes.NewReader(header), bytes.NewReader(body)))
 		if err != nil {
 			return res, errors.Wrap(err, "SearchMessages")
 		}
@@ -261,10 +264,12 @@ func scanMessage(rows *sql.Rows, items []imap.FetchItem) (*imap.Message, error) 
 	var seqNum uint32
 	var msgId uint32
 	var date int64
+	var headerLen uint32
+	var header []byte
 	var bodyLen uint32
 	var body []byte
 	var flagsStr string
-	if err := rows.Scan(&seqNum, &msgId, &date, &bodyLen, &body, &flagsStr); err != nil {
+	if err := rows.Scan(&seqNum, &msgId, &date, &headerLen, &header, &bodyLen, &body, &flagsStr); err != nil {
 		return nil, err
 	}
 
@@ -276,7 +281,7 @@ func scanMessage(rows *sql.Rows, items []imap.FetchItem) (*imap.Message, error) 
 		switch item {
 		case imap.FetchEnvelope:
 			if ent == nil {
-				ent, err = message.Read(bytes.NewReader(body))
+				ent, err = message.Read(io.MultiReader(bytes.NewReader(header), bytes.NewReader(body)))
 				if err != nil {
 					res.Envelope = new(imap.Envelope)
 					continue
@@ -289,7 +294,7 @@ func scanMessage(rows *sql.Rows, items []imap.FetchItem) (*imap.Message, error) 
 			}
 		case imap.FetchBody, imap.FetchBodyStructure:
 			if ent == nil {
-				ent, err = message.Read(bytes.NewReader(body))
+				ent, err = message.Read(io.MultiReader(bytes.NewReader(header), bytes.NewReader(body)))
 				if err != nil {
 					res.BodyStructure = new(imap.BodyStructure)
 					continue
@@ -308,7 +313,7 @@ func scanMessage(rows *sql.Rows, items []imap.FetchItem) (*imap.Message, error) 
 		case imap.FetchInternalDate:
 			res.InternalDate = time.Unix(date, 0)
 		case imap.FetchRFC822Size:
-			res.Size = bodyLen
+			res.Size = headerLen + bodyLen
 		case imap.FetchUid:
 			res.Uid = msgId
 		default:
@@ -318,7 +323,7 @@ func scanMessage(rows *sql.Rows, items []imap.FetchItem) (*imap.Message, error) 
 			}
 
 			if ent == nil {
-				ent, err = message.Read(bytes.NewReader(body))
+				ent, err = message.Read(io.MultiReader(bytes.NewReader(header), bytes.NewReader(body)))
 				if err != nil {
 					res.Body[sect] = bytes.NewReader([]byte{})
 					continue
@@ -342,6 +347,8 @@ func needsBody(items []imap.FetchItem) bool {
 		switch item {
 		case imap.FetchEnvelope, imap.FetchBody, imap.FetchBodyStructure:
 			return true
+		case imap.FetchFlags, imap.FetchInternalDate, imap.FetchRFC822Size, imap.FetchUid:
+			continue
 		default:
 			return true
 		}
@@ -378,16 +385,30 @@ func (m *Mailbox) SetMessageLimit(val *uint32) error {
 	return err
 }
 
-func (m *Mailbox) CreateMessage(flags []string, date time.Time, body imap.Literal) error {
+func splitHeader(blob []byte) (header, body []byte) {
+	endLen := 4
+	headerEnd := bytes.Index(blob, []byte{'\r', '\n', '\r', '\n'})
+	if headerEnd == -1 {
+		endLen = 2
+		headerEnd = bytes.Index(blob, []byte{'\n', '\n'})
+		if headerEnd == -1 {
+			return nil, blob
+		}
+	}
+
+	return blob[:headerEnd+endLen], blob[headerEnd+endLen:]
+}
+
+func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Literal) error {
 	mboxLimit := m.CreateMessageLimit()
-	if mboxLimit != nil && uint32(body.Len()) > *mboxLimit {
+	if mboxLimit != nil && uint32(fullBody.Len()) > *mboxLimit {
 		return appendlimit.ErrTooBig
 	} else if mboxLimit == nil {
 		userLimit := m.user.CreateMessageLimit()
-		if userLimit != nil && uint32(body.Len()) > *userLimit {
+		if userLimit != nil && uint32(fullBody.Len()) > *userLimit {
 			return appendlimit.ErrTooBig
 		} else if userLimit == nil {
-			if m.parent.opts.MaxMsgBytes != nil && uint32(body.Len()) > *m.parent.opts.MaxMsgBytes {
+			if m.parent.opts.MaxMsgBytes != nil && uint32(fullBody.Len()) > *m.parent.opts.MaxMsgBytes {
 				return appendlimit.ErrTooBig
 			}
 		}
@@ -404,17 +425,21 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, body imap.Litera
 		return errors.Wrap(err, "CreateMessage (uidNext)")
 	}
 
-	bodyBlob, err := ioutil.ReadAll(body)
+	bodyBlob, err := ioutil.ReadAll(fullBody)
 	if err != nil {
 		return errors.Wrap(err, "CreateMessage (ReadAll body)")
 	}
 
+	hdr, body := splitHeader(bodyBlob)
+
 	_, err = tx.Stmt(m.parent.addMsg).Exec(
-		/* mboxId:   */ m.id,
-		/* msgId:    */ msgId,
-		/* date:     */ date.Unix(),
-		/* bodyLen:  */ len(bodyBlob),
-		/* body:     */ bodyBlob,
+		/* mboxId:    */ m.id,
+		/* msgId:     */ msgId,
+		/* date:      */ date.Unix(),
+		/* headerLen: */ len(hdr),
+		/* header:    */ hdr,
+		/* bodyLen:   */ len(body),
+		/* body:      */ body,
 	)
 	if err != nil {
 		return errors.Wrap(err, "CreateMessage (addMsg)")

@@ -325,6 +325,8 @@ func (b *Backend) initSchema() error {
 			mboxId BIGINT NOT NULL REFERENCES mboxes(id) ON DELETE CASCADE,
 			msgId BIGINT NOT NULL,
 			date BIGINT NOT NULL,
+			headerLen INTEGER NOT NULL,
+			header LONGTEXT,
 			bodyLen INTEGER NOT NULL,
 			body LONGTEXT NOT NULL,
 			mark INTEGER NOT NULL DEFAULT 0,
@@ -578,8 +580,8 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "mboxId prep")
 	}
 	b.addMsg, err = b.db.Prepare(`
-		INSERT INTO msgs(mboxId, msgId, date, bodyLen, body)
-		VALUES (?, ?, ?, ?, ?)`)
+		INSERT INTO msgs(mboxId, msgId, date, headerLen, header, bodyLen, body)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return errors.Wrap(err, "addMsg prep")
 	}
@@ -590,7 +592,7 @@ func (b *Backend) prepareStmts() error {
 				SELECT uidnext - 1
 				FROM mboxes
 				WHERE id = ?
-			) + (@rownum := @rownum + 1), date, bodyLen, body, 0 AS mark
+			) + (@rownum := @rownum + 1), date, headerLen, header, bodyLen, body, 0 AS mark
 			FROM msgs, (SELECT @rownum := 0) counter
 			WHERE mboxId = ? AND msgId BETWEEN ? AND ?
 			ORDER BY msgId`)
@@ -601,7 +603,7 @@ func (b *Backend) prepareStmts() error {
 				SELECT uidnext - 1
 				FROM mboxes
 				WHERE id = ?
-			) + row_number() OVER (ORDER BY msgId), date, bodyLen, body, 0 AS mark
+			) + row_number() OVER (ORDER BY msgId), date, headerLen, header, bodyLen, body, 0 AS mark
 			FROM msgs
 			WHERE mboxId = ? AND msgId BETWEEN ? AND ?`)
 	}
@@ -652,9 +654,9 @@ func (b *Backend) prepareStmts() error {
 				SELECT uidnext - 1
 				FROM mboxes
 				WHERE id = ?
-			) + (@rownum := @rownum + 1), date, bodyLen, body, 0 AS mark
+			) + (@rownum := @rownum + 1), date, headerLen, header, bodyLen, body, 0 AS mark
 			FROM (
-				SELECT msgId, date, bodyLen, body
+				SELECT msgId, date, headerLen, header, bodyLen, body
 				FROM msgs
 				WHERE mboxId = ?
 				ORDER BY msgId
@@ -668,9 +670,9 @@ func (b *Backend) prepareStmts() error {
 				SELECT uidnext - 1
 				FROM mboxes
 				WHERE id = ?
-			) + row_number() OVER (ORDER BY msgId), date, bodyLen, body, 0 AS mark
+			) + row_number() OVER (ORDER BY msgId), date, headerLen, header, bodyLen, body, 0 AS mark
 			FROM (
-				SELECT msgId, date, bodyLen, body
+				SELECT msgId, date, headerLen, header, bodyLen, body
 				FROM msgs
 				WHERE mboxId = ?
 				ORDER BY msgId
@@ -726,7 +728,7 @@ func (b *Backend) prepareStmts() error {
 	}
 	if b.db.mysql57 {
 		b.getMsgsNoBodyUid, err = b.db.Prepare(`
-			SELECT seqnum, msgs.msgId, date, bodyLen, NULL, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
+			SELECT seqnum, msgs.msgId, date, headerLen, NULL, bodyLen, NULL, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
 			FROM msgs
 			INNER JOIN (
 				SELECT (@rownum := @rownum + 1) AS seqnum, msgId, mboxId
@@ -741,7 +743,7 @@ func (b *Backend) prepareStmts() error {
 			ORDER BY msgs.msgId`)
 	} else {
 		b.getMsgsNoBodyUid, err = b.db.Prepare(`
-			SELECT seqnum, msgs.msgId, date, bodyLen, NULL, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
+			SELECT seqnum, msgs.msgId, date, headerLen, NULL, bodyLen, NULL, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
 			FROM msgs
 			INNER JOIN (
 				SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
@@ -760,7 +762,7 @@ func (b *Backend) prepareStmts() error {
 	}
 	if b.db.mysql57 {
 		b.getMsgsBodyUid, err = b.db.Prepare(`
-			SELECT seqnum, msgs.msgId, date, bodyLen, body, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
+			SELECT seqnum, msgs.msgId, date, headerLen, header, bodyLen, body, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
 			FROM msgs
 			INNER JOIN (
 				SELECT (@rownum := @rownum + 1) AS seqnum, msgId, mboxId
@@ -775,7 +777,7 @@ func (b *Backend) prepareStmts() error {
 			ORDER BY msgs.msgId`)
 	} else {
 		b.getMsgsBodyUid, err = b.db.Prepare(`
-			SELECT seqnum, msgs.msgId, date, bodyLen, body, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
+			SELECT seqnum, msgs.msgId, date, headerLen, header, bodyLen, body, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
 			FROM msgs
 			INNER JOIN (
 				SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
@@ -794,7 +796,7 @@ func (b *Backend) prepareStmts() error {
 	}
 	if b.db.mysql57 {
 		b.getMsgsNoBodySeq, err = b.db.Prepare(`
-			SELECT seqnum, msgs.msgId, date, bodyLen, NULL, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
+			SELECT seqnum, msgs.msgId, date, headerLen, NULL, bodyLen, NULL, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
 			FROM msgs
 			INNER JOIN (
 				SELECT (@rownum := @rownum + 1) AS seqnum, msgId, mboxId
@@ -810,7 +812,7 @@ func (b *Backend) prepareStmts() error {
 			ORDER BY msgs.msgId`)
 	} else {
 		b.getMsgsNoBodySeq, err = b.db.Prepare(`
-			SELECT seqnum, msgs.msgId, date, bodyLen, NULL, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
+			SELECT seqnum, msgs.msgId, date, headerLen, NULL, bodyLen, NULL, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
 			FROM msgs
 			INNER JOIN (
 				SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
@@ -829,7 +831,7 @@ func (b *Backend) prepareStmts() error {
 	}
 	if b.db.mysql57 {
 		b.getMsgsBodySeq, err = b.db.Prepare(`
-			SELECT seqnum, msgs.msgId, date, bodyLen, body, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
+			SELECT seqnum, msgs.msgId, date, headerLen, header, bodyLen, body, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
 			FROM msgs
 			INNER JOIN (
 				SELECT (@rownum := @rownum + 1) AS seqnum, msgId, mboxId
@@ -845,7 +847,7 @@ func (b *Backend) prepareStmts() error {
 			ORDER BY msgs.msgId`)
 	} else {
 		b.getMsgsBodySeq, err = b.db.Prepare(`
-			SELECT seqnum, msgs.msgId, date, bodyLen, body, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
+			SELECT seqnum, msgs.msgId, date, headerLen, header, bodyLen, body, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
 			FROM msgs
 			INNER JOIN (
 				SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId

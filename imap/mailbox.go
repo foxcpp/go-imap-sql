@@ -278,7 +278,7 @@ func scanMessage(rows *sql.Rows, items []imap.FetchItem) (*imap.Message, error) 
 			if ent == nil {
 				ent, err = message.Read(bytes.NewReader(body))
 				if err != nil {
-					return nil, err
+					continue
 				}
 			}
 
@@ -290,7 +290,7 @@ func scanMessage(rows *sql.Rows, items []imap.FetchItem) (*imap.Message, error) 
 			if ent == nil {
 				ent, err = message.Read(bytes.NewReader(body))
 				if err != nil {
-					return nil, err
+					continue
 				}
 			}
 
@@ -313,7 +313,7 @@ func scanMessage(rows *sql.Rows, items []imap.FetchItem) (*imap.Message, error) 
 			if ent == nil {
 				ent, err = message.Read(bytes.NewReader(body))
 				if err != nil {
-					return nil, err
+					continue
 				}
 			}
 
@@ -336,15 +336,8 @@ func scanMessage(rows *sql.Rows, items []imap.FetchItem) (*imap.Message, error) 
 func needsBody(items []imap.FetchItem) bool {
 	for _, item := range items {
 		switch item {
-		case imap.FetchEnvelope:
+		case imap.FetchEnvelope, imap.FetchBody, imap.FetchBodyStructure:
 			return true
-		case imap.FetchBody, imap.FetchBodyStructure:
-			return true
-		case imap.FetchFlags:
-		case imap.FetchInternalDate:
-		case imap.FetchRFC822Size:
-		case imap.FetchUid:
-			return false
 		default:
 			return true
 		}

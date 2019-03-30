@@ -8,7 +8,7 @@ import (
 	"github.com/emersion/go-imap"
 	appendlimit "github.com/emersion/go-imap-appendlimit"
 	"github.com/emersion/go-imap/backend"
-	"github.com/foxcpp/go-imap-sql"
+	imapsql "github.com/foxcpp/go-imap-sql"
 	"gotest.tools/assert"
 )
 

@@ -112,6 +112,14 @@ type Opts struct {
 	// channel.
 	LazyUpdatesInit bool
 
+	// UpdatesChan allows to pass custom channel object used for unilateral
+	// updates dispatching.
+	//
+	// You can use this to change default updates buffer size (20) or to split
+	// initializaton into phases (which allows to break circular dependencies
+	// if you need updates channel before database initialization).
+	UpdatesChan chan backend.Update
+
 	// Custom randomness source for UIDVALIDITY values generation.
 	PRNG Rand
 }
@@ -205,7 +213,10 @@ func NewBackend(driver, dsn string, opts Opts) (*Backend, error) {
 
 	b.opts = opts
 	if !b.opts.LazyUpdatesInit {
-		b.updates = make(chan backend.Update, 20)
+		b.updates = b.opts.UpdatesChan
+		if b.updates == nil {
+			b.updates = make(chan backend.Update, 20)
+		}
 	}
 
 	if b.opts.PRNG != nil {

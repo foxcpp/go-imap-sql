@@ -12,7 +12,7 @@ import (
 	"github.com/emersion/go-imap/backend"
 	"github.com/emersion/go-imap/backend/backendutil"
 	"github.com/emersion/go-message"
-	"github.com/foxcpp/go-imap-sql/imap/children"
+	"github.com/foxcpp/go-imap-sql/children"
 	"github.com/pkg/errors"
 )
 

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	eimap "github.com/emersion/go-imap"
-	"github.com/foxcpp/go-imap-sql/imap"
+	"github.com/foxcpp/go-imap-sql"
 	"github.com/urfave/cli"
 )
 

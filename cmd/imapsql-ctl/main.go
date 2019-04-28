@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/foxcpp/go-imap-sql/imap"
+	"github.com/foxcpp/go-imap-sql"
 	"github.com/urfave/cli"
 )
 

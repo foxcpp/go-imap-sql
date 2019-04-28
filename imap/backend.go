@@ -1,4 +1,4 @@
-package imap
+package imapsql
 
 import (
 	"crypto/rand"
@@ -12,9 +12,13 @@ import (
 	"time"
 
 	"github.com/emersion/go-imap/backend"
-	"github.com/foxcpp/go-imap-sql"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/sha3"
+)
+
+var (
+	ErrUserAlreadyExists = errors.New("imap: user already exists")
+	ErrUserDoesntExists  = errors.New("imap: user doesn't exists")
 )
 
 // db struct is a thin wrapper to solve the most annoying problems
@@ -1140,7 +1144,7 @@ func (b *Backend) CreateUser(username, password string) error {
 
 	_, err := b.addUser.Exec(username, hex.EncodeToString(digest[:]), hex.EncodeToString(salt))
 	if err != nil && (strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "Duplicate entry") || strings.Contains(err.Error(), "unique")) {
-		return imapsql.ErrUserAlreadyExists
+		return ErrUserAlreadyExists
 	}
 	return errors.Wrap(err, "CreateUser")
 }
@@ -1155,7 +1159,7 @@ func (b *Backend) DeleteUser(username string) error {
 		return errors.Wrap(err, "SetUserPassword")
 	}
 	if affected == 0 {
-		return imapsql.ErrUserDoesntExists
+		return ErrUserDoesntExists
 	}
 	return nil
 }
@@ -1182,7 +1186,7 @@ func (b *Backend) SetUserPassword(username, newPassword string) error {
 		return errors.Wrap(err, "SetUserPassword")
 	}
 	if affected == 0 {
-		return imapsql.ErrUserDoesntExists
+		return ErrUserDoesntExists
 	}
 	return nil
 }
@@ -1211,7 +1215,7 @@ func (b *Backend) GetExistingUser(username string) (backend.User, error) {
 	uid, _, _, err := b.UserCreds(username)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, imapsql.ErrUserDoesntExists
+			return nil, ErrUserDoesntExists
 		}
 		return nil, err
 	}

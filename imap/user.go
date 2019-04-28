@@ -1,4 +1,4 @@
-package imap
+package imapsql
 
 import (
 	"database/sql"

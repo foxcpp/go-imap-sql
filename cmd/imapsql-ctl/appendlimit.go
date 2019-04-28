@@ -1,6 +1,8 @@
-package imapsql
+package main
 
 import appendlimit "github.com/emersion/go-imap-appendlimit"
+
+// Copied from go-imap-backend-tests.
 
 // AppendLimitBackend is extension for main backend interface (backend.Backend) which
 // allows to set append limit value for testing and administration purposes.

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	imapsql "github.com/foxcpp/go-imap-sql"
 	"github.com/urfave/cli"
 )
 
@@ -107,7 +106,7 @@ func usersAppendLimit(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	userAL := u.(imapsql.AppendLimitUser)
+	userAL := u.(AppendLimitUser)
 
 	if ctx.IsSet("value") {
 		val := ctx.Int("value")

@@ -6,12 +6,11 @@ import (
 	"fmt"
 	"os"
 
-	imapsql "github.com/foxcpp/go-imap-sql"
 	"github.com/foxcpp/go-imap-sql/imap"
 	"github.com/urfave/cli"
 )
 
-var backend *imap.Backend
+var backend *imapsql.Backend
 var stdinScnr *bufio.Scanner
 
 func connectToDB(ctx *cli.Context) (err error) {
@@ -48,7 +47,7 @@ func connectToDB(ctx *cli.Context) (err error) {
 		return errors.New("Error: dsn is required")
 	}
 
-	backend, err = imap.NewBackend(driver, dsn, imap.Opts{})
+	backend, err = imapsql.NewBackend(driver, dsn, imapsql.Opts{})
 	return
 }
 

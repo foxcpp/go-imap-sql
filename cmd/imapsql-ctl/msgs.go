@@ -109,7 +109,7 @@ func msgsRemove(ctx *cli.Context) error {
 		}
 	}
 
-	mboxB := mbox.(*imap.Mailbox)
+	mboxB := mbox.(*imapsql.Mailbox)
 	if err := mboxB.DelMessages(ctx.Bool("uid"), seq); err != nil {
 		return err
 	}
@@ -194,7 +194,7 @@ func msgsMove(ctx *cli.Context) error {
 		return err
 	}
 
-	moveMbox := srcMbox.(*imap.Mailbox)
+	moveMbox := srcMbox.(*imapsql.Mailbox)
 
 	return moveMbox.MoveMessages(ctx.Bool("uid"), seq, tgtName)
 }

@@ -1,4 +1,4 @@
-package imap
+package imapsql
 
 import (
 	"io/ioutil"
@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/foxcpp/go-imap-sql/imap/testsuite"
+	"github.com/foxcpp/go-imap-backend-tests"
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
@@ -17,7 +17,7 @@ import (
 var TestDB = os.Getenv("TEST_DB")
 var TestDSN = os.Getenv("TEST_DSN")
 
-func initTestBackend() testsuite.Backend {
+func initTestBackend() backendtests.Backend {
 	driver := TestDB
 	dsn := TestDSN
 
@@ -50,7 +50,7 @@ func initTestBackend() testsuite.Backend {
 	return b
 }
 
-func cleanBackend(bi testsuite.Backend) {
+func cleanBackend(bi backendtests.Backend) {
 	b := bi.(*Backend)
 	if os.Getenv("PRESERVE_DB") != "1" {
 		if _, err := b.db.Exec(`DROP TABLE flags`); err != nil {
@@ -70,5 +70,5 @@ func cleanBackend(bi testsuite.Backend) {
 }
 
 func TestBackend(t *testing.T) {
-	testsuite.RunTests(t, initTestBackend, cleanBackend)
+	backendtests.RunTests(t, initTestBackend, cleanBackend)
 }

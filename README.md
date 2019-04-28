@@ -6,7 +6,7 @@ go-imap-sql
 [![Issues](https://img.shields.io/github/issues-raw/foxcpp/go-imap-sql.svg?style=flat-square)](https://github.com/foxcpp/go-imap-sql/issues)
 [![License](https://img.shields.io/github/license/foxcpp/go-imap-sql.svg?style=flat-square)](https://github.com/foxcpp/go-imap-sql/blob/master/LICENSE)
 
-SQL-based storage backend for [go-imap] libraries.
+SQL-based storage backend for [go-imap] library.
 
 #### Building
 

@@ -74,8 +74,7 @@ func (m *Mailbox) Status(items []imap.StatusItem) (*imap.MailboxStatus, error) {
 	res := imap.NewMailboxStatus(m.name, items)
 	res.Flags = []string{
 		imap.SeenFlag, imap.AnsweredFlag, imap.FlaggedFlag,
-		imap.DeletedFlag, imap.DraftFlag, imap.RecentFlag,
-		`\*`,
+		imap.DeletedFlag, imap.DraftFlag,
 	}
 	res.PermanentFlags = []string{
 		imap.SeenFlag, imap.AnsweredFlag, imap.FlaggedFlag,

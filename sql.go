@@ -795,5 +795,13 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "msgFlagsSeq prep")
 	}
 
+	b.usedFlags, err = b.db.Prepare(`
+		SELECT DISTINCT flag
+		FROM flags
+		WHERE mboxId = ?`)
+	if err != nil {
+		return errors.Wrap(err, "usedFlags prep")
+	}
+
 	return nil
 }

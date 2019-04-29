@@ -104,6 +104,7 @@ type Backend struct {
 	massClearFlagsSeq  *sql.Stmt
 	msgFlagsUid        *sql.Stmt
 	msgFlagsSeq        *sql.Stmt
+	usedFlags          *sql.Stmt
 
 	addRecentToLast *sql.Stmt
 

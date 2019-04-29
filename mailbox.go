@@ -82,6 +82,19 @@ func (m *Mailbox) Status(items []imap.StatusItem) (*imap.MailboxStatus, error) {
 		`\*`,
 	}
 
+	rows, err := tx.Stmt(m.parent.usedFlags).Query(m.id)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Status (usedFlags) %s", m.name)
+	}
+	for rows.Next() {
+		var flag string
+		if err := rows.Scan(&flag); err != nil {
+			return nil, errors.Wrapf(err, "Status (usedFlags) %s", m.name)
+		}
+		res.Flags = append(res.Flags, flag)
+		res.PermanentFlags = append(res.PermanentFlags, flag)
+	}
+
 	row := tx.Stmt(m.parent.firstUnseenSeqNum).QueryRow(m.id, m.id)
 	if err := row.Scan(&res.UnseenSeqNum); err != nil {
 		if err != sql.ErrNoRows {

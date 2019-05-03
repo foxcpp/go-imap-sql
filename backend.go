@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	imap "github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/backend"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/sha3"
@@ -96,10 +97,6 @@ type Backend struct {
 	copyMsgFlagsUid    *sql.Stmt
 	copyMsgsSeq        *sql.Stmt
 	copyMsgFlagsSeq    *sql.Stmt
-	getMsgsBodyUid     *sql.Stmt
-	getMsgsBodySeq     *sql.Stmt
-	getMsgsNoBodyUid   *sql.Stmt
-	getMsgsNoBodySeq   *sql.Stmt
 	massClearFlagsUid  *sql.Stmt
 	massClearFlagsSeq  *sql.Stmt
 	msgFlagsUid        *sql.Stmt
@@ -136,10 +133,14 @@ type Backend struct {
 	userMsgSizeLimit    *sql.Stmt
 	setMboxMsgSizeLimit *sql.Stmt
 	mboxMsgSizeLimit    *sql.Stmt
+
+	fetchStmtsCache map[string]*sql.Stmt
 }
 
 func NewBackend(driver, dsn string, opts Opts) (*Backend, error) {
-	b := new(Backend)
+	b := &Backend{
+		fetchStmtsCache: make(map[string]*sql.Stmt),
+	}
 	var err error
 
 	b.opts = opts
@@ -200,6 +201,19 @@ func NewBackend(driver, dsn string, opts Opts) (*Backend, error) {
 	if err := b.prepareStmts(); err != nil {
 		return nil, errors.Wrap(err, "NewBackend")
 	}
+
+	for _, item := range [...]imap.FetchItem{
+		imap.FetchFlags, imap.FetchEnvelope,
+		imap.FetchBodyStructure, "BODY[]", "BODY[HEADER.FIELDS (From To)]"} {
+
+		if _, err := b.getFetchStmt(true, []imap.FetchItem{item}); err != nil {
+			return nil, errors.Wrapf(err, "fetchStmt prime (%s, uid=true)", item)
+		}
+		if _, err := b.getFetchStmt(false, []imap.FetchItem{item}); err != nil {
+			return nil, errors.Wrapf(err, "fetchStmt prime (%s, uid=false)", item)
+		}
+	}
+
 	return b, nil
 }
 

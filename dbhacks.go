@@ -75,5 +75,8 @@ func (d db) rewriteSQL(req string) (res string) {
 			res = strings.Replace(res, "INSERT", "INSERT OR IGNORE", 1)
 		}
 	}
+
+	//log.Println(res)
+
 	return
 }

@@ -70,5 +70,6 @@ func cleanBackend(bi backendtests.Backend) {
 }
 
 func TestBackend(t *testing.T) {
+	backendtests.Blacklist = []string{"TestBackend/Mailbox_SearchMessages"}
 	backendtests.RunTests(t, initTestBackend, cleanBackend)
 }

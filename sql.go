@@ -40,6 +40,8 @@ func (b *Backend) initSchema() error {
 			header LONGTEXT,
 			bodyLen INTEGER NOT NULL,
 			body LONGTEXT NOT NULL,
+			bodyStructure LONGTEXT NOT NULL,
+			cachedHeader LONGTEXT NOT NULL,
 			mark INTEGER NOT NULL DEFAULT 0,
 
 			PRIMARY KEY(mboxId, msgId)
@@ -256,8 +258,8 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "mboxId prep")
 	}
 	b.addMsg, err = b.db.Prepare(`
-		INSERT INTO msgs(mboxId, msgId, date, headerLen, header, bodyLen, body)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`)
+		INSERT INTO msgs(mboxId, msgId, date, headerLen, header, bodyLen, body, bodyStructure, cachedHeader)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return errors.Wrap(err, "addMsg prep")
 	}
@@ -267,7 +269,7 @@ func (b *Backend) prepareStmts() error {
 			SELECT uidnext - 1
 			FROM mboxes
 			WHERE id = ?
-		) + row_number() OVER (ORDER BY msgId), date, headerLen, header, bodyLen, body, 0 AS mark
+		) + row_number() OVER (ORDER BY msgId), date, headerLen, header, bodyLen, body, bodyStructure, cachedHeader, 0 AS mark
 		FROM msgs
 		WHERE mboxId = ? AND msgId BETWEEN ? AND ?`)
 	if err != nil {
@@ -297,9 +299,9 @@ func (b *Backend) prepareStmts() error {
 			SELECT uidnext - 1
 			FROM mboxes
 			WHERE id = ?
-		) + row_number() OVER (ORDER BY msgId), date, headerLen, header, bodyLen, body, 0 AS mark
+		) + row_number() OVER (ORDER BY msgId), date, headerLen, header, bodyLen, body, bodyStructure, cachedHeader, 0 AS mark
 		FROM (
-			SELECT msgId, date, headerLen, header, bodyLen, body
+			SELECT msgId, date, headerLen, header, bodyLen, body, bodyStructure, cachedHeader
 			FROM msgs
 			WHERE mboxId = ?
 			ORDER BY msgId
@@ -329,74 +331,6 @@ func (b *Backend) prepareStmts() error {
 		AND map.mboxId = flags.mboxId`)
 	if err != nil {
 		return errors.Wrap(err, "copyMsgFlagsSeq prep")
-	}
-	b.getMsgsNoBodyUid, err = b.db.Prepare(`
-		SELECT seqnum, msgs.msgId, date, headerLen, NULL, bodyLen, NULL, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
-		FROM msgs
-		INNER JOIN (
-			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
-			FROM msgs
-			WHERE mboxId = ?
-		) map
-		ON map.msgId = msgs.msgId
-		LEFT JOIN flags
-		ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId AND msgs.mboxId = flags.mboxId
-		WHERE msgs.mboxId = ? AND msgs.msgId BETWEEN ? AND ?
-		GROUP BY msgs.mboxId, msgs.msgId, seqnum
-		ORDER BY msgs.msgId`)
-	if err != nil {
-		return errors.Wrap(err, "getMsgsNoBodyUid prep")
-	}
-	b.getMsgsBodyUid, err = b.db.Prepare(`
-		SELECT seqnum, msgs.msgId, date, headerLen, header, bodyLen, body, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
-		FROM msgs
-		INNER JOIN (
-			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
-			FROM msgs
-			WHERE mboxId = ?
-		) map
-		ON map.msgId = msgs.msgId
-		LEFT JOIN flags
-		ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId AND msgs.mboxId = flags.mboxId
-		WHERE msgs.mboxId = ? AND msgs.msgId BETWEEN ? AND ?
-		GROUP BY seqnum, msgs.mboxId, msgs.msgId
-		ORDER BY msgs.msgId`)
-	if err != nil {
-		return errors.Wrap(err, "getMsgsBodyUid prep")
-	}
-	b.getMsgsNoBodySeq, err = b.db.Prepare(`
-		SELECT seqnum, msgs.msgId, date, headerLen, NULL, bodyLen, NULL, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
-		FROM msgs
-		INNER JOIN (
-			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
-			FROM msgs
-			WHERE mboxId = ?
-		) map
-		ON map.msgId = msgs.msgId
-		LEFT JOIN flags
-		ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId AND msgs.mboxId = flags.mboxId
-		WHERE msgs.mboxId = ? AND seqnum BETWEEN ? AND ?
-		GROUP BY seqnum, msgs.mboxId, msgs.msgId
-		ORDER BY msgs.msgId`)
-	if err != nil {
-		return errors.Wrap(err, "getMsgsNoBodySeq prep")
-	}
-	b.getMsgsBodySeq, err = b.db.Prepare(`
-		SELECT seqnum, msgs.msgId, date, headerLen, header, bodyLen, body, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
-		FROM msgs
-		INNER JOIN (
-			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
-			FROM msgs
-			WHERE mboxId = ?
-		) map
-		ON map.msgId = msgs.msgId
-		LEFT JOIN flags
-		ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId
-		WHERE msgs.mboxId = ? AND seqnum BETWEEN ? AND ? AND msgs.mboxId = map.mboxId
-		GROUP BY seqnum, msgs.mboxId, msgs.msgId
-		ORDER BY msgs.msgId`)
-	if err != nil {
-		return errors.Wrap(err, "getMsgsBodySeq prep")
 	}
 	b.massClearFlagsUid, err = b.db.Prepare(`
 		DELETE FROM flags

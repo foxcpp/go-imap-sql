@@ -3,8 +3,8 @@ package imapsql
 import (
 	"bytes"
 	"database/sql"
-	"io"
 	"io/ioutil"
+	"net/textproto"
 	"strings"
 	"time"
 
@@ -14,6 +14,7 @@ import (
 	"github.com/emersion/go-imap/backend/backendutil"
 	"github.com/emersion/go-message"
 	"github.com/foxcpp/go-imap-sql/children"
+	jsoniter "github.com/json-iterator/go"
 	"github.com/pkg/errors"
 )
 
@@ -171,201 +172,7 @@ func (m *Mailbox) Check() error {
 }
 
 func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uint32, error) {
-	res := []uint32{}
-	rows, err := m.parent.getMsgsBodyUid.Query(m.id, m.id, 1, 10000)
-	if err != nil {
-		return res, errors.Wrap(err, "SearchMessages")
-	}
-
-	defer rows.Close()
-	for rows.Next() {
-		var seqNum uint32
-		var msgId uint32
-		var date int64
-		var headerLen uint32
-		var header []byte
-		var bodyLen uint32
-		var body []byte
-		var flagsStr string
-		if err := rows.Scan(&seqNum, &msgId, &date, &headerLen, &header, &bodyLen, &body, &flagsStr); err != nil {
-			return res, errors.Wrap(err, "SearchMessages")
-		}
-
-		ent, err := message.Read(io.MultiReader(bytes.NewReader(header), bytes.NewReader(body)))
-		if err != nil {
-			return res, errors.Wrap(err, "SearchMessages")
-		}
-
-		entMatch, err := backendutil.Match(ent, criteria)
-		if err != nil {
-			return res, errors.Wrap(err, "SearchMessages")
-		}
-
-		flagMatch := backendutil.MatchFlags(strings.Split(flagsStr, flagsSep), criteria)
-
-		idsMatch := backendutil.MatchSeqNumAndUid(seqNum, msgId, criteria)
-		if err != nil {
-			return res, errors.Wrap(err, "SearchMessages")
-		}
-
-		dateMatch := backendutil.MatchDate(time.Unix(date, 0), criteria)
-		if err != nil {
-			return res, errors.Wrap(err, "SearchMessages")
-		}
-
-		if entMatch && flagMatch && idsMatch && dateMatch {
-			if uid {
-				res = append(res, msgId)
-			} else {
-				res = append(res, seqNum)
-			}
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return res, errors.Wrap(err, "SearchMessages")
-	}
-	return res, nil
-}
-
-func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.FetchItem, ch chan<- *imap.Message) error {
-	bodyNeeded := needsBody(items)
-	defer close(ch)
-
-	// Also we use clever trick to get flags as a single string in one row
-	// This saves us from doing more bookkeeping during results iteration.
-	// { is not allowed in flag names in IMAP so we can safetly use it as separator.
-
-	for _, seq := range seqset.Set {
-		start, stop := sqlRange(seq)
-
-		var rows *sql.Rows
-		var err error
-		if uid {
-			if bodyNeeded {
-				rows, err = m.parent.getMsgsBodyUid.Query(m.id, m.id, start, stop)
-			} else {
-				rows, err = m.parent.getMsgsNoBodyUid.Query(m.id, m.id, start, stop)
-			}
-		} else {
-			if bodyNeeded {
-				rows, err = m.parent.getMsgsBodySeq.Query(m.id, m.id, start, stop)
-			} else {
-				rows, err = m.parent.getMsgsNoBodySeq.Query(m.id, m.id, start, stop)
-			}
-		}
-		if err != nil {
-			return errors.Wrap(err, "ListMessages")
-		}
-
-		for rows.Next() {
-			msg, err := scanMessage(rows, items)
-			if err != nil {
-				return errors.Wrap(err, "ListMessages (scan)")
-			}
-
-			ch <- msg
-		}
-		if err := rows.Err(); err != nil {
-			return errors.Wrap(err, "ListMessages")
-		}
-	}
-	return nil
-}
-
-func scanMessage(rows *sql.Rows, items []imap.FetchItem) (*imap.Message, error) {
-	var seqNum uint32
-	var msgId uint32
-	var date int64
-	var headerLen uint32
-	var header []byte
-	var bodyLen uint32
-	var body []byte
-	var flagsStr string
-	if err := rows.Scan(&seqNum, &msgId, &date, &headerLen, &header, &bodyLen, &body, &flagsStr); err != nil {
-		return nil, err
-	}
-
-	res := imap.NewMessage(seqNum, items)
-	var ent *message.Entity
-	var err error
-
-	for _, item := range items {
-		switch item {
-		case imap.FetchEnvelope:
-			if ent == nil {
-				ent, err = message.Read(io.MultiReader(bytes.NewReader(header), bytes.NewReader(body)))
-				if err != nil {
-					res.Envelope = new(imap.Envelope)
-					continue
-				}
-			}
-
-			res.Envelope, err = backendutil.FetchEnvelope(ent.Header)
-			if err != nil {
-				return nil, err
-			}
-		case imap.FetchBody, imap.FetchBodyStructure:
-			if ent == nil {
-				ent, err = message.Read(io.MultiReader(bytes.NewReader(header), bytes.NewReader(body)))
-				if err != nil {
-					res.BodyStructure = new(imap.BodyStructure)
-					continue
-				}
-			}
-
-			res.BodyStructure, err = backendutil.FetchBodyStructure(ent, item == imap.FetchBodyStructure)
-			if err != nil {
-				return nil, err
-			}
-		case imap.FetchFlags:
-			res.Flags = strings.Split(flagsStr, flagsSep) // see ListMessages for reasons of using { as a sep
-			if len(res.Flags) == 1 && res.Flags[0] == "" {
-				res.Flags = []string{}
-			}
-		case imap.FetchInternalDate:
-			res.InternalDate = time.Unix(date, 0)
-		case imap.FetchRFC822Size:
-			res.Size = headerLen + bodyLen
-		case imap.FetchUid:
-			res.Uid = msgId
-		default:
-			sect, err := imap.ParseBodySectionName(item)
-			if err != nil {
-				break
-			}
-
-			if ent == nil {
-				ent, err = message.Read(io.MultiReader(bytes.NewReader(header), bytes.NewReader(body)))
-				if err != nil {
-					res.Body[sect] = bytes.NewReader([]byte{})
-					continue
-				}
-			}
-
-			res.Body[sect], err = backendutil.FetchBodySection(ent, sect)
-			if err != nil {
-				// While this is not explicitly stated in standard,
-				// non-existent sections should return empty literal.
-				res.Body[sect] = bytes.NewReader([]byte{})
-			}
-		}
-	}
-
-	return res, nil
-}
-
-func needsBody(items []imap.FetchItem) bool {
-	for _, item := range items {
-		switch item {
-		case imap.FetchEnvelope, imap.FetchBody, imap.FetchBodyStructure:
-			return true
-		case imap.FetchFlags, imap.FetchInternalDate, imap.FetchRFC822Size, imap.FetchUid:
-			continue
-		default:
-			return true
-		}
-	}
-	return false
+	return nil, errors.New("not implemented")
 }
 
 func (m *Mailbox) createMessageLimit(tx *sql.Tx) *uint32 {
@@ -411,6 +218,29 @@ func splitHeader(blob []byte) (header, body []byte) {
 	return blob[:headerEnd+endLen], blob[headerEnd+endLen:]
 }
 
+func extractCachedData(fullBody []byte) (bodyStructBlob, cachedHeadersBlob []byte, err error) {
+	msg, err := message.Read(bytes.NewReader(fullBody))
+	if err != nil {
+		return nil, nil, err
+	}
+	hdrs := make(map[string][]string, len(cachedHeaderFields))
+	for field, _ := range cachedHeaderFields {
+		hdrs[field] = msg.Header[textproto.CanonicalMIMEHeaderKey(field)]
+	}
+
+	bodyStruct, err := backendutil.FetchBodyStructure(msg, true)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	bodyStructBlob, err = jsoniter.Marshal(bodyStruct)
+	if err != nil {
+		return
+	}
+	cachedHeadersBlob, err = jsoniter.Marshal(hdrs)
+	return
+}
+
 func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Literal) error {
 	mboxLimit := m.CreateMessageLimit()
 	if mboxLimit != nil && uint32(fullBody.Len()) > *mboxLimit {
@@ -443,15 +273,15 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 	}
 
 	hdr, body := splitHeader(bodyBlob)
+	bodyStruct, cachedHdr, err := extractCachedData(bodyBlob)
+	if err != nil {
+		return errors.Wrap(err, "CreateMessage (extractCachedData)")
+	}
 
 	_, err = tx.Stmt(m.parent.addMsg).Exec(
-		/* mboxId:    */ m.id,
-		/* msgId:     */ msgId,
-		/* date:      */ date.Unix(),
-		/* headerLen: */ len(hdr),
-		/* header:    */ hdr,
-		/* bodyLen:   */ len(body),
-		/* body:      */ body,
+		m.id, msgId, date.Unix(),
+		len(hdr), hdr, len(body), body,
+		bodyStruct, cachedHdr,
 	)
 	if err != nil {
 		return errors.Wrap(err, "CreateMessage (addMsg)")

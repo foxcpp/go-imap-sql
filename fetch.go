@@ -21,12 +21,18 @@ func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.Fetch
 	if err != nil {
 		return err
 	}
+
 	// don't close statement, it is owned by cache
+	tx, err := m.parent.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 
 	for _, seq := range seqset.Set {
 		begin, end := sqlRange(seq)
 
-		rows, err := stmt.Query(m.id, m.id, begin, end)
+		rows, err := tx.Stmt(stmt).Query(m.id, m.id, begin, end)
 		if err != nil {
 			return err
 		}

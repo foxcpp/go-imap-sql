@@ -480,10 +480,8 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		// How horrible variable arguments in Go are...
 		params := make([]interface{}, 0, 3+len(flags))
 		params = append(params, m.id)
-		if !m.parent.db.mysql57 {
-			for _, flag := range flags {
-				params = append(params, flag)
-			}
+		for _, flag := range flags {
+			params = append(params, flag)
 		}
 		params = append(params, m.id, msgId)
 		if _, err := tx.Exec(flagsReq, params...); err != nil {
@@ -606,10 +604,8 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 			if uid {
 				params := make([]interface{}, 0, 4+len(flags))
 				params = append(params, m.id)
-				if !m.parent.db.mysql57 {
-					for _, flag := range flags {
-						params = append(params, flag)
-					}
+				for _, flag := range flags {
+					params = append(params, flag)
 				}
 				params = append(params, m.id, start, stop)
 
@@ -617,10 +613,8 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 			} else {
 				params := make([]interface{}, 0, 4+len(flags))
 				params = append(params, m.id, m.id, stop-start+1, start-1)
-				if !m.parent.db.mysql57 {
-					for _, flag := range flags {
-						params = append(params, flag)
-					}
+				for _, flag := range flags {
+					params = append(params, flag)
 				}
 
 				_, err = query.Exec(params...)
@@ -639,33 +633,18 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 				AND msgId BETWEEN ? AND ?
 				AND flag IN (` + m.valuesSubquery(flags) + `)`))
 		} else {
-			if m.parent.db.mysql57 {
-				query, err = tx.Prepare(m.parent.db.rewriteSQL(`
-					DELETE FROM flags
-					WHERE mboxId = ?
-					AND msgId IN (
-						SELECT msgId
-						FROM (
-							SELECT (@rownum := @rownum + 1) AS seqnum, msgId
-							FROM msgs, (SELECT @rownum := 0) counter
-							WHERE mboxId = ?
-						) seqnums
-						WHERE seqnum BETWEEN ? AND ?
-					) AND flag IN (` + m.valuesSubquery(flags) + `)`))
-			} else {
-				query, err = tx.Prepare(m.parent.db.rewriteSQL(`
-					DELETE FROM flags
-					WHERE mboxId = ?
-					AND msgId IN (
-						SELECT msgId
-						FROM (
-							SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId
-							FROM msgs
-							WHERE mboxId = ?
-						) seqnums
-						WHERE seqnum BETWEEN ? AND ?
-					) AND flag IN (` + m.valuesSubquery(flags) + `)`))
-			}
+			query, err = tx.Prepare(m.parent.db.rewriteSQL(`
+				DELETE FROM flags
+				WHERE mboxId = ?
+				AND msgId IN (
+					SELECT msgId
+					FROM (
+						SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId
+						FROM msgs
+						WHERE mboxId = ?
+					) seqnums
+					WHERE seqnum BETWEEN ? AND ?
+				) AND flag IN (` + m.valuesSubquery(flags) + `)`))
 		}
 		if err != nil {
 			return errors.Wrap(err, "UpdateMessagesFlags")
@@ -676,19 +655,15 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 			if uid {
 				params := make([]interface{}, 0, 3+len(flags))
 				params = append(params, m.id, start, stop)
-				if !m.parent.db.mysql57 {
-					for _, flag := range flags {
-						params = append(params, flag)
-					}
+				for _, flag := range flags {
+					params = append(params, flag)
 				}
 				_, err = query.Exec(params...)
 			} else {
 				params := make([]interface{}, 0, 4+len(flags))
 				params = append(params, m.id, m.id, start, stop)
-				if !m.parent.db.mysql57 {
-					for _, flag := range flags {
-						params = append(params, flag)
-					}
+				for _, flag := range flags {
+					params = append(params, flag)
 				}
 				_, err = query.Exec(params...)
 			}
@@ -758,20 +733,7 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 func (m *Mailbox) valuesSubquery(rows []string) string {
 	count := len(rows)
 	sqlList := ""
-	if m.parent.db.mysql57 {
-		// MySQL 5.7 for some reason complains that
-		// we don't have column1 when we use bindings.
-
-		val0 := strings.Replace(rows[0], "''", "''", -1)
-
-		sqlList += "SELECT '" + val0 + "' AS column1"
-		for _, val := range rows[1:] {
-			val = strings.Replace(val, "''", "''", -1)
-
-			sqlList += " UNION ALL SELECT '" + val + "' "
-		}
-		return sqlList
-	} else if m.parent.db.driver == "mysql" {
+	if m.parent.db.driver == "mysql" {
 
 		sqlList += "SELECT ? AS column1"
 		for i := 1; i < count; i++ {

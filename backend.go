@@ -192,12 +192,6 @@ func NewBackend(driver, dsn string, opts Opts) (*Backend, error) {
 		if err != nil {
 			return nil, errors.Wrap(err, "NewBackend")
 		}
-		row := b.db.QueryRow(`SELECT version()`)
-		mysqlVer := ""
-		if err := row.Scan(&mysqlVer); err != nil {
-			return nil, errors.Wrap(err, "NewBackend")
-		}
-		b.db.mysql57 = strings.HasPrefix(mysqlVer, "5.7.")
 	}
 
 	if err := b.initSchema(); err != nil {

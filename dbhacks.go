@@ -9,9 +9,8 @@ import (
 // db struct is a thin wrapper to solve the most annoying problems
 // with cross-RDBMS compatibility.
 type db struct {
-	DB      *sql.DB
-	driver  string
-	mysql57 bool
+	DB     *sql.DB
+	driver string
 }
 
 func (d db) Prepare(req string) (*sql.Stmt, error) {

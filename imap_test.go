@@ -70,6 +70,11 @@ func cleanBackend(bi backendtests.Backend) {
 }
 
 func TestBackend(t *testing.T) {
-	backendtests.Blacklist = []string{"TestBackend/Mailbox_SearchMessages"}
+	backendtests.Blacklist = []string{
+		// FIXME: not handled correctly by backendutil, https://github.com/emersion/go-imap/pull/240
+		"TestBackend/Mailbox_ListMessages_Body/BODY[HEADER.FIELDS.NOT_(From_To)]",
+		"TestBackend/Mailbox_ListMessages_Body/BODY[1.1.HEADER.FIELDS_(Content-Type)]",
+		"TestBackend/Mailbox_ListMessages_Body/BODY[1.1.HEADER.FIELDS.NOT_(Content-Type)]",
+	}
 	backendtests.RunTests(t, initTestBackend, cleanBackend)
 }

@@ -148,6 +148,9 @@ type Backend struct {
 	setMboxMsgSizeLimit *sql.Stmt
 	mboxMsgSizeLimit    *sql.Stmt
 
+	searchFetchNoBody *sql.Stmt
+	searchFetch       *sql.Stmt
+
 	fetchStmtsCache map[string]*sql.Stmt
 }
 

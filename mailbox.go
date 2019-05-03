@@ -171,10 +171,6 @@ func (m *Mailbox) Check() error {
 	return nil
 }
 
-func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uint32, error) {
-	return nil, errors.New("not implemented")
-}
-
 func (m *Mailbox) createMessageLimit(tx *sql.Tx) *uint32 {
 	var res sql.NullInt64
 	var row *sql.Row

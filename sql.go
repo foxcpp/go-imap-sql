@@ -554,5 +554,40 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "usedFlags prep")
 	}
 
+	b.searchFetchNoBody, err = b.db.Prepare(`
+		SELECT seqnum, msgs.msgId, date, headerLen, bodyLen, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
+		FROM msgs
+		INNER JOIN (
+			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
+			FROM msgs
+			WHERE mboxId = ?
+		) map
+		ON map.msgId = msgs.msgId
+		LEFT JOIN flags
+		ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId AND msgs.mboxId = flags.mboxId
+		WHERE msgs.mboxId = ?
+		GROUP BY msgs.mboxId, msgs.msgId, seqnum
+		ORDER BY seqnum DESC`)
+	if err != nil {
+		return errors.Wrap(err, "searchFetchNoBody prep")
+	}
+	b.searchFetch, err = b.db.Prepare(`
+		SELECT seqnum, msgs.msgId, date, headerLen, header, bodyLen, body, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
+		FROM msgs
+		INNER JOIN (
+			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
+			FROM msgs
+			WHERE mboxId = ?
+		) map
+		ON map.msgId = msgs.msgId
+		LEFT JOIN flags
+		ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId AND msgs.mboxId = flags.mboxId
+		WHERE msgs.mboxId = ?
+		GROUP BY msgs.mboxId, msgs.msgId, seqnum
+		ORDER BY seqnum DESC`)
+	if err != nil {
+		return errors.Wrap(err, "msgFlagsSeq prep")
+	}
+
 	return nil
 }

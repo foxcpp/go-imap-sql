@@ -53,6 +53,20 @@ type Opts struct {
 
 	// Custom randomness source for UIDVALIDITY values generation.
 	PRNG Rand
+
+	// (SQLite3 only) Don't force WAL journaling mode.
+	NoWAL bool
+
+	// (SQLite3 only) Use different value for busy_timeout. Default is 50000.
+	// To set to 0, use -1 (you probably don't want this).
+	BusyTimeout int
+
+	// (SQLite3 only) Use EXCLUSIVE locking mode.
+	ExclusiveLock bool
+
+	// (SQLite3 only) Change page cache size. Positive value indicates cache
+	// size in pages, negative in KiB. If set 0 - SQLite default will be used.
+	CacheSize int
 }
 
 type Backend struct {
@@ -157,42 +171,16 @@ func NewBackend(driver, dsn string, opts Opts) (*Backend, error) {
 		b.prng = mathrand.New(mathrand.NewSource(time.Now().Unix()))
 	}
 
-	if driver == "sqlite3" {
-		if !strings.HasPrefix(dsn, "file:") {
-			dsn = "file:" + dsn
-		}
-		if !strings.Contains(dsn, "?") {
-			dsn = dsn + "?"
-		}
-
-		dsn = dsn + "_journal=WAL&_busy_timeout=5000"
-	}
-
 	b.db.driver = driver
+	b.db.dsn = dsn
 
 	b.db.DB, err = sql.Open(driver, dsn)
 	if err != nil {
 		return nil, errors.Wrap(err, "NewBackend")
 	}
 
-	if driver == "sqlite3" {
-		if dsn == "file::memory:?_journal=WAL&_busy_timeout=5000" {
-			b.db.DB.SetMaxOpenConns(1)
-		}
-
-		_, err := b.db.Exec(`PRAGMA foreign_keys = ON`)
-		if err != nil {
-			return nil, errors.Wrap(err, "NewBackend")
-		}
-	} else if driver == "mysql" {
-		_, err := b.db.Exec(`SET SESSION sql_mode = 'ansi,no_backslash_escapes'`)
-		if err != nil {
-			return nil, errors.Wrap(err, "NewBackend")
-		}
-		_, err = b.db.Exec(`SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE`)
-		if err != nil {
-			return nil, errors.Wrap(err, "NewBackend")
-		}
+	if err := b.configureEngine(); err != nil {
+		return nil, errors.Wrap(err, "NewBackend")
 	}
 
 	if err := b.initSchema(); err != nil {

@@ -11,6 +11,7 @@ import (
 type db struct {
 	DB     *sql.DB
 	driver string
+	dsn    string
 }
 
 func (d db) Prepare(req string) (*sql.Stmt, error) {

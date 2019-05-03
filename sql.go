@@ -1,6 +1,78 @@
 package imapsql
 
-import "github.com/pkg/errors"
+import (
+	"strconv"
+
+	"github.com/pkg/errors"
+)
+
+func (b *Backend) configureEngine() error {
+	if b.db.driver == "sqlite3" {
+		// For testing purposes, it is important that only one memory DB will
+		// be used (otherwise each connection will get its own DB)
+		if b.db.dsn == ":memory:" {
+			b.db.DB.SetMaxOpenConns(1)
+		}
+
+		_, err := b.db.Exec(`PRAGMA foreign_keys = ON`)
+		if err != nil {
+			return err
+		}
+
+		// If we turn on EXCLUSIVE locking before WAL, it will be more useful.
+		// TODO: Is it effective at all?
+		if b.opts.ExclusiveLock {
+			if _, err := b.db.Exec(`PRAGMA locking_mode=EXCLUSIVE`); err != nil {
+				return err
+			}
+		}
+
+		// Performance tweaks.
+		if !b.opts.NoWAL {
+			if _, err := b.db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
+				return err
+			}
+			if _, err := b.db.Exec(`PRAGMA synchronous=NORMAL`); err != nil {
+				return err
+			}
+		}
+
+		if b.opts.BusyTimeout == 0 {
+			b.opts.BusyTimeout = 500000
+		}
+		if b.opts.BusyTimeout == -1 {
+			b.opts.BusyTimeout = 0
+		}
+
+		if _, err := b.db.Exec(`PRAGMA busy_timeout=` + strconv.Itoa(b.opts.BusyTimeout)); err != nil {
+			return err
+		}
+
+		if _, err := b.db.Exec(`PRAGMA page_size=16384`); err != nil {
+			return err
+		}
+		if _, err := b.db.Exec(`PRAGMA auto_vacuum=FULL`); err != nil {
+			return err
+		}
+	}
+
+	if b.db.driver == "mysql" {
+		// Make MySQL more ANSI SQL compatible.
+		_, err := b.db.Exec(`SET SESSION sql_mode = 'ansi,no_backslash_escapes'`)
+		if err != nil {
+			return err
+		}
+
+		// Turn on strictiest transaction isolation.
+		// TODO: Review if this is really needed to ensure consistentcy.
+		_, err = b.db.Exec(`SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE`)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
 
 func (b *Backend) initSchema() error {
 	var err error

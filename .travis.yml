@@ -9,8 +9,8 @@ matrix:
   include:
   - env: TEST_DB=sqlite3 TEST_DSN=":memory:" GO111MODULE=on SHUFFLE_CASES=1
   - env: TEST_DB=mysql TEST_DSN="root@tcp(localhost)/sqlmail_test" GO111MODULE=on SHUFFLE_CASES=1
-    services:
-    - mysql
+    addons:
+      mariadb: "10.2"
     before_install:
     - mysql -u root -e 'CREATE DATABASE IF NOT EXISTS sqlmail_test;'
   - env: TEST_DB=postgres TEST_DSN="user=postgres dbname=sqlmail_test sslmode=disable" GO111MODULE=on SHUFFLE_CASES=1

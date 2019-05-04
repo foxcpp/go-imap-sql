@@ -40,10 +40,15 @@ func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uin
 			return nil, err
 		}
 
+		flags := strings.Split(flagStr, flagsSep)
+		if len(flags) == 1 && flags[0] == "" {
+			flags = nil
+		}
+
 		if !backendutil.MatchSeqNumAndUid(seqNum, msgId, criteria) {
 			continue
 		}
-		if !backendutil.MatchFlags(strings.Split(flagStr, flagsSep), criteria) {
+		if !backendutil.MatchFlags(flags, criteria) {
 			continue
 		}
 		if !backendutil.MatchDate(time.Unix(dateUnix, 0), criteria) {

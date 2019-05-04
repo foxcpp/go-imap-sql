@@ -63,20 +63,21 @@ func scanMessages(rows *sql.Rows, items []imap.FetchItem, ch chan<- *imap.Messag
 
 	scanOrder := make([]interface{}, 0, len(cols))
 	for _, col := range cols {
+		// PostgreSQL case-folds column names to lower-case.
 		switch col {
 		case "seqnum":
 			scanOrder = append(scanOrder, &seqNum)
 		case "date":
 			scanOrder = append(scanOrder, &dateUnix)
-		case "headerLen":
+		case "headerLen", "headerlen":
 			scanOrder = append(scanOrder, &headerLen)
-		case "bodyLen":
+		case "bodyLen", "bodylen":
 			scanOrder = append(scanOrder, &bodyLen)
-		case "msgId":
+		case "msgId", "msgid":
 			scanOrder = append(scanOrder, &msgId)
-		case "cachedHeader":
+		case "cachedHeader", "cachedheader":
 			scanOrder = append(scanOrder, &cachedHeaderBlob)
-		case "bodyStructure":
+		case "bodyStructure", "bodystructure":
 			scanOrder = append(scanOrder, &bodyStructureBlob)
 		case "header":
 			scanOrder = append(scanOrder, &headerBlob)

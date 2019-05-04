@@ -153,9 +153,10 @@ type Backend struct {
 	searchFetchNoBodyNoSeq *sql.Stmt
 	searchFetchNoSeq       *sql.Stmt
 
+	flagsSearchStmtsLck   sync.RWMutex
 	flagsSearchStmtsCache map[string]*sql.Stmt
-
-	fetchStmtsCache map[string]*sql.Stmt
+	fetchStmtsLck         sync.RWMutex
+	fetchStmtsCache       map[string]*sql.Stmt
 }
 
 func NewBackend(driver, dsn string, opts Opts) (*Backend, error) {

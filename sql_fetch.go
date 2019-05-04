@@ -113,16 +113,21 @@ func (b *Backend) getFetchStmt(uid bool, items []imap.FetchItem) (*sql.Stmt, err
 		return nil, err
 	}
 
-	if stmt := b.fetchStmtsCache[key]; stmt != nil {
+	b.fetchStmtsLck.RLock()
+	stmt := b.fetchStmtsCache[key]
+	b.fetchStmtsLck.RUnlock()
+	if stmt != nil {
 		return stmt, nil
 	}
 
-	stmt, err := b.db.Prepare(str)
+	stmt, err = b.db.Prepare(str)
 	if err != nil {
 		return nil, err
 	}
 
+	b.fetchStmtsLck.Lock()
 	b.fetchStmtsCache[key] = stmt
+	b.fetchStmtsLck.Unlock()
 	return stmt, nil
 }
 

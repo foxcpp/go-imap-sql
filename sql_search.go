@@ -54,7 +54,10 @@ func buildSearchStmt(uid bool, withFlags, withoutFlags []string) string {
 
 func (m *Mailbox) getFlagSearchStmt(uid bool, withFlags, withoutFlags []string) (*sql.Stmt, error) {
 	cacheKey := fmt.Sprint(uid, len(withFlags), ":", len(withoutFlags))
-	if stmt := m.parent.flagsSearchStmtsCache[cacheKey]; stmt != nil {
+	m.parent.flagsSearchStmtsLck.RLock()
+	stmt := m.parent.flagsSearchStmtsCache[cacheKey]
+	m.parent.flagsSearchStmtsLck.RUnlock()
+	if stmt != nil {
 		return stmt, nil
 	}
 
@@ -63,7 +66,9 @@ func (m *Mailbox) getFlagSearchStmt(uid bool, withFlags, withoutFlags []string) 
 	if err != nil {
 		return nil, err
 	}
+	m.parent.flagsSearchStmtsLck.Lock()
 	m.parent.flagsSearchStmtsCache[cacheKey] = stmt
+	m.parent.flagsSearchStmtsLck.Unlock()
 
 	return stmt, nil
 }

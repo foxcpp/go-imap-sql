@@ -586,7 +586,31 @@ func (b *Backend) prepareStmts() error {
 		GROUP BY msgs.mboxId, msgs.msgId, seqnum
 		ORDER BY seqnum DESC`)
 	if err != nil {
-		return errors.Wrap(err, "msgFlagsSeq prep")
+		return errors.Wrap(err, "searchFetch prep")
+	}
+
+	// It is kinda expensive to compute sequence numbers using row_number() so we avoid it where possible.
+	b.searchFetchNoBodyNoSeq, err = b.db.Prepare(`
+		SELECT 0 AS seqnum, msgs.msgId, date, headerLen, bodyLen, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
+		FROM msgs
+		LEFT JOIN flags
+		ON flags.msgId = msgs.msgId AND msgs.mboxId = flags.mboxId
+		WHERE msgs.mboxId = ?
+		GROUP BY msgs.mboxId, msgs.msgId, seqnum
+		ORDER BY seqnum DESC`)
+	if err != nil {
+		return errors.Wrap(err, "searchFetchNoBodyNoSeq prep")
+	}
+	b.searchFetchNoSeq, err = b.db.Prepare(`
+		SELECT 0 AS seqnum, msgs.msgId, date, headerLen, header, bodyLen, body, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
+		FROM msgs
+		LEFT JOIN flags
+		ON flags.msgId = msgs.msgId AND msgs.mboxId = flags.mboxId
+		WHERE msgs.mboxId = ?
+		GROUP BY msgs.mboxId, msgs.msgId, seqnum
+		ORDER BY seqnum DESC`)
+	if err != nil {
+		return errors.Wrap(err, "searchFetchNoSeq prep")
 	}
 
 	return nil

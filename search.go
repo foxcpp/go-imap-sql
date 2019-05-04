@@ -13,13 +13,29 @@ import (
 )
 
 func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uint32, error) {
+	if searchOnlyWithFlags(criteria) {
+		return m.flagSearch(uid, criteria.WithFlags, criteria.WithoutFlags)
+	}
+
 	needBody := searchNeedsBody(criteria)
+	noSeqNum := noSeqNumNeeded(criteria)
 	var rows *sql.Rows
 	var err error
 	if needBody {
-		rows, err = m.parent.searchFetch.Query(m.id, m.id)
+		if noSeqNum && uid {
+			rows, err = m.parent.searchFetchNoSeq.Query(m.id)
+		} else {
+			rows, err = m.parent.searchFetch.Query(m.id, m.id)
+		}
 	} else {
-		rows, err = m.parent.searchFetchNoBody.Query(m.id, m.id)
+		if noSeqNum && uid {
+			rows, err = m.parent.searchFetchNoBodyNoSeq.Query(m.id)
+		} else {
+			rows, err = m.parent.searchFetchNoBody.Query(m.id, m.id)
+		}
+	}
+	if err != nil {
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -108,4 +124,70 @@ func searchNeedsBody(criteria *imap.SearchCriteria) bool {
 	}
 
 	return false
+}
+
+func searchOnlyWithFlags(criteria *imap.SearchCriteria) bool {
+	if criteria.Header != nil ||
+		criteria.Body != nil ||
+		criteria.Text != nil ||
+		!criteria.SentSince.IsZero() ||
+		!criteria.SentBefore.IsZero() ||
+		criteria.Smaller != 0 ||
+		criteria.Uid != nil ||
+		criteria.SeqNum != nil ||
+		!criteria.Since.IsZero() ||
+		!criteria.Before.IsZero() ||
+		criteria.Larger != 0 ||
+		criteria.Not != nil ||
+		criteria.Or != nil {
+
+		return false
+	}
+
+	return true
+}
+
+func noSeqNumNeeded(criteria *imap.SearchCriteria) bool {
+	if criteria.SeqNum != nil {
+		return false
+	}
+
+	for _, crit := range criteria.Not {
+		if !noSeqNumNeeded(crit) {
+			return false
+		}
+	}
+	for _, crit := range criteria.Or {
+		if !noSeqNumNeeded(crit[0]) || !noSeqNumNeeded(crit[1]) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (m *Mailbox) flagSearch(uid bool, withFlags, withoutFlags []string) ([]uint32, error) {
+	stmt, err := m.getFlagSearchStmt(uid, withFlags, withoutFlags)
+	if err != nil {
+		return nil, err
+	}
+
+	args := m.buildFlagSearchQueryArgs(uid, withFlags, withoutFlags)
+	rows, err := stmt.Query(args...)
+	if err != nil {
+		return nil, err
+	}
+
+	var res []uint32
+	for rows.Next() {
+		var id uint32
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		res = append(res, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return res, nil
 }

@@ -148,15 +148,20 @@ type Backend struct {
 	setMboxMsgSizeLimit *sql.Stmt
 	mboxMsgSizeLimit    *sql.Stmt
 
-	searchFetchNoBody *sql.Stmt
-	searchFetch       *sql.Stmt
+	searchFetchNoBody      *sql.Stmt
+	searchFetch            *sql.Stmt
+	searchFetchNoBodyNoSeq *sql.Stmt
+	searchFetchNoSeq       *sql.Stmt
+
+	flagsSearchStmtsCache map[string]*sql.Stmt
 
 	fetchStmtsCache map[string]*sql.Stmt
 }
 
 func NewBackend(driver, dsn string, opts Opts) (*Backend, error) {
 	b := &Backend{
-		fetchStmtsCache: make(map[string]*sql.Stmt),
+		fetchStmtsCache:       make(map[string]*sql.Stmt),
+		flagsSearchStmtsCache: make(map[string]*sql.Stmt),
 	}
 	var err error
 

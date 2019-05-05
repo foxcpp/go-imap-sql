@@ -421,7 +421,7 @@ func (b *Backend) CheckPlain(username, password string) bool {
 	return err == nil
 }
 
-func (b *Backend) Login(username, password string) (backend.User, error) {
+func (b *Backend) Login(_ *imap.ConnInfo, username, password string) (backend.User, error) {
 	uid, err := b.checkUser(username, password)
 	if err != nil {
 		return nil, err

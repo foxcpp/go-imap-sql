@@ -62,16 +62,7 @@ func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uin
 			flags = nil
 		}
 
-		if !backendutil.MatchSeqNumAndUid(seqNum, msgId, criteria) {
-			continue
-		}
-		if !backendutil.MatchFlags(flags, criteria) {
-			continue
-		}
-		if !backendutil.MatchDate(time.Unix(dateUnix, 0), criteria) {
-			continue
-		}
-
+		var ent *message.Entity
 		if needBody {
 			body, err := m.openBody(extBodyKey, headerBlob, bodyBlob)
 			if err != nil {
@@ -84,19 +75,23 @@ func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uin
 				return nil, err
 			}
 			parsedHeader := message.Header(textprotoHdr)
-			ent, err := message.New(parsedHeader, bufferedBody)
+			ent, err = message.New(parsedHeader, bufferedBody)
 			if err != nil {
 				return nil, err
 			}
-
-			matched, err := backendutil.Match(ent, criteria)
+		} else {
+			ent, err = message.New(make(message.Header), nil)
 			if err != nil {
-				return nil, err
+				panic(err)
 			}
+		}
 
-			if !matched {
-				continue
-			}
+		matched, err := backendutil.Match(ent, seqNum, msgId, time.Unix(dateUnix, 0), flags, criteria)
+		if err != nil {
+			return nil, err
+		}
+		if !matched {
+			continue
 		}
 
 		if uid {

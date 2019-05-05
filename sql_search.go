@@ -66,9 +66,11 @@ func (m *Mailbox) getFlagSearchStmt(uid bool, withFlags, withoutFlags []string) 
 	if err != nil {
 		return nil, err
 	}
-	m.parent.flagsSearchStmtsLck.Lock()
-	m.parent.flagsSearchStmtsCache[cacheKey] = stmt
-	m.parent.flagsSearchStmtsLck.Unlock()
+	if len(withFlags) < 3 && len(withoutFlags) < 3 {
+		m.parent.flagsSearchStmtsLck.Lock()
+		m.parent.flagsSearchStmtsCache[cacheKey] = stmt
+		m.parent.flagsSearchStmtsLck.Unlock()
+	}
 
 	return stmt, nil
 }

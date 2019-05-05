@@ -159,7 +159,7 @@ type Backend struct {
 	fetchStmtsCache       map[string]*sql.Stmt
 }
 
-func NewBackend(driver, dsn string, opts Opts) (*Backend, error) {
+func New(driver, dsn string, opts Opts) (*Backend, error) {
 	b := &Backend{
 		fetchStmtsCache:       make(map[string]*sql.Stmt),
 		flagsSearchStmtsCache: make(map[string]*sql.Stmt),

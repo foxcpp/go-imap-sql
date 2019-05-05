@@ -40,7 +40,7 @@ func initTestBackend() backendtests.Backend {
 		dsn = filepath.Join(tempDir, "test.db")
 	}
 
-	b, err := NewBackend(driver, dsn, Opts{
+	b, err := New(driver, dsn, Opts{
 		LazyUpdatesInit: true,
 		PRNG:            prng,
 	})

@@ -298,7 +298,7 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 			INSERT INTO flags
 			SELECT ?, msgId, column1 AS flag
 			FROM msgs
-			CROSS JOIN (` + m.valuesSubquery(flags) + `) flagset
+			CROSS JOIN (` + m.parent.db.valuesSubquery(flags) + `) flagset
 			WHERE mboxId = ? AND msgId = ?
 			ON CONFLICT DO NOTHING`)
 
@@ -356,29 +356,6 @@ func (m *Mailbox) statusUpdate(tx *sql.Tx) (backend.Update, error) {
 	upd.MailboxStatus.Recent = newRecent
 
 	return &upd, nil
-}
-
-func (m *Mailbox) valuesSubquery(rows []string) string {
-	count := len(rows)
-	sqlList := ""
-	if m.parent.db.driver == "mysql" {
-
-		sqlList += "SELECT ? AS column1"
-		for i := 1; i < count; i++ {
-			sqlList += " UNION ALL SELECT ? "
-		}
-
-		return sqlList
-	}
-
-	for i := 0; i < count; i++ {
-		sqlList += "(?)"
-		if i+1 != count {
-			sqlList += ","
-		}
-	}
-
-	return "VALUES " + sqlList
 }
 
 func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error {

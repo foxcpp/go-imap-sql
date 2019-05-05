@@ -6,33 +6,33 @@ import (
 	imap "github.com/emersion/go-imap"
 )
 
-func (m *Mailbox) makeFlagsAddStmt(uid bool, flags []string) (*sql.Stmt, error) {
+func (b *Backend) makeFlagsAddStmt(uid bool, flags []string) (*sql.Stmt, error) {
 	var query *sql.Stmt
 	var err error
 	if uid {
-		query, err = m.parent.db.Prepare(`
+		query, err = b.db.Prepare(`
 			INSERT INTO flags
 			SELECT ? AS mboxId, msgId, column1 AS flag
 			FROM msgs
-			CROSS JOIN (` + m.valuesSubquery(flags) + `) flagset
+			CROSS JOIN (` + b.db.valuesSubquery(flags) + `) flagset
 			WHERE mboxId = ? AND msgId BETWEEN ? AND ?
 			ON CONFLICT DO NOTHING`)
 	} else {
 		// ON 1=1 is necessary to make SQLite's parser not interpret ON CONFLICT as join condition.
-		if m.parent.db.driver == "sqlite3" {
-			query, err = m.parent.db.Prepare(`
+		if b.db.driver == "sqlite3" {
+			query, err = b.db.Prepare(`
 				INSERT INTO flags
 				SELECT ? AS mboxId, msgId, column1 AS flag
 				FROM (SELECT msgId FROM msgs WHERE mboxId = ? LIMIT ? OFFSET ?) msgIds
-				CROSS JOIN (` + m.valuesSubquery(flags) + `) flagset ON 1=1
+				CROSS JOIN (` + b.db.valuesSubquery(flags) + `) flagset ON 1=1
 				ON CONFLICT DO NOTHING`)
 		} else {
 			// But 1 = 1 in query causes errors on PostgreSQL.
-			query, err = m.parent.db.Prepare(`
+			query, err = b.db.Prepare(`
 				INSERT INTO flags
 				SELECT ? AS mboxId, msgId, column1 AS flag
 				FROM (SELECT msgId FROM msgs WHERE mboxId = ? LIMIT ? OFFSET ?) msgIds
-				CROSS JOIN (` + m.valuesSubquery(flags) + `) flagset
+				CROSS JOIN (` + b.db.valuesSubquery(flags) + `) flagset
 				ON CONFLICT DO NOTHING`)
 		}
 	}
@@ -58,17 +58,17 @@ func (m *Mailbox) makeFlagsAddStmtArgs(uid bool, flags []string, seq imap.Seq) (
 	return
 }
 
-func (m *Mailbox) makeFlagsRemStmt(uid bool, flags []string) (*sql.Stmt, error) {
+func (b *Backend) makeFlagsRemStmt(uid bool, flags []string) (*sql.Stmt, error) {
 	var query *sql.Stmt
 	var err error
 	if uid {
-		query, err = m.parent.db.Prepare(`
+		query, err = b.db.Prepare(`
 			 DELETE FROM flags
 			 WHERE mboxId = ?
 			 AND msgId BETWEEN ? AND ?
-			 AND flag IN (` + m.valuesSubquery(flags) + `)`)
+			 AND flag IN (` + b.db.valuesSubquery(flags) + `)`)
 	} else {
-		query, err = m.parent.db.Prepare(`
+		query, err = b.db.Prepare(`
 			 DELETE FROM flags
 			 WHERE mboxId = ?
 			 AND msgId IN (
@@ -79,7 +79,7 @@ func (m *Mailbox) makeFlagsRemStmt(uid bool, flags []string) (*sql.Stmt, error) 
 							 WHERE mboxId = ?
 					 ) seqnums
 					 WHERE seqnum BETWEEN ? AND ?
-			 ) AND flag IN (` + m.valuesSubquery(flags) + `)`)
+			 ) AND flag IN (` + b.db.valuesSubquery(flags) + `)`)
 	}
 	return query, err
 }

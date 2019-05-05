@@ -512,7 +512,7 @@ func (b *Backend) prepareStmts() error {
 	}
 
 	b.msgFlagsUid, err = b.db.Prepare(`
-		SELECT seqnum, msgs.msgId, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
+		SELECT seqnum, msgs.msgId, coalesce(` + b.db.groupConcatFn("flag", "{") + `, '')
 		FROM msgs
 		INNER JOIN (
 			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
@@ -529,7 +529,7 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "msgFlagsUid prep")
 	}
 	b.msgFlagsSeq, err = b.db.Prepare(`
-		SELECT seqnum, msgs.msgId, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
+		SELECT seqnum, msgs.msgId, coalesce(` + b.db.groupConcatFn("flag", "{") + `, '')
 		FROM msgs
 		INNER JOIN (
 			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
@@ -555,7 +555,7 @@ func (b *Backend) prepareStmts() error {
 	}
 
 	b.searchFetchNoBody, err = b.db.Prepare(`
-		SELECT seqnum, msgs.msgId, date, headerLen, bodyLen, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
+		SELECT seqnum, msgs.msgId, date, headerLen, bodyLen, coalesce(` + b.db.groupConcatFn("flag", "{") + `, '')
 		FROM msgs
 		INNER JOIN (
 			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
@@ -572,7 +572,7 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "searchFetchNoBody prep")
 	}
 	b.searchFetch, err = b.db.Prepare(`
-		SELECT seqnum, msgs.msgId, date, headerLen, header, bodyLen, body, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
+		SELECT seqnum, msgs.msgId, date, headerLen, header, bodyLen, body, coalesce(` + b.db.groupConcatFn("flag", "{") + `, '')
 		FROM msgs
 		INNER JOIN (
 			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
@@ -591,7 +591,7 @@ func (b *Backend) prepareStmts() error {
 
 	// It is kinda expensive to compute sequence numbers using row_number() so we avoid it where possible.
 	b.searchFetchNoBodyNoSeq, err = b.db.Prepare(`
-		SELECT 0 AS seqnum, msgs.msgId, date, headerLen, bodyLen, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
+		SELECT 0 AS seqnum, msgs.msgId, date, headerLen, bodyLen, coalesce(` + b.db.groupConcatFn("flag", "{") + `, '')
 		FROM msgs
 		LEFT JOIN flags
 		ON flags.msgId = msgs.msgId AND msgs.mboxId = flags.mboxId
@@ -602,7 +602,7 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "searchFetchNoBodyNoSeq prep")
 	}
 	b.searchFetchNoSeq, err = b.db.Prepare(`
-		SELECT 0 AS seqnum, msgs.msgId, date, headerLen, header, bodyLen, body, coalesce(` + b.groupConcatFn("flag", "{") + `, '')
+		SELECT 0 AS seqnum, msgs.msgId, date, headerLen, header, bodyLen, body, coalesce(` + b.db.groupConcatFn("flag", "{") + `, '')
 		FROM msgs
 		LEFT JOIN flags
 		ON flags.msgId = msgs.msgId AND msgs.mboxId = flags.mboxId

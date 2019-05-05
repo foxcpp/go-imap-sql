@@ -81,3 +81,39 @@ func (d db) rewriteSQL(req string) (res string) {
 
 	return
 }
+
+func (db db) valuesSubquery(rows []string) string {
+	count := len(rows)
+	sqlList := ""
+	if db.driver == "mysql" {
+
+		sqlList += "SELECT ? AS column1"
+		for i := 1; i < count; i++ {
+			sqlList += " UNION ALL SELECT ? "
+		}
+
+		return sqlList
+	}
+
+	for i := 0; i < count; i++ {
+		sqlList += "(?)"
+		if i+1 != count {
+			sqlList += ","
+		}
+	}
+
+	return "VALUES " + sqlList
+}
+
+func (db db) groupConcatFn(expr, separator string) string {
+	if db.driver == "sqlite3" {
+		return "group_concat(" + expr + ", '" + separator + "')"
+	}
+	if db.driver == "postgres" {
+		return "string_agg(" + expr + ", '" + separator + "')"
+	}
+	if db.driver == "mysql" {
+		return "group_concat(" + expr + " SEPARATOR '" + separator + "')"
+	}
+	panic("Unsupported driver")
+}

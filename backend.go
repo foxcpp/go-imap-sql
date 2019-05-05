@@ -235,19 +235,6 @@ func (b *Backend) Updates() <-chan backend.Update {
 	return b.updates
 }
 
-func (b *Backend) groupConcatFn(expr, separator string) string {
-	if b.db.driver == "sqlite3" {
-		return "group_concat(" + expr + ", '" + separator + "')"
-	}
-	if b.db.driver == "postgres" {
-		return "string_agg(" + expr + ", '" + separator + "')"
-	}
-	if b.db.driver == "mysql" {
-		return "group_concat(" + expr + " SEPARATOR '" + separator + "')"
-	}
-	panic("Unsupported driver")
-}
-
 func (b *Backend) UserCreds(username string) (uint64, []byte, []byte, error) {
 	row := b.userCreds.QueryRow(username)
 	id, passHashHex, passSaltHex := uint64(0), "", ""

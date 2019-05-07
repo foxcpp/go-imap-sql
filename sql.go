@@ -48,8 +48,10 @@ func (b *Backend) configureEngine() error {
 			return err
 		}
 
-		if _, err := b.db.Exec(`PRAGMA page_size=16384`); err != nil {
-			return err
+		if b.Opts.ExternalStore == nil {
+			if _, err := b.db.Exec(`PRAGMA page_size=16384`); err != nil {
+				return err
+			}
 		}
 		if _, err := b.db.Exec(`PRAGMA auto_vacuum=FULL`); err != nil {
 			return err

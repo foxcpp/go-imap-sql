@@ -72,11 +72,18 @@ type Opts struct {
 	// Close.
 	// It runs VACUUM and PRAGMA wal_checkpoint(TRUNCATE).
 	MinimizeOnClose bool
+
+	// External storage to use to store message bodies. If specified - all new messages
+	// will be saved to it. However, already existing messages stored in DB
+	// directly will not be moved.
+	ExternalStore ExternalStore
 }
 
 type Backend struct {
-	db   db
-	opts Opts
+	db db
+
+	Opts Opts
+	DB   *sql.DB
 
 	childrenExt bool
 
@@ -147,6 +154,9 @@ type Backend struct {
 
 	markedSeqnums *sql.Stmt
 
+	extKeysUid *sql.Stmt
+	extKeysSeq *sql.Stmt
+
 	// For APPEND-LIMIT extension
 	setUserMsgSizeLimit *sql.Stmt
 	userMsgSizeLimit    *sql.Stmt
@@ -162,6 +172,14 @@ type Backend struct {
 	flagsSearchStmtsCache map[string]*sql.Stmt
 	fetchStmtsLck         sync.RWMutex
 	fetchStmtsCache       map[string]*sql.Stmt
+
+	// extkeys table
+	addExtKey             *sql.Stmt
+	decreaseRefForMarked  *sql.Stmt
+	decreaseRefForDeleted *sql.Stmt
+	increaseRefForLast    *sql.Stmt
+	zeroRef               *sql.Stmt
+	deleteZeroRef         *sql.Stmt
 }
 
 func New(driver, dsn string, opts Opts) (*Backend, error) {
@@ -171,15 +189,15 @@ func New(driver, dsn string, opts Opts) (*Backend, error) {
 	}
 	var err error
 
-	b.opts = opts
-	if !b.opts.LazyUpdatesInit {
-		b.updates = b.opts.UpdatesChan
+	b.Opts = opts
+	if !b.Opts.LazyUpdatesInit {
+		b.updates = b.Opts.UpdatesChan
 		if b.updates == nil {
 			b.updates = make(chan backend.Update, 20)
 		}
 	}
 
-	if b.opts.PRNG != nil {
+	if b.Opts.PRNG != nil {
 		b.prng = opts.PRNG
 	} else {
 		b.prng = mathrand.New(mathrand.NewSource(time.Now().Unix()))
@@ -192,6 +210,7 @@ func New(driver, dsn string, opts Opts) (*Backend, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "NewBackend")
 	}
+	b.DB = b.db.DB
 
 	if err := b.configureEngine(); err != nil {
 		return nil, errors.Wrap(err, "NewBackend")
@@ -239,7 +258,7 @@ func (b *Backend) Close() error {
 }
 
 func (b *Backend) Updates() <-chan backend.Update {
-	if b.opts.LazyUpdatesInit && b.updates == nil {
+	if b.Opts.LazyUpdatesInit && b.updates == nil {
 		b.updatesLck.Lock()
 		defer b.updatesLck.Unlock()
 
@@ -286,6 +305,7 @@ func (b *Backend) CreateUser(username, password string) error {
 	if err != nil && (strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "Duplicate entry") || strings.Contains(err.Error(), "unique")) {
 		return ErrUserAlreadyExists
 	}
+
 	return errors.Wrap(err, "CreateUser")
 }
 
@@ -296,8 +316,9 @@ func (b *Backend) DeleteUser(username string) error {
 	}
 	affected, err := stats.RowsAffected()
 	if err != nil {
-		return errors.Wrap(err, "SetUserPassword")
+		return errors.Wrap(err, "DeleteUser")
 	}
+
 	if affected == 0 {
 		return ErrUserDoesntExists
 	}
@@ -412,10 +433,10 @@ func (b *Backend) Login(username, password string) (backend.User, error) {
 }
 
 func (b *Backend) CreateMessageLimit() *uint32 {
-	return b.opts.MaxMsgBytes
+	return b.Opts.MaxMsgBytes
 }
 
 func (b *Backend) SetMessageLimit(val *uint32) error {
-	b.opts.MaxMsgBytes = val
+	b.Opts.MaxMsgBytes = val
 	return nil
 }

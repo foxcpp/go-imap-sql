@@ -101,6 +101,7 @@ func (u *User) CreateMailbox(name string) error {
 		}
 		return errors.Wrapf(err, "CreateMailbox %s", name)
 	}
+
 	return errors.Wrapf(tx.Commit(), "CreateMailbox %s", name)
 }
 

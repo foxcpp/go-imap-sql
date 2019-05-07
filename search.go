@@ -1,9 +1,9 @@
 package imapsql
 
 import (
-	"bytes"
+	"bufio"
 	"database/sql"
-	"io"
+	"net/textproto"
 	"strings"
 	"time"
 
@@ -44,11 +44,11 @@ func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uin
 		var seqNum, msgId uint32
 		var dateUnix int64
 		var headerLen, bodyLen int
-		var header, body []byte
-		var flagStr string
+		var headerBlob, bodyBlob []byte
+		var flagStr, extBodyKey string
 
 		if needBody {
-			err = rows.Scan(&seqNum, &msgId, &dateUnix, &headerLen, &header, &bodyLen, &body, &flagStr)
+			err = rows.Scan(&seqNum, &msgId, &dateUnix, &headerLen, &headerBlob, &bodyLen, &extBodyKey, &bodyBlob, &flagStr)
 		} else {
 			err = rows.Scan(&seqNum, &msgId, &dateUnix, &headerLen, &bodyLen, &flagStr)
 		}
@@ -72,7 +72,18 @@ func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uin
 		}
 
 		if needBody {
-			ent, err := message.Read(io.MultiReader(bytes.NewReader(header), bytes.NewReader(body)))
+			body, err := m.openBody(extBodyKey, headerBlob, bodyBlob)
+			if err != nil {
+				return nil, err
+			}
+			bufferedBody := bufio.NewReader(body)
+
+			textprotoHdr, err := textproto.NewReader(bufferedBody).ReadMIMEHeader()
+			if err != nil {
+				return nil, err
+			}
+			parsedHeader := message.Header(textprotoHdr)
+			ent, err := message.New(parsedHeader, bufferedBody)
 			if err != nil {
 				return nil, err
 			}

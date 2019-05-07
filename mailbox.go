@@ -245,7 +245,7 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		if userLimit != nil && uint32(fullBody.Len()) > *userLimit {
 			return appendlimit.ErrTooBig
 		} else if userLimit == nil {
-			if m.parent.opts.MaxMsgBytes != nil && uint32(fullBody.Len()) > *m.parent.opts.MaxMsgBytes {
+			if m.parent.Opts.MaxMsgBytes != nil && uint32(fullBody.Len()) > *m.parent.Opts.MaxMsgBytes {
 				return appendlimit.ErrTooBig
 			}
 		}
@@ -273,9 +273,30 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		return errors.Wrap(err, "CreateMessage (extractCachedData)")
 	}
 
+	headerLen := len(hdr)
+	bodyLen := len(body)
+
+	var extBodyKey string
+	if m.parent.Opts.ExternalStore != nil {
+		extBodyKey, err = randomKey()
+		if err != nil {
+			return err
+		}
+		if err := m.parent.Opts.ExternalStore.Create(extBodyKey, bytes.NewReader(bodyBlob)); err != nil {
+			return err
+		}
+
+		hdr = nil
+		body = nil
+
+		if _, err = tx.Stmt(m.parent.addExtKey).Exec(extBodyKey); err != nil {
+			return errors.Wrap(err, "CreateMessage (addExtKey)")
+		}
+	}
+
 	_, err = tx.Stmt(m.parent.addMsg).Exec(
 		m.id, msgId, date.Unix(),
-		len(hdr), hdr, len(body), body,
+		headerLen, hdr, bodyLen, extBodyKey, body,
 		bodyStruct, cachedHdr,
 	)
 	if err != nil {
@@ -459,16 +480,22 @@ func (m *Mailbox) delMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, updsBuf
 		}
 	}
 
+	var deletedExtKeys []string
+
 	rows, err := tx.Stmt(m.parent.markedSeqnums).Query(m.id)
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
 		var seqnum uint32
-		if err := rows.Scan(&seqnum); err != nil {
+		var extKey string
+		if err := rows.Scan(&seqnum, &extKey); err != nil {
 			return err
 		}
 
+		if extKey != "" {
+			deletedExtKeys = append(deletedExtKeys, extKey)
+		}
 		*updsBuffer = append(*updsBuffer, &backend.ExpungeUpdate{
 			Update: backend.NewUpdate(m.user.username, m.name),
 			SeqNum: seqnum,
@@ -476,6 +503,12 @@ func (m *Mailbox) delMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, updsBuf
 	}
 	if err := rows.Err(); err != nil {
 		return err
+	}
+
+	if m.parent.Opts.ExternalStore != nil {
+		if err := m.parent.Opts.ExternalStore.Delete(deletedExtKeys); err != nil {
+			return err
+		}
 	}
 
 	_, err = tx.Stmt(m.parent.delMarked).Exec()
@@ -520,6 +553,12 @@ func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest s
 		affected, err := stats.RowsAffected()
 		if err != nil {
 			return err
+		}
+
+		if m.parent.Opts.ExternalStore != nil {
+			if _, err := tx.Stmt(m.parent.increaseRefForLast).Exec(destID, affected); err != nil {
+				return err
+			}
 		}
 
 		if _, err := tx.Stmt(m.parent.addRecentToLast).Exec(destID, destID, affected); err != nil {
@@ -569,6 +608,12 @@ func (m *Mailbox) Expunge() error {
 		return errors.Wrap(err, "Expunge")
 	}
 
+	if m.parent.Opts.ExternalStore != nil {
+		if err := m.expungeExternal(tx); err != nil {
+			return err
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		return errors.Wrap(err, "Expunge")
 	}
@@ -580,6 +625,37 @@ func (m *Mailbox) Expunge() error {
 				SeqNum: seqnum,
 			}
 		}
+	}
+
+	return nil
+}
+
+func (m *Mailbox) expungeExternal(tx *sql.Tx) error {
+	if _, err := tx.Stmt(m.parent.decreaseRefForDeleted).Exec(m.id); err != nil {
+		return err
+	}
+
+	rows, err := tx.Stmt(m.parent.zeroRef).Query(m.id)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	keys := make([]string, 0, 16)
+	for rows.Next() {
+		var extKey string
+		if err := rows.Scan(&extKey); err != nil {
+			return err
+		}
+		keys = append(keys, extKey)
+
+	}
+
+	if err := m.parent.Opts.ExternalStore.Delete(keys); err != nil {
+		return err
+	}
+	if _, err := tx.Stmt(m.parent.deleteZeroRef).Exec(m.id); err != nil {
+		return err
 	}
 
 	return nil

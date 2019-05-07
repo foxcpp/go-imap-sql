@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"database/sql"
+	"io"
+	"io/ioutil"
 	"net/textproto"
 	"strings"
 	"time"
@@ -36,7 +38,7 @@ func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.Fetch
 		if err != nil {
 			return err
 		}
-		if err := scanMessages(rows, items, ch); err != nil {
+		if err := m.scanMessages(rows, items, ch); err != nil {
 			return err
 		}
 	}
@@ -44,21 +46,25 @@ func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.Fetch
 	return nil
 }
 
-func scanMessages(rows *sql.Rows, items []imap.FetchItem, ch chan<- *imap.Message) error {
-	defer rows.Close()
+type scanData struct {
+	cachedHeaderBlob, bodyStructureBlob, headerBlob, bodyBlob []byte
 
-	var cachedHeaderBlob, bodyStructureBlob, headerBlob, bodyBlob []byte
-	var seqNum, msgId uint32
-	var dateUnix int64
-	var headerLen, bodyLen uint32
-	var flagStr string
+	seqNum, msgId      uint32
+	dateUnix           int64
+	headerLen, bodyLen uint32
+	flagStr            string
+	extBodyKey         string
 
-	var bodyStructure *imap.BodyStructure
-	var cachedHeader map[string][]string
+	bodyReader    io.ReadCloser
+	bodyStructure *imap.BodyStructure
+	cachedHeader  map[string][]string
+	parsedHeader  message.Header
+}
 
+func makeScanArgs(data *scanData, rows *sql.Rows) ([]interface{}, error) {
 	cols, err := rows.Columns()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	scanOrder := make([]interface{}, 0, len(cols))
@@ -66,100 +72,84 @@ func scanMessages(rows *sql.Rows, items []imap.FetchItem, ch chan<- *imap.Messag
 		// PostgreSQL case-folds column names to lower-case.
 		switch col {
 		case "seqnum":
-			scanOrder = append(scanOrder, &seqNum)
+			scanOrder = append(scanOrder, &data.seqNum)
 		case "date":
-			scanOrder = append(scanOrder, &dateUnix)
+			scanOrder = append(scanOrder, &data.dateUnix)
 		case "headerLen", "headerlen":
-			scanOrder = append(scanOrder, &headerLen)
+			scanOrder = append(scanOrder, &data.headerLen)
 		case "bodyLen", "bodylen":
-			scanOrder = append(scanOrder, &bodyLen)
+			scanOrder = append(scanOrder, &data.bodyLen)
 		case "msgId", "msgid":
-			scanOrder = append(scanOrder, &msgId)
+			scanOrder = append(scanOrder, &data.msgId)
 		case "cachedHeader", "cachedheader":
-			scanOrder = append(scanOrder, &cachedHeaderBlob)
+			scanOrder = append(scanOrder, &data.cachedHeaderBlob)
 		case "bodyStructure", "bodystructure":
-			scanOrder = append(scanOrder, &bodyStructureBlob)
+			scanOrder = append(scanOrder, &data.bodyStructureBlob)
 		case "header":
-			scanOrder = append(scanOrder, &headerBlob)
+			scanOrder = append(scanOrder, &data.headerBlob)
 		case "body":
-			scanOrder = append(scanOrder, &bodyBlob)
+			scanOrder = append(scanOrder, &data.bodyBlob)
+		case "extBodyKey":
+			scanOrder = append(scanOrder, &data.extBodyKey)
 		case "flags":
-			scanOrder = append(scanOrder, &flagStr)
+			scanOrder = append(scanOrder, &data.flagStr)
 		default:
 			panic("unknown column: " + col)
 		}
 	}
 
+	return scanOrder, nil
+}
+
+func (m *Mailbox) scanMessages(rows *sql.Rows, items []imap.FetchItem, ch chan<- *imap.Message) error {
+	defer rows.Close()
+	data := scanData{}
+
+	scanArgs, err := makeScanArgs(&data, rows)
+	if err != nil {
+		return err
+	}
+
 	for rows.Next() {
-		if err := rows.Scan(scanOrder...); err != nil {
+		if err := rows.Scan(scanArgs...); err != nil {
 			return err
 		}
 
-		if cachedHeaderBlob != nil {
-			if err := jsoniter.Unmarshal(cachedHeaderBlob, &cachedHeader); err != nil {
+		if data.cachedHeaderBlob != nil {
+			if err := jsoniter.Unmarshal(data.cachedHeaderBlob, &data.cachedHeader); err != nil {
 				return err
 			}
 		}
-		if bodyStructureBlob != nil {
+		if data.bodyStructureBlob != nil {
 			// don't reuse structure already sent to the channel
-			bodyStructure = nil
+			data.bodyStructure = nil
 
-			if err := jsoniter.Unmarshal(bodyStructureBlob, &bodyStructure); err != nil {
+			if err := jsoniter.Unmarshal(data.bodyStructureBlob, &data.bodyStructure); err != nil {
 				return err
 			}
 		}
 
-		var parsedHdr message.Header
-		msg := imap.NewMessage(seqNum, items)
-
+		msg := imap.NewMessage(data.seqNum, items)
 		for _, item := range items {
 			switch item {
 			case imap.FetchInternalDate:
-				msg.InternalDate = time.Unix(dateUnix, 0)
+				msg.InternalDate = time.Unix(data.dateUnix, 0)
 			case imap.FetchRFC822Size:
-				msg.Size = headerLen + bodyLen
+				msg.Size = data.headerLen + data.bodyLen
 			case imap.FetchUid:
-				msg.Uid = msgId
+				msg.Uid = data.msgId
 			case imap.FetchEnvelope:
-				raw := envelopeFromHeader(cachedHeader)
+				raw := envelopeFromHeader(data.cachedHeader)
 				msg.Envelope = raw.toIMAP()
 			case imap.FetchBody:
-				msg.BodyStructure = stripExtBodyStruct(bodyStructure)
+				msg.BodyStructure = stripExtBodyStruct(data.bodyStructure)
 			case imap.FetchBodyStructure:
-				msg.BodyStructure = bodyStructure
+				msg.BodyStructure = data.bodyStructure
 			case imap.FetchFlags:
-				msg.Flags = strings.Split(flagStr, flagsSep)
+				msg.Flags = strings.Split(data.flagStr, flagsSep)
 			default:
-				sect, part, err := getNeededPart(item)
-				if err != nil {
+				if err := m.extractBodyPart(item, &data, msg); err != nil {
 					return err
-				}
-
-				switch part {
-				case needCachedHeader:
-					var err error
-					msg.Body[sect], err = headerSubsetFromCached(sect, cachedHeader)
-					if err != nil {
-						return err
-					}
-				case needHeader, needFullBody:
-					if parsedHdr == nil {
-						textprotoHdr, err := textproto.NewReader(bufio.NewReader(bytes.NewReader(headerBlob))).ReadMIMEHeader()
-						if err != nil {
-							return err
-						}
-						parsedHdr = message.Header(textprotoHdr)
-					}
-
-					ent, err := message.New(parsedHdr, bytes.NewReader(bodyBlob))
-					if err != nil {
-						return err
-					}
-
-					msg.Body[sect], err = backendutil.FetchBodySection(ent, sect)
-					if err != nil {
-						msg.Body[sect] = bytes.NewReader(nil)
-					}
 				}
 			}
 		}
@@ -171,6 +161,59 @@ func scanMessages(rows *sql.Rows, items []imap.FetchItem, ch chan<- *imap.Messag
 	}
 
 	return nil
+}
+
+func (m *Mailbox) extractBodyPart(item imap.FetchItem, data *scanData, msg *imap.Message) error {
+	sect, part, err := getNeededPart(item)
+	if err != nil {
+		return err
+	}
+
+	switch part {
+	case needCachedHeader:
+		var err error
+		msg.Body[sect], err = headerSubsetFromCached(sect, data.cachedHeader)
+		if err != nil {
+			return err
+		}
+	case needHeader, needFullBody:
+		var ent *message.Entity
+		body, err := m.openBody(data.extBodyKey, data.headerBlob, data.bodyBlob)
+		if err != nil {
+			return err
+		}
+		bufferedBody := bufio.NewReader(body)
+
+		if data.parsedHeader == nil {
+			textprotoHdr, err := textproto.NewReader(bufferedBody).ReadMIMEHeader()
+			if err != nil {
+				return err
+			}
+			data.parsedHeader = message.Header(textprotoHdr)
+		}
+		ent, err = message.New(data.parsedHeader, bufferedBody)
+		if err != nil {
+			return err
+		}
+
+		msg.Body[sect], err = backendutil.FetchBodySection(ent, sect)
+		if err != nil {
+			msg.Body[sect] = bytes.NewReader(nil)
+		}
+	}
+
+	return nil
+}
+
+func (m *Mailbox) openBody(extBodyKey string, headerBlob, bodyBlob []byte) (io.ReadCloser, error) {
+	if extBodyKey != "" {
+		rdr, err := m.parent.Opts.ExternalStore.Open(extBodyKey)
+		if err != nil {
+			return nil, err
+		}
+		return rdr, nil
+	}
+	return ioutil.NopCloser(io.MultiReader(bytes.NewReader(headerBlob), bytes.NewReader(bodyBlob))), nil
 }
 
 func headerSubsetFromCached(sect *imap.BodySectionName, cachedHeader map[string][]string) (imap.Literal, error) {

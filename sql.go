@@ -21,14 +21,14 @@ func (b *Backend) configureEngine() error {
 
 		// If we turn on EXCLUSIVE locking before WAL, it will be more useful.
 		// TODO: Is it effective at all?
-		if b.opts.ExclusiveLock {
+		if b.Opts.ExclusiveLock {
 			if _, err := b.db.Exec(`PRAGMA locking_mode=EXCLUSIVE`); err != nil {
 				return err
 			}
 		}
 
 		// Performance tweaks.
-		if !b.opts.NoWAL {
+		if !b.Opts.NoWAL {
 			if _, err := b.db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
 				return err
 			}
@@ -37,14 +37,14 @@ func (b *Backend) configureEngine() error {
 			}
 		}
 
-		if b.opts.BusyTimeout == 0 {
-			b.opts.BusyTimeout = 500000
+		if b.Opts.BusyTimeout == 0 {
+			b.Opts.BusyTimeout = 500000
 		}
-		if b.opts.BusyTimeout == -1 {
-			b.opts.BusyTimeout = 0
+		if b.Opts.BusyTimeout == -1 {
+			b.Opts.BusyTimeout = 0
 		}
 
-		if _, err := b.db.Exec(`PRAGMA busy_timeout=` + strconv.Itoa(b.opts.BusyTimeout)); err != nil {
+		if _, err := b.db.Exec(`PRAGMA busy_timeout=` + strconv.Itoa(b.Opts.BusyTimeout)); err != nil {
 			return err
 		}
 
@@ -111,7 +111,8 @@ func (b *Backend) initSchema() error {
 			headerLen INTEGER NOT NULL,
 			header LONGTEXT,
 			bodyLen INTEGER NOT NULL,
-			body LONGTEXT NOT NULL,
+			extBodyKey VARCHAR(255) NOT NULL REFERENCES extKeys(key) ON DELETE RESTRICT,
+			body LONGTEXT,
 			bodyStructure LONGTEXT NOT NULL,
 			cachedHeader LONGTEXT NOT NULL,
 			mark INTEGER NOT NULL DEFAULT 0,
@@ -133,6 +134,16 @@ func (b *Backend) initSchema() error {
 	if err != nil {
 		return errors.Wrap(err, "create table flags")
 	}
+
+	_, err = b.db.Exec(`
+		CREATE TABLE IF NOT EXISTS extKeys (
+			key VARCHAR(255) PRIMARY KEY NOT NULL,
+			refs INTEGER NOT NULL DEFAULT 1
+		)`)
+	if err != nil {
+		return errors.Wrap(err, "create table extkeys")
+	}
+
 	return nil
 }
 
@@ -330,8 +341,8 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "mboxId prep")
 	}
 	b.addMsg, err = b.db.Prepare(`
-		INSERT INTO msgs(mboxId, msgId, date, headerLen, header, bodyLen, body, bodyStructure, cachedHeader)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		INSERT INTO msgs(mboxId, msgId, date, headerLen, header, bodyLen, extBodyKey, body, bodyStructure, cachedHeader)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return errors.Wrap(err, "addMsg prep")
 	}
@@ -341,7 +352,7 @@ func (b *Backend) prepareStmts() error {
 			SELECT uidnext - 1
 			FROM mboxes
 			WHERE id = ?
-		) + row_number() OVER (ORDER BY msgId), date, headerLen, header, bodyLen, body, bodyStructure, cachedHeader, 0 AS mark
+		) + row_number() OVER (ORDER BY msgId), date, headerLen, header, bodyLen, extBodyKey, body, bodyStructure, cachedHeader, 0 AS mark
 		FROM msgs
 		WHERE mboxId = ? AND msgId BETWEEN ? AND ?`)
 	if err != nil {
@@ -371,9 +382,9 @@ func (b *Backend) prepareStmts() error {
 			SELECT uidnext - 1
 			FROM mboxes
 			WHERE id = ?
-		) + row_number() OVER (ORDER BY msgId), date, headerLen, header, bodyLen, body, bodyStructure, cachedHeader, 0 AS mark
+		) + row_number() OVER (ORDER BY msgId), date, headerLen, header, bodyLen, extBodyKey, body, bodyStructure, cachedHeader, 0 AS mark
 		FROM (
-			SELECT msgId, date, headerLen, header, bodyLen, body, bodyStructure, cachedHeader
+			SELECT msgId, date, headerLen, header, bodyLen, extBodyKey, body, bodyStructure, cachedHeader
 			FROM msgs
 			WHERE mboxId = ?
 			ORDER BY msgId
@@ -470,16 +481,38 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "delMarked prep")
 	}
 	b.markedSeqnums, err = b.db.Prepare(`
-		SELECT seqnum
+		SELECT seqnum, extBodyKey
 		FROM (
-			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mark
+			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, mark, extBodyKey
 			FROM msgs
 			WHERE mboxId = ?
 		) seqnums
 		WHERE mark = 1
 		ORDER BY seqnum DESC`)
 	if err != nil {
-		return errors.Wrap(err, "deletedSeqnums prep")
+		return errors.Wrap(err, "markedSeqnums prep")
+	}
+
+	b.extKeysUid, err = b.db.Prepare(`
+		SELECT extBodyKey
+		FROM msgs
+		WHERE mboxId = ?
+		AND msgId BETWEEN ? AND ?
+		AND extBodyKey = 1`)
+	if err != nil {
+		return errors.Wrap(err, "extKeysUid prep")
+	}
+	b.extKeysSeq, err = b.db.Prepare(`
+		SELECT extBodyKey
+		FROM (
+			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, extBodyKey
+			FROM msgs
+			WHERE mboxId = ?
+		) seqnums
+		WHERE seqnum BETWEEN ? AND ?
+		AND extBodyKey = 1`)
+	if err != nil {
+		return errors.Wrap(err, "extKeysSeq prep")
 	}
 
 	b.setUserMsgSizeLimit, err = b.db.Prepare(`
@@ -572,7 +605,7 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "searchFetchNoBody prep")
 	}
 	b.searchFetch, err = b.db.Prepare(`
-		SELECT seqnum, msgs.msgId, date, headerLen, header, bodyLen, body, coalesce(` + b.db.groupConcatFn("flag", "{") + `, '')
+		SELECT seqnum, msgs.msgId, date, headerLen, header, bodyLen, extBodyKey, body, coalesce(` + b.db.groupConcatFn("flag", "{") + `, '')
 		FROM msgs
 		INNER JOIN (
 			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
@@ -602,7 +635,7 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "searchFetchNoBodyNoSeq prep")
 	}
 	b.searchFetchNoSeq, err = b.db.Prepare(`
-		SELECT 0 AS seqnum, msgs.msgId, date, headerLen, header, bodyLen, body, coalesce(` + b.db.groupConcatFn("flag", "{") + `, '')
+		SELECT 0 AS seqnum, msgs.msgId, date, headerLen, header, bodyLen, extBodyKey, body, coalesce(` + b.db.groupConcatFn("flag", "{") + `, '')
 		FROM msgs
 		LEFT JOIN flags
 		ON flags.msgId = msgs.msgId AND msgs.mboxId = flags.mboxId
@@ -611,6 +644,76 @@ func (b *Backend) prepareStmts() error {
 		ORDER BY seqnum DESC`)
 	if err != nil {
 		return errors.Wrap(err, "searchFetchNoSeq prep")
+	}
+
+	b.addExtKey, err = b.db.Prepare(`
+		INSERT INTO extKeys(key)
+		VALUES (?)`)
+	if err != nil {
+		return errors.Wrap(err, "addExtKey prep")
+	}
+	b.decreaseRefForMarked, err = b.db.Prepare(`
+		UPDATE extKeys
+		SET refs = refs - 1
+		WHERE key IN (
+			SELECT extBodyKey
+			FROM msgs
+			WHERE mboxId = ? AND mark = 1 AND extBodyKey IS NOT NULL
+		)`)
+	if err != nil {
+		return errors.Wrap(err, "decreaseRefForMarked prep")
+	}
+	b.decreaseRefForDeleted, err = b.db.Prepare(`
+		UPDATE extKeys
+		SET refs = refs - 1
+		WHERE key IN (
+			SELECT extBodyKey
+			FROM msgs
+			INNER JOIN flags
+			ON msgs.mboxId = flags.mboxId
+			AND msgs.msgId = msgs.msgId
+			AND flag = '\Deleted'
+			WHERE msgs.mboxId = ?
+		)`)
+	if err != nil {
+		return errors.Wrap(err, "decreaseRefForDeleted prep")
+	}
+	b.increaseRefForLast, err = b.db.Prepare(`
+		UPDATE extKeys
+		SET refs = refs + 1
+		WHERE key IN (
+			SELECT extBodyKey
+			FROM msgs
+			WHERE mboxId = ?
+			ORDER BY msgId DESC
+			LIMIT ?
+		)`)
+	if err != nil {
+		return errors.Wrap(err, "increaseRefForLast prep")
+	}
+	b.zeroRef, err = b.db.Prepare(`
+		SELECT extBodyKey
+		FROM msgs
+		INNER JOIN extKeys
+		ON msgs.extBodyKey = extKeys.key
+		WHERE extBodyKey IS NOT NULL
+		AND mboxId = ?
+		AND refs = 0`)
+	if err != nil {
+		return errors.Wrap(err, "zeroRef prep")
+	}
+	b.deleteZeroRef, err = b.db.Prepare(`
+		DELETE FROM extKeys WHERE key IN (
+			SELECT extBodyKey
+			FROM msgs
+			INNER JOIN extKeys
+			ON msgs.extBodyKey = extKeys.key
+			WHERE extBodyKey IS NOT NULL
+			AND mboxId = ?
+			AND refs = 0
+		)`)
+	if err != nil {
+		return errors.Wrap(err, "deleteZeroRef prep")
 	}
 
 	return nil

@@ -30,7 +30,7 @@ func usersCreate(ctx *cli.Context) error {
 		return errors.New("Error: USERNAME is required")
 	}
 
-	_, err := backend.GetExistingUser(username)
+	_, err := backend.GetUser(username)
 	if err == nil {
 		return errors.New("Error: User already exists")
 	}

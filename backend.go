@@ -67,6 +67,11 @@ type Opts struct {
 	// (SQLite3 only) Change page cache size. Positive value indicates cache
 	// size in pages, negative in KiB. If set 0 - SQLite default will be used.
 	CacheSize int
+
+	// (SQLite3 only) Repack database file into minimal amount of disk space on
+	// Close.
+	// It runs VACUUM and PRAGMA wal_checkpoint(TRUNCATE).
+	MinimizeOnClose bool
 }
 
 type Backend struct {
@@ -220,6 +225,16 @@ func (b *Backend) EnableChildrenExt() bool {
 }
 
 func (b *Backend) Close() error {
+	if b.db.driver == "sqlite3" {
+		// These operations are not critical, so it's not a problem if they fail.
+		if b.Opts.MinimizeOnClose {
+			b.db.Exec(`VACUUM`)
+			b.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+		}
+
+		b.db.Exec(`PRAGMA optimize`)
+	}
+
 	return b.db.Close()
 }
 

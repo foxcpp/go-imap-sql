@@ -45,7 +45,8 @@ func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uin
 		var dateUnix int64
 		var headerLen, bodyLen int
 		var headerBlob, bodyBlob []byte
-		var flagStr, extBodyKey string
+		var flagStr string
+		var extBodyKey sql.NullString
 
 		if needBody {
 			err = rows.Scan(&seqNum, &msgId, &dateUnix, &headerLen, &headerBlob, &bodyLen, &extBodyKey, &bodyBlob, &flagStr)

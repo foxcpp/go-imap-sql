@@ -276,13 +276,14 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 	headerLen := len(hdr)
 	bodyLen := len(body)
 
-	var extBodyKey string
+	var extBodyKey sql.NullString
 	if m.parent.Opts.ExternalStore != nil {
-		extBodyKey, err = randomKey()
+		extBodyKey.String, err = randomKey()
 		if err != nil {
 			return err
 		}
-		if err := m.parent.Opts.ExternalStore.Create(extBodyKey, bytes.NewReader(bodyBlob)); err != nil {
+		extBodyKey.Valid = true
+		if err := m.parent.Opts.ExternalStore.Create(extBodyKey.String, bytes.NewReader(bodyBlob)); err != nil {
 			return err
 		}
 
@@ -488,13 +489,13 @@ func (m *Mailbox) delMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, updsBuf
 	}
 	for rows.Next() {
 		var seqnum uint32
-		var extKey string
+		var extKey sql.NullString
 		if err := rows.Scan(&seqnum, &extKey); err != nil {
 			return err
 		}
 
-		if extKey != "" {
-			deletedExtKeys = append(deletedExtKeys, extKey)
+		if extKey.Valid {
+			deletedExtKeys = append(deletedExtKeys, extKey.String)
 		}
 		*updsBuffer = append(*updsBuffer, &backend.ExpungeUpdate{
 			Update: backend.NewUpdate(m.user.username, m.name),

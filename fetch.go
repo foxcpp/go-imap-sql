@@ -53,7 +53,7 @@ type scanData struct {
 	dateUnix           int64
 	headerLen, bodyLen uint32
 	flagStr            string
-	extBodyKey         string
+	extBodyKey         sql.NullString
 
 	bodyReader    io.ReadCloser
 	bodyStructure *imap.BodyStructure
@@ -205,9 +205,9 @@ func (m *Mailbox) extractBodyPart(item imap.FetchItem, data *scanData, msg *imap
 	return nil
 }
 
-func (m *Mailbox) openBody(extBodyKey string, headerBlob, bodyBlob []byte) (io.ReadCloser, error) {
-	if extBodyKey != "" {
-		rdr, err := m.parent.Opts.ExternalStore.Open(extBodyKey)
+func (m *Mailbox) openBody(extBodyKey sql.NullString, headerBlob, bodyBlob []byte) (io.ReadCloser, error) {
+	if extBodyKey.Valid {
+		rdr, err := m.parent.Opts.ExternalStore.Open(extBodyKey.String)
 		if err != nil {
 			return nil, err
 		}

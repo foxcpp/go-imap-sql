@@ -113,7 +113,7 @@ func (b *Backend) initSchema() error {
 			headerLen INTEGER NOT NULL,
 			header LONGTEXT,
 			bodyLen INTEGER NOT NULL,
-			extBodyKey VARCHAR(255) NOT NULL REFERENCES extKeys(key) ON DELETE RESTRICT,
+			extBodyKey VARCHAR(255) REFERENCES extKeys(key) ON DELETE RESTRICT,
 			body LONGTEXT,
 			bodyStructure LONGTEXT NOT NULL,
 			cachedHeader LONGTEXT NOT NULL,

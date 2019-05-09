@@ -48,7 +48,6 @@ func (b *Backend) buildFetchStmt(uid bool, items []imap.FetchItem) (stmt, cacheK
 		case imap.FetchInternalDate:
 			colNames["date"] = struct{}{}
 		case imap.FetchRFC822Size:
-			colNames["headerLen"] = struct{}{}
 			colNames["bodyLen"] = struct{}{}
 		case imap.FetchUid:
 			colNames["msgs.msgId"] = struct{}{}

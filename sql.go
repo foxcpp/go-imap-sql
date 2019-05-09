@@ -110,10 +110,9 @@ func (b *Backend) initSchema() error {
 			mboxId BIGINT NOT NULL REFERENCES mboxes(id) ON DELETE CASCADE,
 			msgId BIGINT NOT NULL,
 			date BIGINT NOT NULL,
-			headerLen INTEGER NOT NULL,
 			header LONGTEXT,
-			bodyLen INTEGER NOT NULL,
 			extBodyKey VARCHAR(255) REFERENCES extKeys(key) ON DELETE RESTRICT,
+			bodyLen INTEGER NOT NULL,
 			body LONGTEXT,
 			bodyStructure LONGTEXT NOT NULL,
 			cachedHeader LONGTEXT NOT NULL,
@@ -343,8 +342,8 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "mboxId prep")
 	}
 	b.addMsg, err = b.db.Prepare(`
-		INSERT INTO msgs(mboxId, msgId, date, headerLen, header, bodyLen, extBodyKey, body, bodyStructure, cachedHeader)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		INSERT INTO msgs(mboxId, msgId, date, header, bodyLen, extBodyKey, body, bodyStructure, cachedHeader)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return errors.Wrap(err, "addMsg prep")
 	}
@@ -354,7 +353,7 @@ func (b *Backend) prepareStmts() error {
 			SELECT uidnext - 1
 			FROM mboxes
 			WHERE id = ?
-		) + row_number() OVER (ORDER BY msgId), date, headerLen, header, bodyLen, extBodyKey, body, bodyStructure, cachedHeader, 0 AS mark
+		) + row_number() OVER (ORDER BY msgId), date, header, extBodyKey, bodyLen, body, bodyStructure, cachedHeader, 0 AS mark
 		FROM msgs
 		WHERE mboxId = ? AND msgId BETWEEN ? AND ?`)
 	if err != nil {
@@ -384,9 +383,9 @@ func (b *Backend) prepareStmts() error {
 			SELECT uidnext - 1
 			FROM mboxes
 			WHERE id = ?
-		) + row_number() OVER (ORDER BY msgId), date, headerLen, header, bodyLen, extBodyKey, body, bodyStructure, cachedHeader, 0 AS mark
+		) + row_number() OVER (ORDER BY msgId), date, header, extBodyKey, bodyLen, body, bodyStructure, cachedHeader, 0 AS mark
 		FROM (
-			SELECT msgId, date, headerLen, header, bodyLen, extBodyKey, body, bodyStructure, cachedHeader
+			SELECT msgId, date, header, extBodyKey, bodyLen, body, bodyStructure, cachedHeader
 			FROM msgs
 			WHERE mboxId = ?
 			ORDER BY msgId
@@ -590,7 +589,7 @@ func (b *Backend) prepareStmts() error {
 	}
 
 	b.searchFetchNoBody, err = b.db.Prepare(`
-		SELECT seqnum, msgs.msgId, date, headerLen, bodyLen, coalesce(` + b.db.groupConcatFn("flag", "{") + `, '')
+		SELECT seqnum, msgs.msgId, date, bodyLen, coalesce(` + b.db.groupConcatFn("flag", "{") + `, '')
 		FROM msgs
 		INNER JOIN (
 			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
@@ -607,7 +606,7 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "searchFetchNoBody prep")
 	}
 	b.searchFetch, err = b.db.Prepare(`
-		SELECT seqnum, msgs.msgId, date, headerLen, header, bodyLen, extBodyKey, body, coalesce(` + b.db.groupConcatFn("flag", "{") + `, '')
+		SELECT seqnum, msgs.msgId, date, header, bodyLen, extBodyKey, body, coalesce(` + b.db.groupConcatFn("flag", "{") + `, '')
 		FROM msgs
 		INNER JOIN (
 			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
@@ -626,7 +625,7 @@ func (b *Backend) prepareStmts() error {
 
 	// It is kinda expensive to compute sequence numbers using row_number() so we avoid it where possible.
 	b.searchFetchNoBodyNoSeq, err = b.db.Prepare(`
-		SELECT 0 AS seqnum, msgs.msgId, date, headerLen, bodyLen, coalesce(` + b.db.groupConcatFn("flag", "{") + `, '')
+		SELECT 0 AS seqnum, msgs.msgId, date, bodyLen, coalesce(` + b.db.groupConcatFn("flag", "{") + `, '')
 		FROM msgs
 		LEFT JOIN flags
 		ON flags.msgId = msgs.msgId AND msgs.mboxId = flags.mboxId
@@ -637,7 +636,7 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "searchFetchNoBodyNoSeq prep")
 	}
 	b.searchFetchNoSeq, err = b.db.Prepare(`
-		SELECT 0 AS seqnum, msgs.msgId, date, headerLen, header, bodyLen, extBodyKey, body, coalesce(` + b.db.groupConcatFn("flag", "{") + `, '')
+		SELECT 0 AS seqnum, msgs.msgId, date, header, bodyLen, extBodyKey, body, coalesce(` + b.db.groupConcatFn("flag", "{") + `, '')
 		FROM msgs
 		LEFT JOIN flags
 		ON flags.msgId = msgs.msgId AND msgs.mboxId = flags.mboxId

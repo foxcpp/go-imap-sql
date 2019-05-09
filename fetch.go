@@ -49,11 +49,11 @@ func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.Fetch
 type scanData struct {
 	cachedHeaderBlob, bodyStructureBlob, headerBlob, bodyBlob []byte
 
-	seqNum, msgId      uint32
-	dateUnix           int64
-	headerLen, bodyLen uint32
-	flagStr            string
-	extBodyKey         sql.NullString
+	seqNum, msgId uint32
+	dateUnix      int64
+	bodyLen       uint32
+	flagStr       string
+	extBodyKey    sql.NullString
 
 	bodyReader    io.ReadCloser
 	bodyStructure *imap.BodyStructure
@@ -75,8 +75,6 @@ func makeScanArgs(data *scanData, rows *sql.Rows) ([]interface{}, error) {
 			scanOrder = append(scanOrder, &data.seqNum)
 		case "date":
 			scanOrder = append(scanOrder, &data.dateUnix)
-		case "headerLen", "headerlen":
-			scanOrder = append(scanOrder, &data.headerLen)
 		case "bodyLen", "bodylen":
 			scanOrder = append(scanOrder, &data.bodyLen)
 		case "msgId", "msgid":
@@ -103,7 +101,7 @@ func makeScanArgs(data *scanData, rows *sql.Rows) ([]interface{}, error) {
 
 func (m *Mailbox) scanMessages(rows *sql.Rows, items []imap.FetchItem, ch chan<- *imap.Message) error {
 	defer rows.Close()
-	data := scanData{}
+	data := scanData{bodyLen: 15}
 
 	scanArgs, err := makeScanArgs(&data, rows)
 	if err != nil {
@@ -135,7 +133,7 @@ func (m *Mailbox) scanMessages(rows *sql.Rows, items []imap.FetchItem, ch chan<-
 			case imap.FetchInternalDate:
 				msg.InternalDate = time.Unix(data.dateUnix, 0)
 			case imap.FetchRFC822Size:
-				msg.Size = data.headerLen + data.bodyLen
+				msg.Size = data.bodyLen
 			case imap.FetchUid:
 				msg.Uid = data.msgId
 			case imap.FetchEnvelope:

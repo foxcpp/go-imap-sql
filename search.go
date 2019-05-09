@@ -43,15 +43,15 @@ func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uin
 	for rows.Next() {
 		var seqNum, msgId uint32
 		var dateUnix int64
-		var headerLen, bodyLen int
+		var bodyLen int
 		var headerBlob, bodyBlob []byte
 		var flagStr string
 		var extBodyKey sql.NullString
 
 		if needBody {
-			err = rows.Scan(&seqNum, &msgId, &dateUnix, &headerLen, &headerBlob, &bodyLen, &extBodyKey, &bodyBlob, &flagStr)
+			err = rows.Scan(&seqNum, &msgId, &dateUnix, &headerBlob, &bodyLen, &extBodyKey, &bodyBlob, &flagStr)
 		} else {
-			err = rows.Scan(&seqNum, &msgId, &dateUnix, &headerLen, &bodyLen, &flagStr)
+			err = rows.Scan(&seqNum, &msgId, &dateUnix, &bodyLen, &flagStr)
 		}
 		if err != nil {
 			return nil, err

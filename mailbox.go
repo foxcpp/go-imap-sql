@@ -273,9 +273,6 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		return errors.Wrap(err, "CreateMessage (extractCachedData)")
 	}
 
-	headerLen := len(hdr)
-	bodyLen := len(body)
-
 	var extBodyKey sql.NullString
 	if m.parent.Opts.ExternalStore != nil {
 		extBodyKey.String, err = randomKey()
@@ -297,7 +294,7 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 
 	_, err = tx.Stmt(m.parent.addMsg).Exec(
 		m.id, msgId, date.Unix(),
-		headerLen, hdr, bodyLen, extBodyKey, body,
+		hdr, len(bodyBlob), extBodyKey, body,
 		bodyStruct, cachedHdr,
 	)
 	if err != nil {

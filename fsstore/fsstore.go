@@ -18,18 +18,8 @@ func (s *Store) Open(key string) (io.ReadCloser, error) {
 	return os.Open(filepath.Join(s.Root, key))
 }
 
-func (s *Store) Create(key string, r io.Reader) error {
-	f, err := os.Create(filepath.Join(s.Root, key))
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	if _, err := io.Copy(f, r); err != nil {
-		return err
-	}
-
-	return nil
+func (s *Store) Create(key string) (io.WriteCloser, error) {
+	return os.Create(filepath.Join(s.Root, key))
 }
 
 func (s *Store) Delete(keys []string) error {

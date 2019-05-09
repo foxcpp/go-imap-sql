@@ -3,6 +3,7 @@ package imapsql
 import (
 	"bytes"
 	"database/sql"
+	"io"
 	"io/ioutil"
 	"net/textproto"
 	"time"
@@ -213,8 +214,8 @@ func splitHeader(blob []byte) (header, body []byte) {
 	return blob[:headerEnd+endLen], blob[headerEnd+endLen:]
 }
 
-func extractCachedData(fullBody []byte) (bodyStructBlob, cachedHeadersBlob []byte, err error) {
-	msg, err := message.Read(bytes.NewReader(fullBody))
+func extractCachedData(bodyReader io.Reader) (bodyStructBlob, cachedHeadersBlob []byte, err error) {
+	msg, err := message.Read(bodyReader)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -233,6 +234,41 @@ func extractCachedData(fullBody []byte) (bodyStructBlob, cachedHeadersBlob []byt
 		return
 	}
 	cachedHeadersBlob, err = jsoniter.Marshal(hdrs)
+	return
+}
+
+func (m *Mailbox) processBody(literal imap.Literal) (headerBlob, bodyBlob, bodyStruct, cachedHeader []byte, extBodyKey sql.NullString, err error) {
+	var bodyReader io.Reader = literal
+	if m.parent.Opts.ExternalStore != nil {
+		extBodyKey.String, err = randomKey()
+		if err != nil {
+			return nil, nil, nil, nil, sql.NullString{}, err
+		}
+		extBodyKey.Valid = true
+		extWriter, err := m.parent.Opts.ExternalStore.Create(extBodyKey.String)
+		if err != nil {
+			return nil, nil, nil, nil, sql.NullString{}, err
+		}
+		defer extWriter.Close()
+
+		bodyReader = io.TeeReader(literal, extWriter)
+
+		headerBlob = nil
+		bodyBlob = nil
+	} else {
+		bodyBuf, err := ioutil.ReadAll(literal)
+		if err != nil {
+			return nil, nil, nil, nil, sql.NullString{}, errors.Wrap(err, "CreateMessage (ReadAll body)")
+		}
+		headerBlob, bodyBlob = splitHeader(bodyBuf)
+		bodyReader = bytes.NewReader(bodyBuf)
+	}
+
+	bodyStruct, cachedHeader, err = extractCachedData(bodyReader)
+	if err != nil {
+		return nil, nil, nil, nil, sql.NullString{}, errors.Wrap(err, "CreateMessage (extractCachedData)")
+	}
+
 	return
 }
 
@@ -262,31 +298,13 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		return errors.Wrap(err, "CreateMessage (uidNext)")
 	}
 
-	bodyBlob, err := ioutil.ReadAll(fullBody)
+	bodyLen := fullBody.Len()
+	hdr, body, bodyStruct, cachedHdr, extBodyKey, err := m.processBody(fullBody)
 	if err != nil {
-		return errors.Wrap(err, "CreateMessage (ReadAll body)")
+		return err
 	}
 
-	hdr, body := splitHeader(bodyBlob)
-	bodyStruct, cachedHdr, err := extractCachedData(bodyBlob)
-	if err != nil {
-		return errors.Wrap(err, "CreateMessage (extractCachedData)")
-	}
-
-	var extBodyKey sql.NullString
-	if m.parent.Opts.ExternalStore != nil {
-		extBodyKey.String, err = randomKey()
-		if err != nil {
-			return err
-		}
-		extBodyKey.Valid = true
-		if err := m.parent.Opts.ExternalStore.Create(extBodyKey.String, bytes.NewReader(bodyBlob)); err != nil {
-			return err
-		}
-
-		hdr = nil
-		body = nil
-
+	if extBodyKey.Valid {
 		if _, err = tx.Stmt(m.parent.addExtKey).Exec(extBodyKey); err != nil {
 			return errors.Wrap(err, "CreateMessage (addExtKey)")
 		}
@@ -294,7 +312,7 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 
 	_, err = tx.Stmt(m.parent.addMsg).Exec(
 		m.id, msgId, date.Unix(),
-		hdr, len(bodyBlob), extBodyKey, body,
+		hdr, bodyLen, extBodyKey, body,
 		bodyStruct, cachedHdr,
 	)
 	if err != nil {

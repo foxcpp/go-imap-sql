@@ -572,8 +572,14 @@ func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest s
 		}
 
 		if m.parent.Opts.ExternalStore != nil {
-			if _, err := tx.Stmt(m.parent.increaseRefForLast).Exec(destID, affected); err != nil {
-				return err
+			if uid {
+				if _, err := tx.Stmt(m.parent.incrementRefUid).Exec(srcId, start, stop); err != nil {
+					return err
+				}
+			} else {
+				if _, err := tx.Stmt(m.parent.incrementRefSeq).Exec(srcId, srcId, start, stop); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -670,7 +676,7 @@ func (m *Mailbox) expungeExternal(tx *sql.Tx) error {
 	if err := m.parent.Opts.ExternalStore.Delete(keys); err != nil {
 		return err
 	}
-	if _, err := tx.Stmt(m.parent.deleteZeroRef).Exec(m.id); err != nil {
+	if _, err := tx.Stmt(m.parent.deleteZeroRef).Exec(); err != nil {
 		return err
 	}
 

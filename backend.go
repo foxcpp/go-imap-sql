@@ -154,9 +154,6 @@ type Backend struct {
 
 	markedSeqnums *sql.Stmt
 
-	extKeysUid *sql.Stmt
-	extKeysSeq *sql.Stmt
-
 	// For APPEND-LIMIT extension
 	setUserMsgSizeLimit *sql.Stmt
 	userMsgSizeLimit    *sql.Stmt
@@ -177,7 +174,8 @@ type Backend struct {
 	addExtKey             *sql.Stmt
 	decreaseRefForMarked  *sql.Stmt
 	decreaseRefForDeleted *sql.Stmt
-	increaseRefForLast    *sql.Stmt
+	incrementRefUid       *sql.Stmt
+	incrementRefSeq       *sql.Stmt
 	zeroRef               *sql.Stmt
 	deleteZeroRef         *sql.Stmt
 }

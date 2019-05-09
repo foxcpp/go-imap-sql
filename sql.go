@@ -106,12 +106,20 @@ func (b *Backend) initSchema() error {
 		return errors.Wrap(err, "create table mboxes")
 	}
 	_, err = b.db.Exec(`
+		CREATE TABLE IF NOT EXISTS extKeys (
+			id VARCHAR(255) PRIMARY KEY NOT NULL,
+			refs INTEGER NOT NULL DEFAULT 1
+		)`)
+	if err != nil {
+		return errors.Wrap(err, "create table extkeys")
+	}
+	_, err = b.db.Exec(`
 		CREATE TABLE IF NOT EXISTS msgs (
 			mboxId BIGINT NOT NULL REFERENCES mboxes(id) ON DELETE CASCADE,
 			msgId BIGINT NOT NULL,
 			date BIGINT NOT NULL,
 			header LONGTEXT,
-			extBodyKey VARCHAR(255) REFERENCES extKeys(key) ON DELETE RESTRICT,
+			extBodyKey VARCHAR(255) REFERENCES extKeys(id) ON DELETE RESTRICT,
 			bodyLen INTEGER NOT NULL,
 			body LONGTEXT,
 			bodyStructure LONGTEXT NOT NULL,
@@ -134,15 +142,6 @@ func (b *Backend) initSchema() error {
 		)`)
 	if err != nil {
 		return errors.Wrap(err, "create table flags")
-	}
-
-	_, err = b.db.Exec(`
-		CREATE TABLE IF NOT EXISTS extKeys (
-			key VARCHAR(255) PRIMARY KEY NOT NULL,
-			refs INTEGER NOT NULL DEFAULT 1
-		)`)
-	if err != nil {
-		return errors.Wrap(err, "create table extkeys")
 	}
 
 	return nil
@@ -494,28 +493,6 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "markedSeqnums prep")
 	}
 
-	b.extKeysUid, err = b.db.Prepare(`
-		SELECT extBodyKey
-		FROM msgs
-		WHERE mboxId = ?
-		AND msgId BETWEEN ? AND ?
-		AND extBodyKey = 1`)
-	if err != nil {
-		return errors.Wrap(err, "extKeysUid prep")
-	}
-	b.extKeysSeq, err = b.db.Prepare(`
-		SELECT extBodyKey
-		FROM (
-			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, extBodyKey
-			FROM msgs
-			WHERE mboxId = ?
-		) seqnums
-		WHERE seqnum BETWEEN ? AND ?
-		AND extBodyKey = 1`)
-	if err != nil {
-		return errors.Wrap(err, "extKeysSeq prep")
-	}
-
 	b.setUserMsgSizeLimit, err = b.db.Prepare(`
 		UPDATE users
 		SET msgsizelimit = ?
@@ -648,7 +625,7 @@ func (b *Backend) prepareStmts() error {
 	}
 
 	b.addExtKey, err = b.db.Prepare(`
-		INSERT INTO extKeys(key)
+		INSERT INTO extKeys(id)
 		VALUES (?)`)
 	if err != nil {
 		return errors.Wrap(err, "addExtKey prep")
@@ -656,7 +633,7 @@ func (b *Backend) prepareStmts() error {
 	b.decreaseRefForMarked, err = b.db.Prepare(`
 		UPDATE extKeys
 		SET refs = refs - 1
-		WHERE key IN (
+		WHERE id IN (
 			SELECT extBodyKey
 			FROM msgs
 			WHERE mboxId = ? AND mark = 1 AND extBodyKey IS NOT NULL
@@ -667,7 +644,7 @@ func (b *Backend) prepareStmts() error {
 	b.decreaseRefForDeleted, err = b.db.Prepare(`
 		UPDATE extKeys
 		SET refs = refs - 1
-		WHERE key IN (
+		WHERE id IN (
 			SELECT extBodyKey
 			FROM msgs
 			INNER JOIN flags
@@ -679,24 +656,41 @@ func (b *Backend) prepareStmts() error {
 	if err != nil {
 		return errors.Wrap(err, "decreaseRefForDeleted prep")
 	}
-	b.increaseRefForLast, err = b.db.Prepare(`
+	b.incrementRefUid, err = b.db.Prepare(`
 		UPDATE extKeys
 		SET refs = refs + 1
-		WHERE key IN (
+		WHERE id IN (
 			SELECT extBodyKey
 			FROM msgs
-			WHERE mboxId = ?
+			WHERE mboxId = ? AND msgId BETWEEN ? AND ?
 			ORDER BY msgId DESC
-			LIMIT ?
 		)`)
 	if err != nil {
-		return errors.Wrap(err, "increaseRefForLast prep")
+		return errors.Wrap(err, "incrementRefUid prep")
+	}
+	b.incrementRefSeq, err = b.db.Prepare(`
+		UPDATE extKeys
+		SET refs = refs + 1
+		WHERE id IN (
+			SELECT extBodyKey
+			FROM msgs
+			INNER JOIN (
+				SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId
+				FROM msgs
+				WHERE mboxId = ?
+			) map
+			ON msgs.msgId = map.msgId
+			WHERE mboxId = ? AND seqnum BETWEEN ? AND ?
+			ORDER BY msgs.msgId DESC
+		)`)
+	if err != nil {
+		return errors.Wrap(err, "incrementRefSeq prep")
 	}
 	b.zeroRef, err = b.db.Prepare(`
 		SELECT extBodyKey
 		FROM msgs
 		INNER JOIN extKeys
-		ON msgs.extBodyKey = extKeys.key
+		ON msgs.extBodyKey = extKeys.id
 		WHERE extBodyKey IS NOT NULL
 		AND mboxId = ?
 		AND refs = 0`)
@@ -704,15 +698,8 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "zeroRef prep")
 	}
 	b.deleteZeroRef, err = b.db.Prepare(`
-		DELETE FROM extKeys WHERE key IN (
-			SELECT extBodyKey
-			FROM msgs
-			INNER JOIN extKeys
-			ON msgs.extBodyKey = extKeys.key
-			WHERE extBodyKey IS NOT NULL
-			AND mboxId = ?
-			AND refs = 0
-		)`)
+		DELETE FROM extKeys
+		WHERE refs = 0`)
 	if err != nil {
 		return errors.Wrap(err, "deleteZeroRef prep")
 	}

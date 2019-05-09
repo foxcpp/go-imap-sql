@@ -87,7 +87,7 @@ func makeScanArgs(data *scanData, rows *sql.Rows) ([]interface{}, error) {
 			scanOrder = append(scanOrder, &data.headerBlob)
 		case "body":
 			scanOrder = append(scanOrder, &data.bodyBlob)
-		case "extBodyKey":
+		case "extBodyKey", "extbodykey":
 			scanOrder = append(scanOrder, &data.extBodyKey)
 		case "flags":
 			scanOrder = append(scanOrder, &data.flagStr)

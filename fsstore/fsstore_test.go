@@ -10,6 +10,8 @@ import (
 
 	backendtests "github.com/foxcpp/go-imap-backend-tests"
 	imapsql "github.com/foxcpp/go-imap-sql"
+	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -60,20 +62,23 @@ func cleanBackend(bi backendtests.Backend) {
 	b := bi.(*imapsql.Backend)
 	if os.Getenv("PRESERVE_DB") != "1" {
 		if _, err := b.DB.Exec(`DROP TABLE flags`); err != nil {
-			panic(err)
+			log.Println("DROP TABLE flags", err)
 		}
 		if _, err := b.DB.Exec(`DROP TABLE msgs`); err != nil {
-			panic(err)
+			log.Println("DROP TABLE msgs", err)
 		}
 		if _, err := b.DB.Exec(`DROP TABLE mboxes`); err != nil {
-			panic(err)
+			log.Println("DROP TABLE mboxes", err)
 		}
 		if _, err := b.DB.Exec(`DROP TABLE users`); err != nil {
-			panic(err)
+			log.Println("DROP TABLE users", err)
+		}
+		if _, err := b.DB.Exec(`DROP TABLE extKeys`); err != nil {
+			log.Println("DROP TABLE users", err)
 		}
 
 		if err := os.RemoveAll(b.Opts.ExternalStore.(*Store).Root); err != nil {
-			panic(err)
+			log.Println(err)
 		}
 	}
 	b.Close()

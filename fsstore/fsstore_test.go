@@ -74,7 +74,7 @@ func cleanBackend(bi backendtests.Backend) {
 			log.Println("DROP TABLE users", err)
 		}
 		if _, err := b.DB.Exec(`DROP TABLE extKeys`); err != nil {
-			log.Println("DROP TABLE users", err)
+			log.Println("DROP TABLE extKeys", err)
 		}
 
 		if err := os.RemoveAll(b.Opts.ExternalStore.(*Store).Root); err != nil {

@@ -47,7 +47,7 @@ func connectToDB(ctx *cli.Context) (err error) {
 		return errors.New("Error: dsn is required")
 	}
 
-	backend, err = imapsql.New(driver, dsn, imapsql.Opts{})
+	backend, err = imapsql.New(driver, dsn, imapsql.Opts{LazyUpdatesInit: true})
 	return
 }
 

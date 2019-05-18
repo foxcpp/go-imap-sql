@@ -18,6 +18,19 @@ import (
 
 func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.FetchItem, ch chan<- *imap.Message) error {
 	defer close(ch)
+	var err error
+
+	setSeen := shouldSetSeen(items)
+	var addSeenStmt *sql.Stmt
+	if setSeen {
+		addSeenStmt, err = m.parent.makeFlagsAddStmt(uid, []string{imap.SeenFlag})
+		if err != nil {
+			return err
+		}
+
+		// Duplicate entries (if any) shouldn't cause problems.
+		items = append(items, imap.FetchFlags)
+	}
 
 	stmt, err := m.parent.getFetchStmt(uid, items)
 	if err != nil {
@@ -33,6 +46,13 @@ func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.Fetch
 
 	for _, seq := range seqset.Set {
 		begin, end := sqlRange(seq)
+
+		if setSeen {
+			params := m.makeFlagsAddStmtArgs(uid, []string{imap.SeenFlag}, seq)
+			if _, err := tx.Stmt(addSeenStmt).Exec(params...); err != nil {
+				return err
+			}
+		}
 
 		rows, err := tx.Stmt(stmt).Query(m.id, m.id, begin, end)
 		if err != nil {
@@ -254,4 +274,23 @@ func stripExtBodyStruct(extended *imap.BodyStructure) *imap.BodyStructure {
 		stripped.Parts[i] = stripExtBodyStruct(stripped.Parts[i])
 	}
 	return &stripped
+}
+
+func shouldSetSeen(items []imap.FetchItem) bool {
+	for _, item := range items {
+		switch item {
+		case imap.FetchInternalDate, imap.FetchRFC822Size, imap.FetchUid, imap.FetchEnvelope,
+			imap.FetchBody, imap.FetchBodyStructure, imap.FetchFlags:
+			continue
+		default:
+			sect, err := imap.ParseBodySectionName(item)
+			if err != nil {
+				return false
+			}
+			if !sect.Peek {
+				return true
+			}
+		}
+	}
+	return false
 }

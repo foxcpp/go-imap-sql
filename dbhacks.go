@@ -105,15 +105,15 @@ func (db db) valuesSubquery(rows []string) string {
 	return "VALUES " + sqlList
 }
 
-func (db db) groupConcatFn(expr, separator string) string {
+func (db db) aggrValuesSet(expr, separator string) string {
 	if db.driver == "sqlite3" {
-		return "group_concat(" + expr + ", '" + separator + "')"
+		return "coalesce(group_concat(" + expr + ", '" + separator + "'), '')"
 	}
 	if db.driver == "postgres" {
-		return "string_agg(" + expr + ", '" + separator + "')"
+		return "coalesce(string_agg(" + expr + ",'" + separator + "'), '')"
 	}
 	if db.driver == "mysql" {
-		return "group_concat(" + expr + " SEPARATOR '" + separator + "')"
+		return "coalesce(group_concat(" + expr + " SEPARATOR '" + separator + "'), '')"
 	}
 	panic("Unsupported driver")
 }

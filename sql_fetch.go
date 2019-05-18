@@ -84,7 +84,7 @@ func (b *Backend) buildFetchStmt(uid bool, items []imap.FetchItem) (stmt, cacheK
 	extraParams := ""
 	if needFlags {
 		extraParams = flagsMidBlock
-		cols = append(cols, b.db.groupConcatFn("flag", "{")+" AS flags")
+		cols = append(cols, b.db.aggrValuesSet("flag", "{")+" AS flags")
 	}
 
 	sort.Strings(cols)

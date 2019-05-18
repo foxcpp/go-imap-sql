@@ -376,24 +376,30 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 }
 
 func (m *Mailbox) statusUpdate(tx *sql.Tx) (backend.Update, error) {
+	upd := backend.MailboxUpdate{
+		Update:        backend.NewUpdate(m.user.username, m.name),
+		MailboxStatus: imap.NewMailboxStatus(m.name, []imap.StatusItem{imap.StatusMessages, imap.StatusUnseen}),
+	}
+
 	row := tx.Stmt(m.parent.msgsCount).QueryRow(m.id)
 	newCount := uint32(0)
 	if err := row.Scan(&newCount); err != nil {
 		return nil, errors.Wrap(err, "CreateMessage (exists read)")
 	}
 
-	row = tx.Stmt(m.parent.recentCount).QueryRow(m.id)
-	newRecent := uint32(0)
-	if err := row.Scan(&newRecent); err != nil {
-		return nil, errors.Wrap(err, "CreateMessage (recent read)")
+	unseenSeqNum := uint32(0)
+	row = tx.Stmt(m.parent.firstUnseenSeqNum).QueryRow(m.id, m.id)
+	if err := row.Scan(&unseenSeqNum); err != nil && err != sql.ErrNoRows {
+		return nil, errors.Wrap(err, "CreateMessage (unseen seq num read)")
+	}
+	if unseenSeqNum == 0 {
+		delete(upd.MailboxStatus.Items, imap.StatusUnseen)
 	}
 
-	upd := backend.MailboxUpdate{
-		Update:        backend.NewUpdate(m.user.username, m.name),
-		MailboxStatus: imap.NewMailboxStatus(m.name, []imap.StatusItem{imap.StatusMessages, imap.StatusRecent}),
-	}
+	upd.MailboxStatus.Flags = nil
+	upd.MailboxStatus.PermanentFlags = nil
+	upd.MailboxStatus.UnseenSeqNum = unseenSeqNum
 	upd.MailboxStatus.Messages = newCount
-	upd.MailboxStatus.Recent = newRecent
 
 	return &upd, nil
 }

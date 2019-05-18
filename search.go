@@ -3,13 +3,13 @@ package imapsql
 import (
 	"bufio"
 	"database/sql"
-	"net/textproto"
 	"strings"
 	"time"
 
 	imap "github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/backend/backendutil"
 	"github.com/emersion/go-message"
+	"github.com/emersion/go-message/textproto"
 )
 
 func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uint32, error) {
@@ -70,17 +70,16 @@ func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uin
 			}
 			bufferedBody := bufio.NewReader(body)
 
-			textprotoHdr, err := textproto.NewReader(bufferedBody).ReadMIMEHeader()
+			parsedHeader, err := textproto.ReadHeader(bufferedBody)
 			if err != nil {
 				return nil, err
 			}
-			parsedHeader := message.Header(textprotoHdr)
-			ent, err = message.New(parsedHeader, bufferedBody)
+			ent, err = message.New(message.Header{Header: parsedHeader}, bufferedBody)
 			if err != nil {
 				return nil, err
 			}
 		} else {
-			ent, err = message.New(make(message.Header), nil)
+			ent, err = message.New(message.Header{}, nil)
 			if err != nil {
 				panic(err)
 			}

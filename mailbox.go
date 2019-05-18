@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"io"
 	"io/ioutil"
-	"net/textproto"
+	"strings"
 	"time"
 
 	"github.com/emersion/go-imap"
@@ -220,8 +220,11 @@ func extractCachedData(bodyReader io.Reader) (bodyStructBlob, cachedHeadersBlob 
 		return nil, nil, err
 	}
 	hdrs := make(map[string][]string, len(cachedHeaderFields))
-	for field, _ := range cachedHeaderFields {
-		hdrs[field] = msg.Header[textproto.CanonicalMIMEHeaderKey(field)]
+	for field := msg.Header.Fields(); field.Next(); {
+		if _, ok := cachedHeaderFields[strings.ToLower(field.Key())]; !ok {
+			continue
+		}
+		hdrs[strings.ToLower(field.Key())] = append(hdrs[strings.ToLower(field.Key())], field.Value())
 	}
 
 	bodyStruct, err := backendutil.FetchBodyStructure(msg, true)

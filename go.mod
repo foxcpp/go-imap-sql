@@ -1,9 +1,9 @@
 module github.com/foxcpp/go-imap-sql
 
 require (
-	github.com/emersion/go-imap v1.0.0-beta.4.0.20190504114255-4d5af3d05147
+	github.com/emersion/go-imap v1.0.0-beta.4.0.20190515165049-652a96ccdcb8
 	github.com/emersion/go-imap-appendlimit v0.0.0-20190308131241-25671c986a6a
-	github.com/emersion/go-message v0.9.2
+	github.com/emersion/go-message v0.10.2-0.20190514201857-604a73722993
 	github.com/foxcpp/go-imap-backend-tests v0.0.0-20190505082948-bf97d1956e31
 	github.com/go-sql-driver/mysql v1.4.1
 	github.com/json-iterator/go v1.1.6

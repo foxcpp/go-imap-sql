@@ -16,10 +16,6 @@ github.com/emersion/go-sasl v0.0.0-20161116183048-7e096a0a6197 h1:rDJPbyliyym8ZL
 github.com/emersion/go-sasl v0.0.0-20161116183048-7e096a0a6197/go.mod h1:G/dpzLu16WtQpBfQ/z3LYiYJn3ZhKSGWn83fyoyQe/k=
 github.com/emersion/go-textwrapper v0.0.0-20160606182133-d0e65e56babe h1:40SWqY0zE3qCi6ZrtTf5OUdNm5lDnGnjRSq9GgmeTrg=
 github.com/emersion/go-textwrapper v0.0.0-20160606182133-d0e65e56babe/go.mod h1:aqO8z8wPrjkscevZJFVE1wXJrLpC5LtJG7fqLOsPb2U=
-github.com/foxcpp/go-imap-backend-tests v0.0.0-20190505082948-bf97d1956e31 h1:Tf8ol7pHqRvIccozQ2wkjzDy2h5Nj4mJEeXxRGcytbA=
-github.com/foxcpp/go-imap-backend-tests v0.0.0-20190505082948-bf97d1956e31/go.mod h1:LtfeEmMceZnOtkLsZ91roD35v9SOo9Cx0VNrqPSeOpg=
-github.com/foxcpp/go-imap-backend-tests v0.0.0-20190518173523-19df021e6a10 h1:Ilw71zJoukxn6IKTcGY//dJTsq00v7NWCWzxuksRHio=
-github.com/foxcpp/go-imap-backend-tests v0.0.0-20190518173523-19df021e6a10/go.mod h1:LtfeEmMceZnOtkLsZ91roD35v9SOo9Cx0VNrqPSeOpg=
 github.com/foxcpp/go-imap-backend-tests v0.0.0-20190518173708-afd25c1cbb28 h1:I+m+0jNx5+MJz6M1Z8fod9uWO8mOphjJ145exFr60zc=
 github.com/foxcpp/go-imap-backend-tests v0.0.0-20190518173708-afd25c1cbb28/go.mod h1:LtfeEmMceZnOtkLsZ91roD35v9SOo9Cx0VNrqPSeOpg=
 github.com/go-sql-driver/mysql v1.4.1 h1:g24URVg0OFbNUTx9qqY1IRZ9D9z3iPyi5zKhQZpNwpA=

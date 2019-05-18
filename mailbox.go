@@ -290,6 +290,22 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		}
 	}
 
+	// Important to run before transaction, otherwise it will deadlock on
+	// SQLite.
+	haveRecent := false
+	for _, flag := range flags {
+		if flag == imap.RecentFlag {
+			haveRecent = true
+		}
+	}
+	if !haveRecent {
+		flags = append(flags, imap.RecentFlag)
+	}
+	stmt, err := m.parent.makeFlagsAddStmt(true, flags)
+	if err != nil {
+		return errors.Wrap(err, "CreateMessage")
+	}
+
 	tx, err := m.parent.db.Begin()
 	if err != nil {
 		return errors.Wrap(err, "CreateMessage (tx begin)")
@@ -322,36 +338,9 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		return errors.Wrap(err, "CreateMessage (addMsg)")
 	}
 
-	haveRecent := false
-	for _, flag := range flags {
-		if flag == imap.RecentFlag {
-			haveRecent = true
-		}
-	}
-	if !haveRecent {
-		flags = append(flags, imap.RecentFlag)
-	}
-
-	if len(flags) != 0 {
-		// TOOD: Use addFlag if only one flag is added.
-		flagsReq := m.parent.db.rewriteSQL(`
-			INSERT INTO flags
-			SELECT ?, msgId, column1 AS flag
-			FROM msgs
-			CROSS JOIN (` + m.parent.db.valuesSubquery(flags) + `) flagset
-			WHERE mboxId = ? AND msgId = ?
-			ON CONFLICT DO NOTHING`)
-
-		// How horrible variable arguments in Go are...
-		params := make([]interface{}, 0, 3+len(flags))
-		params = append(params, m.id)
-		for _, flag := range flags {
-			params = append(params, flag)
-		}
-		params = append(params, m.id, msgId)
-		if _, err := tx.Exec(flagsReq, params...); err != nil {
-			return errors.Wrap(err, "CreateMessage (flags)")
-		}
+	params := m.makeFlagsAddStmtArgs(true, flags, imap.Seq{msgId, msgId})
+	if _, err := tx.Stmt(stmt).Exec(params...); err != nil {
+		return errors.Wrap(err, "CreateMessage (flags)")
 	}
 
 	if _, err := tx.Stmt(m.parent.addUidNext).Exec(1, m.id); err != nil {

@@ -14,6 +14,10 @@ import (
 )
 
 func msgsAdd(ctx *cli.Context) error {
+	if err := connectToDB(ctx); err != nil {
+		return err
+	}
+
 	if !ctx.GlobalBool("unsafe") {
 		return errors.New("Error: Refusing to edit mailboxes without --unsafe")
 	}
@@ -71,6 +75,10 @@ func msgsAdd(ctx *cli.Context) error {
 }
 
 func msgsRemove(ctx *cli.Context) error {
+	if err := connectToDB(ctx); err != nil {
+		return err
+	}
+
 	if !ctx.GlobalBool("unsafe") {
 		return errors.New("Error: Refusing to edit mailboxes without --unsafe")
 	}
@@ -118,6 +126,10 @@ func msgsRemove(ctx *cli.Context) error {
 }
 
 func msgsCopy(ctx *cli.Context) error {
+	if err := connectToDB(ctx); err != nil {
+		return err
+	}
+
 	if !ctx.GlobalBool("unsafe") {
 		return errors.New("Error: Refusing to edit mailboxes without --unsafe")
 	}
@@ -158,6 +170,10 @@ func msgsCopy(ctx *cli.Context) error {
 }
 
 func msgsMove(ctx *cli.Context) error {
+	if err := connectToDB(ctx); err != nil {
+		return err
+	}
+
 	if !ctx.GlobalBool("unsafe") {
 		return errors.New("Error: Refusing to edit mailboxes without --unsafe")
 	}
@@ -200,6 +216,10 @@ func msgsMove(ctx *cli.Context) error {
 }
 
 func msgsList(ctx *cli.Context) error {
+	if err := connectToDB(ctx); err != nil {
+		return err
+	}
+
 	username := ctx.Args().First()
 	if username == "" {
 		return errors.New("Error: USERNAME is required")
@@ -276,6 +296,10 @@ func msgsList(ctx *cli.Context) error {
 }
 
 func msgsDump(ctx *cli.Context) error {
+	if err := connectToDB(ctx); err != nil {
+		return err
+	}
+
 	username := ctx.Args().First()
 	if username == "" {
 		return errors.New("Error: USERNAME is required")

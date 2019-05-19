@@ -9,6 +9,10 @@ import (
 )
 
 func usersList(ctx *cli.Context) error {
+	if err := connectToDB(ctx); err != nil {
+		return err
+	}
+
 	list, err := backend.ListUsers()
 	if err != nil {
 		return err
@@ -25,6 +29,10 @@ func usersList(ctx *cli.Context) error {
 }
 
 func usersCreate(ctx *cli.Context) error {
+	if err := connectToDB(ctx); err != nil {
+		return err
+	}
+
 	username := ctx.Args().First()
 	if username == "" {
 		return errors.New("Error: USERNAME is required")
@@ -49,6 +57,10 @@ func usersCreate(ctx *cli.Context) error {
 }
 
 func usersRemove(ctx *cli.Context) error {
+	if err := connectToDB(ctx); err != nil {
+		return err
+	}
+
 	if !ctx.GlobalBool("unsafe") {
 		return errors.New("Error: Refusing to edit mailboxes without --unsafe")
 	}
@@ -73,6 +85,10 @@ func usersRemove(ctx *cli.Context) error {
 }
 
 func usersPassword(ctx *cli.Context) error {
+	if err := connectToDB(ctx); err != nil {
+		return err
+	}
+
 	username := ctx.Args().First()
 	if username == "" {
 		return errors.New("Error: USERNAME is required")
@@ -97,6 +113,10 @@ func usersPassword(ctx *cli.Context) error {
 }
 
 func usersAppendLimit(ctx *cli.Context) error {
+	if err := connectToDB(ctx); err != nil {
+		return err
+	}
+
 	username := ctx.Args().First()
 	if username == "" {
 		return errors.New("Error: USERNAME is required")

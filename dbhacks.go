@@ -53,13 +53,13 @@ func (d db) rewriteSQL(req string) (res string) {
 			}
 		}
 		res = strings.TrimLeft(res, "\n\t")
-		if strings.HasPrefix(res, "CREATE TABLE") {
+		if strings.HasPrefix(res, "CREATE TABLE") || strings.HasPrefix(res, "ALERT TABLE") {
 			res = strings.Replace(res, "BLOB", "BYTEA", -1)
 			res = strings.Replace(res, "LONGTEXT", "BYTEA", -1)
 			res = strings.Replace(res, "AUTOINCREMENT", "", -1)
 		}
 	} else if d.driver == "mysql" {
-		if strings.HasPrefix(res, "CREATE TABLE") {
+		if strings.HasPrefix(res, "CREATE TABLE") || strings.HasPrefix(res, "ALERT TABLE") {
 			res = strings.Replace(res, "BIGSERIAL", "BIGINT", -1)
 			res = strings.Replace(res, "AUTOINCREMENT", "AUTO_INCREMENT", -1)
 		}
@@ -68,7 +68,7 @@ func (d db) rewriteSQL(req string) (res string) {
 			res = strings.Replace(res, "INSERT", "INSERT IGNORE", 1)
 		}
 	} else if d.driver == "sqlite3" {
-		if strings.HasPrefix(res, "CREATE TABLE") {
+		if strings.HasPrefix(res, "CREATE TABLE") || strings.HasPrefix(res, "ALERT TABLE") {
 			res = strings.Replace(res, "BIGSERIAL", "INTEGER", -1)
 		}
 		if strings.HasSuffix(res, "ON CONFLICT DO NOTHING") && strings.HasPrefix(res, "INSERT") {

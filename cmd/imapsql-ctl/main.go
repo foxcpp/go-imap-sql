@@ -14,15 +14,15 @@ var backend *imapsql.Backend
 var stdinScnr *bufio.Scanner
 
 func connectToDB(ctx *cli.Context) (err error) {
-	if ctx.IsSet("unsafe") && !ctx.IsSet("quiet") {
+	if ctx.GlobalIsSet("unsafe") && !ctx.GlobalIsSet("quiet") {
 		fmt.Fprintln(os.Stderr, "WARNING: Using --unsafe with running server may lead to accidential damage to data due to desynchronization with connected clients.")
 	}
 
-	driver := ctx.String("driver")
-	dsn := ctx.String("dsn")
+	driver := ctx.GlobalString("driver")
+	dsn := ctx.GlobalString("dsn")
 
-	if (driver == "" || dsn == "") && ctx.IsSet("config") {
-		f, err := os.Open(ctx.String("config"))
+	if (driver == "" || dsn == "") && ctx.GlobalIsSet("config") {
+		f, err := os.Open(ctx.GlobalString("config"))
 		if err != nil {
 			return err
 		}
@@ -47,7 +47,10 @@ func connectToDB(ctx *cli.Context) (err error) {
 		return errors.New("Error: dsn is required")
 	}
 
-	backend, err = imapsql.New(driver, dsn, imapsql.Opts{LazyUpdatesInit: true})
+	opts := imapsql.Opts{LazyUpdatesInit: true}
+	opts.AllowSchemaUpgrade = ctx.GlobalIsSet("allow-schema-upgrade")
+
+	backend, err = imapsql.New(driver, dsn, opts)
 	return
 }
 
@@ -63,9 +66,8 @@ func main() {
 
 	app := cli.NewApp()
 	app.Usage = "go-imap-sql database management utility"
-	app.Version = imapsql.VersionStr + " (go-imap-sql)"
-	app.HideVersion = true
-	app.Before = connectToDB
+	app.Version = fmt.Sprintf("%s (go-imap-sql), %d (DB schema)", imapsql.VersionStr, imapsql.SchemaVersion)
+	app.HideVersion = false
 	app.After = closeBackend
 
 	app.Flags = []cli.Flag{
@@ -89,6 +91,10 @@ func main() {
 		cli.BoolFlag{
 			Name:  "unsafe",
 			Usage: "Allow to perform actions that can be safely done only without running server",
+		},
+		cli.BoolFlag{
+			Name:  "allow-schema-upgrade",
+			Usage: "Allow go-imap-sql to automatically update database schema to version imapsql-ctl is compiled with\n\t\tWARNING: Make a backup before using this flag!",
 		},
 	}
 

@@ -77,6 +77,9 @@ type Opts struct {
 	// will be saved to it. However, already existing messages stored in DB
 	// directly will not be moved.
 	ExternalStore ExternalStore
+
+	// Automatically update database schema on imapsql.New.
+	AllowSchemaUpgrade bool
 }
 
 type Backend struct {
@@ -209,6 +212,26 @@ func New(driver, dsn string, opts Opts) (*Backend, error) {
 		return nil, errors.Wrap(err, "NewBackend")
 	}
 	b.DB = b.db.DB
+
+	ver, err := b.schemaVersion()
+	if err != nil {
+		return nil, errors.Wrap(err, "NewBackend")
+	}
+	// Zero version indicates "empty database".
+	if ver > SchemaVersion {
+		return nil, errors.Errorf("incompatible database schema, too new (%d > %d)", ver, SchemaVersion)
+	}
+	if ver < SchemaVersion && ver != 0 {
+		if !opts.AllowSchemaUpgrade {
+			return nil, errors.Errorf("incompatible database schema, upgrade required (%d < %d)", ver, SchemaVersion)
+		}
+		if err := b.upgradeSchema(ver); err != nil {
+			return nil, errors.Wrap(err, "NewBackend")
+		}
+	}
+	if err := b.setSchemaVersion(SchemaVersion); err != nil {
+		return nil, errors.Wrap(err, "NewBackend")
+	}
 
 	if err := b.configureEngine(); err != nil {
 		return nil, errors.Wrap(err, "NewBackend")

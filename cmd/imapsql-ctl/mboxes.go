@@ -10,6 +10,10 @@ import (
 )
 
 func mboxesList(ctx *cli.Context) error {
+	if err := connectToDB(ctx); err != nil {
+		return err
+	}
+
 	username := ctx.Args().First()
 	if username == "" {
 		return errors.New("Error: USERNAME is required")
@@ -37,6 +41,10 @@ func mboxesList(ctx *cli.Context) error {
 }
 
 func mboxesCreate(ctx *cli.Context) error {
+	if err := connectToDB(ctx); err != nil {
+		return err
+	}
+
 	username := ctx.Args().First()
 	if username == "" {
 		return errors.New("Error: USERNAME is required")
@@ -59,6 +67,10 @@ func mboxesCreate(ctx *cli.Context) error {
 }
 
 func mboxesRemove(ctx *cli.Context) error {
+	if err := connectToDB(ctx); err != nil {
+		return err
+	}
+
 	if !ctx.GlobalBool("unsafe") {
 		return errors.New("Error: Refusing to edit mailboxes without --unsafe")
 	}
@@ -105,6 +117,10 @@ func mboxesRemove(ctx *cli.Context) error {
 }
 
 func mboxesRename(ctx *cli.Context) error {
+	if err := connectToDB(ctx); err != nil {
+		return err
+	}
+
 	if !ctx.GlobalBool("unsafe") {
 		return errors.New("Error: Refusing to edit mailboxes without --unsafe")
 	}
@@ -131,6 +147,10 @@ func mboxesRename(ctx *cli.Context) error {
 }
 
 func mboxesAppendLimit(ctx *cli.Context) error {
+	if err := connectToDB(ctx); err != nil {
+		return err
+	}
+
 	username := ctx.Args().First()
 	if username == "" {
 		return errors.New("Error: USERNAME is required")

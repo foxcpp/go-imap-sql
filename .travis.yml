@@ -24,6 +24,9 @@ matrix:
     before_install:
     - psql -c 'create database sqlmail_test;' -U postgres
 
+before_script:
+- go mod verify # ensure cache consistency
+
 script:
 - go test ./... -race -coverprofile=coverage.txt -covermode=atomic -tags $TEST_DB -count 8 -p $PARALLEL_TESTS
 

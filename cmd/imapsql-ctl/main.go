@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/foxcpp/go-imap-sql"
+	imapsql "github.com/foxcpp/go-imap-sql"
+	"github.com/foxcpp/go-imap-sql/fsstore"
 	"github.com/urfave/cli"
 )
 
@@ -49,6 +50,10 @@ func connectToDB(ctx *cli.Context) (err error) {
 
 	opts := imapsql.Opts{LazyUpdatesInit: true}
 	opts.AllowSchemaUpgrade = ctx.GlobalIsSet("allow-schema-upgrade")
+	opts.NoWAL = ctx.GlobalIsSet("no-wal")
+	if store := ctx.GlobalString("fsstore"); store != "" {
+		opts.ExternalStore = &fsstore.Store{Root: store}
+	}
 
 	backend, err = imapsql.New(driver, dsn, opts)
 	return
@@ -95,6 +100,15 @@ func main() {
 		cli.BoolFlag{
 			Name:  "allow-schema-upgrade",
 			Usage: "Allow go-imap-sql to automatically update database schema to version imapsql-ctl is compiled with\n\t\tWARNING: Make a backup before using this flag!",
+		},
+		cli.BoolFlag{
+			Name:  "no-wal",
+			Usage: "(SQLite only) Don't force WAL mode",
+		},
+		cli.StringFlag{
+			Name:   "fsstore",
+			Usage:  "Use fsstore with specified directory",
+			EnvVar: "SQLMAIL_FSSTORE",
 		},
 	}
 

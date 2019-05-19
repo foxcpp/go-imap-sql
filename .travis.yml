@@ -2,6 +2,11 @@ sudo: false
 dist: xenial
 language: go
 
+cache:
+  directories:
+  - /home/travis/gopath/pkg/linux_amd64
+  - /home/travis/gopath/pkg/mod
+
 go:
 - "1.x"
 

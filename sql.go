@@ -125,7 +125,7 @@ func (b *Backend) initSchema() error {
 			header LONGTEXT,
 			bodyStructure LONGTEXT NOT NULL,
 			cachedHeader LONGTEXT NOT NULL,
-			extBodyKey VARCHAR(255) REFERENCES extKeys(id) ON DELETE RESTRICT DEFAULT NULL,
+			extBodyKey VARCHAR(255) DEFAULT NULL REFERENCES extKeys(id) ON DELETE RESTRICT,
 
 			PRIMARY KEY(mboxId, msgId)
 		)`)

@@ -118,13 +118,14 @@ func (b *Backend) initSchema() error {
 			mboxId BIGINT NOT NULL REFERENCES mboxes(id) ON DELETE CASCADE,
 			msgId BIGINT NOT NULL,
 			date BIGINT NOT NULL,
-			header LONGTEXT,
-			extBodyKey VARCHAR(255) REFERENCES extKeys(id) ON DELETE RESTRICT,
 			bodyLen INTEGER NOT NULL,
 			body LONGTEXT,
+			mark INTEGER NOT NULL DEFAULT 0,
+
+			header LONGTEXT,
 			bodyStructure LONGTEXT NOT NULL,
 			cachedHeader LONGTEXT NOT NULL,
-			mark INTEGER NOT NULL DEFAULT 0,
+			extBodyKey VARCHAR(255) REFERENCES extKeys(id) ON DELETE RESTRICT DEFAULT NULL,
 
 			PRIMARY KEY(mboxId, msgId)
 		)`)
@@ -341,7 +342,7 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "mboxId prep")
 	}
 	b.addMsg, err = b.db.Prepare(`
-		INSERT INTO msgs(mboxId, msgId, date, header, bodyLen, extBodyKey, body, bodyStructure, cachedHeader)
+		INSERT INTO msgs(mboxId, msgId, date, bodyLen, body, header, bodyStructure, cachedHeader, extBodyKey)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return errors.Wrap(err, "addMsg prep")
@@ -352,7 +353,7 @@ func (b *Backend) prepareStmts() error {
 			SELECT uidnext - 1
 			FROM mboxes
 			WHERE id = ?
-		) + row_number() OVER (ORDER BY msgId), date, header, extBodyKey, bodyLen, body, bodyStructure, cachedHeader, 0 AS mark
+		) + row_number() OVER (ORDER BY msgId), date, bodyLen, body, 0 AS mark, header, bodyStructure, cachedHeader, extBodyKey
 		FROM msgs
 		WHERE mboxId = ? AND msgId BETWEEN ? AND ?`)
 	if err != nil {
@@ -382,9 +383,9 @@ func (b *Backend) prepareStmts() error {
 			SELECT uidnext - 1
 			FROM mboxes
 			WHERE id = ?
-		) + row_number() OVER (ORDER BY msgId), date, header, extBodyKey, bodyLen, body, bodyStructure, cachedHeader, 0 AS mark
+		) + row_number() OVER (ORDER BY msgId), date, bodyLen, body, 0 AS mark, header, bodyStructure, cachedHeader, extBodyKey
 		FROM (
-			SELECT msgId, date, header, extBodyKey, bodyLen, body, bodyStructure, cachedHeader
+			SELECT msgId, date, bodyLen, body,  header, bodyStructure, cachedHeader, extBodyKey
 			FROM msgs
 			WHERE mboxId = ?
 			ORDER BY msgId

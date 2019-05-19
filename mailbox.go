@@ -331,8 +331,8 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 
 	_, err = tx.Stmt(m.parent.addMsg).Exec(
 		m.id, msgId, date.Unix(),
-		hdr, bodyLen, extBodyKey, body,
-		bodyStruct, cachedHdr,
+		bodyLen, body, hdr,
+		bodyStruct, cachedHdr, extBodyKey,
 	)
 	if err != nil {
 		return errors.Wrap(err, "CreateMessage (addMsg)")

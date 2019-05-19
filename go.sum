@@ -2,8 +2,8 @@ github.com/davecgh/go-spew v1.1.0 h1:ZDRjVQ15GmhC3fiQ8ni8+OwkZQO4DARzQgrnXU1Liz8
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/emersion/go-imap v1.0.0-beta.4.0.20190504114255-4d5af3d05147 h1:cdHOk66P3hpTDhXodyrt+LwFscLHo5DJ/Iy8Rs64pOU=
 github.com/emersion/go-imap v1.0.0-beta.4.0.20190504114255-4d5af3d05147/go.mod h1:mOPegfAgLVXbhRm1bh2JTX08z2Y3HYmKYpbrKDeAzsQ=
-github.com/emersion/go-imap v1.0.0-beta.4.0.20190515165049-652a96ccdcb8 h1:H/d9wFvx26KbMIR3p3POpo4+2mBu/QBMGv5v5ad2bDQ=
-github.com/emersion/go-imap v1.0.0-beta.4.0.20190515165049-652a96ccdcb8/go.mod h1:hwG4om0BJJYYFktL0Wm3xHhL3kybvG0hlm94ZofzwWQ=
+github.com/emersion/go-imap v1.0.0-beta.5 h1:KpOPIoPNNq5m9LpWqRZcUgoDoc4SBy+TdYniGdwBJiU=
+github.com/emersion/go-imap v1.0.0-beta.5/go.mod h1:hwG4om0BJJYYFktL0Wm3xHhL3kybvG0hlm94ZofzwWQ=
 github.com/emersion/go-imap-appendlimit v0.0.0-20190308131241-25671c986a6a h1:bMdSPm6sssuOFpIaveu3XGAijMS3Tq2S3EqFZmZxidc=
 github.com/emersion/go-imap-appendlimit v0.0.0-20190308131241-25671c986a6a/go.mod h1:ikgISoP7pRAolqsVP64yMteJa2FIpS6ju88eBT6K1yQ=
 github.com/emersion/go-imap-move v0.0.0-20180601155324-5eb20cb834bf h1:TmRfuPmhrwAhWKu2XaBaY9N+anRRDBO+E8VRVO9g3fY=
@@ -12,6 +12,8 @@ github.com/emersion/go-message v0.9.1 h1:s6HoJ6t+1wHWEs0G/QVR1r5bb6nvx2/b6DuQfkn
 github.com/emersion/go-message v0.9.1/go.mod h1:m3cK90skCWxm5sIMs1sXxly4Tn9Plvcf6eayHZJ1NzM=
 github.com/emersion/go-message v0.10.2-0.20190514201857-604a73722993 h1:UWudYI58vDfvGAXM56skCZirvNmltb2/wNdbPwsyleo=
 github.com/emersion/go-message v0.10.2-0.20190514201857-604a73722993/go.mod h1:7d2eJfhjiJSnlaKcUPq7sEC7ekWELG6F5Lw2BxOGj6Y=
+github.com/emersion/go-message v0.10.3 h1:4pajGb3Rq+gHLfRcWysgcwtGRNgLpB8LC6X/vRZ89d0=
+github.com/emersion/go-message v0.10.3/go.mod h1:3h+HsGTCFHmk4ngJ2IV/YPhdlaOcR6hcgqM3yca9v7c=
 github.com/emersion/go-sasl v0.0.0-20161116183048-7e096a0a6197 h1:rDJPbyliyym8ZL/Wt71kdolp6yaD4fLIQz638E6JEt0=
 github.com/emersion/go-sasl v0.0.0-20161116183048-7e096a0a6197/go.mod h1:G/dpzLu16WtQpBfQ/z3LYiYJn3ZhKSGWn83fyoyQe/k=
 github.com/emersion/go-textwrapper v0.0.0-20160606182133-d0e65e56babe h1:40SWqY0zE3qCi6ZrtTf5OUdNm5lDnGnjRSq9GgmeTrg=
@@ -27,6 +29,8 @@ github.com/json-iterator/go v1.1.6 h1:MrUvLMLTMxbqFJ9kzlvat/rYZqZnW3u4wkLzWTaFwK
 github.com/json-iterator/go v1.1.6/go.mod h1:+SdeFBvtyEkXs7REEP0seUULqWtbJapLOCVDaaPEHmU=
 github.com/lib/pq v1.0.0 h1:X5PMW56eZitiTeO7tKzZxFCSpbFZJtkMMooicw2us9A=
 github.com/lib/pq v1.0.0/go.mod h1:5WUZQaWbwv1U+lTReE5YruASi9Al49XbQIvNi/34Woo=
+github.com/martinlindhe/base36 v0.0.0-20190418230009-7c6542dfbb41 h1:CVsnY46BCLkX9XOhALJ/S7yb9ayc4eqjXSXO3tyB66A=
+github.com/martinlindhe/base36 v0.0.0-20190418230009-7c6542dfbb41/go.mod h1:+AtEs8xrBpCeYgSLoY/aJ6Wf37jtBuR0s35750M27+8=
 github.com/mattn/go-sqlite3 v1.10.0 h1:jbhqpg7tQe4SupckyijYiy0mJJ/pRyHvXf7JdWK860o=
 github.com/mattn/go-sqlite3 v1.10.0/go.mod h1:FPy6KqzDD04eiIsT53CuJW3U88zkxoIYsOqkbpncsNc=
 github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd h1:TRLaZ9cD/w8PVh93nsPXa1VrQ6jlwL5oN8l14QlcNfg=

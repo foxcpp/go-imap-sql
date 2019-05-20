@@ -1,9 +1,9 @@
 go-imap-sql
-==========
-
-
 [![Travis CI](https://img.shields.io/travis/com/foxcpp/go-imap-sql.svg?style=flat-square&logo=Linux)](https://travis-ci.com/foxcpp/go-imap-sql)
 [![CodeCov](https://img.shields.io/codecov/c/github/foxcpp/go-imap-sql.svg?style=flat-square)](https://codecov.io/gh/foxcpp/go-imap-sql)
+[![Reference](https://img.shields.io/badge/godoc-reference-blue.svg?style=flat-square)](https://godoc.org/github.com/foxcpp/go-imap-sql)
+[![stability-unstable](https://img.shields.io/badge/stability-unstable-yellow.svg?style=flat-square)](https://github.com/emersion/stability-badges#unstable)
+=============
 
 SQL-based storage backend for [go-imap] library.
 

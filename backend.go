@@ -541,7 +541,7 @@ func (b *Backend) GetOrCreateUser(username string) (backend.User, error) {
 			return nil, err
 		}
 	}
-	return &User{id: uid, username: username, parent: b}, nil
+	return &User{id: uid, username: username, parent: b}, tx.Commit()
 }
 
 func (b *Backend) checkUser(username, password string) (uint64, error) {

@@ -120,7 +120,7 @@ func (m *Mailbox) Status(items []imap.StatusItem) (*imap.MailboxStatus, error) {
 				return nil, errors.Wrapf(err, "Status (recent) %s", m.name)
 			}
 		case imap.StatusUidNext:
-			res.UidNext, err = m.UidNext(tx)
+			res.UidNext, err = m.uidNext(tx)
 			if err != nil {
 				return nil, errors.Wrapf(err, "Status (uidnext) %s", m.name)
 			}
@@ -140,7 +140,7 @@ func (m *Mailbox) Status(items []imap.StatusItem) (*imap.MailboxStatus, error) {
 	return res, nil
 }
 
-func (m *Mailbox) UidNext(tx *sql.Tx) (uint32, error) {
+func (m *Mailbox) uidNext(tx *sql.Tx) (uint32, error) {
 	var row *sql.Row
 	if tx != nil {
 		row = tx.Stmt(m.parent.uidNext).QueryRow(m.id)
@@ -312,7 +312,7 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	msgId, err := m.UidNext(tx)
+	msgId, err := m.uidNext(tx)
 	if err != nil {
 		return errors.Wrap(err, "CreateMessage (uidNext)")
 	}

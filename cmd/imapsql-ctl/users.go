@@ -43,6 +43,10 @@ func usersCreate(ctx *cli.Context) error {
 		return errors.New("Error: User already exists")
 	}
 
+	if ctx.IsSet("null") {
+		return backend.CreateUserNoPass(username)
+	}
+
 	var pass string
 	if ctx.IsSet("password") {
 		pass = ctx.String("password,p")
@@ -97,6 +101,10 @@ func usersPassword(ctx *cli.Context) error {
 	_, err := backend.GetUser(username)
 	if err != nil {
 		return errors.New("Error: User doesn't exists")
+	}
+
+	if ctx.IsSet("null") {
+		return backend.ResetPassword(username)
 	}
 
 	var pass string

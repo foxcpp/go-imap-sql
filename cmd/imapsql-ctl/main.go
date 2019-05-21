@@ -283,6 +283,10 @@ func main() {
 							Name:  "password,p",
 							Usage: "Use `PASSWORD instead of reading password from stdin.\n\t\tWARNING: Provided only for debugging convenience. Don't leave your passwords in shell history!",
 						},
+						cli.BoolFlag{
+							Name:  "null,n",
+							Usage: "Create account with null password",
+						},
 					},
 					Action: usersCreate,
 				},
@@ -307,6 +311,10 @@ func main() {
 						cli.StringFlag{
 							Name:  "password,p",
 							Usage: "Use `PASSWORD` instead of reading password from stdin.\n\t\tWARNING: Provided only for debugging convenience. Don't leave your passwords in shell history!",
+						},
+						cli.BoolFlag{
+							Name:  "null,n",
+							Usage: "Set password to null",
 						},
 					},
 					Action: usersPassword,

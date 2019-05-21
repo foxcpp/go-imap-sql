@@ -233,7 +233,7 @@ func New(driver, dsn string, opts Opts) (*Backend, error) {
 	}
 
 	if driver == "sqlite3" {
-		b.db.dsn = b.addSqlite3Params(dsn)
+		dsn = b.addSqlite3Params(dsn)
 	}
 
 	b.db.driver = driver

@@ -232,18 +232,22 @@ func New(driver, dsn string, opts Opts) (*Backend, error) {
 		b.prng = mathrand.New(mathrand.NewSource(time.Now().Unix()))
 	}
 
+	if driver == "sqlite3" {
+		b.db.dsn = b.addSqlite3Params(dsn)
+	}
+
 	b.db.driver = driver
 	b.db.dsn = dsn
 
 	b.db.DB, err = sql.Open(driver, dsn)
 	if err != nil {
-		return nil, errors.Wrap(err, "NewBackend")
+		return nil, errors.Wrap(err, "NewBackend (open)")
 	}
 	b.DB = b.db.DB
 
 	ver, err := b.schemaVersion()
 	if err != nil {
-		return nil, errors.Wrap(err, "NewBackend")
+		return nil, errors.Wrap(err, "NewBackend (schemaVersion)")
 	}
 	// Zero version indicates "empty database".
 	if ver > SchemaVersion {
@@ -254,22 +258,22 @@ func New(driver, dsn string, opts Opts) (*Backend, error) {
 			return nil, errors.Errorf("incompatible database schema, upgrade required (%d < %d)", ver, SchemaVersion)
 		}
 		if err := b.upgradeSchema(ver); err != nil {
-			return nil, errors.Wrap(err, "NewBackend")
+			return nil, errors.Wrap(err, "NewBackend (schemaUpgrade)")
 		}
 	}
 	if err := b.setSchemaVersion(SchemaVersion); err != nil {
-		return nil, errors.Wrap(err, "NewBackend")
+		return nil, errors.Wrap(err, "NewBackend (setSchemaVersion)")
 	}
 
 	if err := b.configureEngine(); err != nil {
-		return nil, errors.Wrap(err, "NewBackend")
+		return nil, errors.Wrap(err, "NewBackend (configureEngine)")
 	}
 
 	if err := b.initSchema(); err != nil {
-		return nil, errors.Wrap(err, "NewBackend")
+		return nil, errors.Wrap(err, "NewBackend (initSchema)")
 	}
 	if err := b.prepareStmts(); err != nil {
-		return nil, errors.Wrap(err, "NewBackend")
+		return nil, errors.Wrap(err, "NewBackend (prepareStmts)")
 	}
 
 	for _, item := range [...]imap.FetchItem{

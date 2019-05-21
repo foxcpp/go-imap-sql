@@ -2,9 +2,40 @@ package imapsql
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/pkg/errors"
 )
+
+func (b *Backend) addSqlite3Params(dsn string) string {
+	if !strings.HasPrefix(dsn, "file:") {
+		dsn = "file:" + dsn
+	}
+	if !strings.Contains(dsn, "?") {
+		dsn += "?"
+	} else {
+		dsn += "&"
+	}
+
+	dsn += "_fk=ON&_auto_vacuum=FULL&"
+
+	if !b.Opts.NoWAL {
+		dsn += "_journal_mode=WAL&_sync=NORMAL&"
+	}
+	if b.Opts.ExclusiveLock {
+		dsn += "_locking_mode=EXCLUSIVE&"
+	}
+
+	if b.Opts.BusyTimeout == 0 {
+		b.Opts.BusyTimeout = 500000
+	}
+	if b.Opts.BusyTimeout == -1 {
+		b.Opts.BusyTimeout = 0
+	}
+	dsn += "_busy_timeout=" + strconv.Itoa(b.Opts.BusyTimeout)
+
+	return dsn
+}
 
 func (b *Backend) configureEngine() error {
 	if b.db.driver == "sqlite3" {
@@ -14,47 +45,10 @@ func (b *Backend) configureEngine() error {
 			b.db.DB.SetMaxOpenConns(1)
 		}
 
-		_, err := b.db.Exec(`PRAGMA foreign_keys = ON`)
-		if err != nil {
-			return err
-		}
-
-		// If we turn on EXCLUSIVE locking before WAL, it will be more useful.
-		// TODO: Is it effective at all?
-		if b.Opts.ExclusiveLock {
-			if _, err := b.db.Exec(`PRAGMA locking_mode=EXCLUSIVE`); err != nil {
-				return err
-			}
-		}
-
-		// Performance tweaks.
-		if !b.Opts.NoWAL {
-			if _, err := b.db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
-				return err
-			}
-			if _, err := b.db.Exec(`PRAGMA synchronous=NORMAL`); err != nil {
-				return err
-			}
-		}
-
-		if b.Opts.BusyTimeout == 0 {
-			b.Opts.BusyTimeout = 500000
-		}
-		if b.Opts.BusyTimeout == -1 {
-			b.Opts.BusyTimeout = 0
-		}
-
-		if _, err := b.db.Exec(`PRAGMA busy_timeout=` + strconv.Itoa(b.Opts.BusyTimeout)); err != nil {
-			return err
-		}
-
 		if b.Opts.ExternalStore == nil {
 			if _, err := b.db.Exec(`PRAGMA page_size=16384`); err != nil {
 				return err
 			}
-		}
-		if _, err := b.db.Exec(`PRAGMA auto_vacuum=FULL`); err != nil {
-			return err
 		}
 	}
 

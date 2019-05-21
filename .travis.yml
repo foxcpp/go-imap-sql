@@ -8,10 +8,13 @@ cache:
   - /home/travis/gopath/pkg/mod
 
 go:
-- "1.x"
+- "1.11.4"
 
 matrix:
   include:
+  # also test against the latest Go version
+  - go: "1.x"
+    env: TEST_DB=sqlite3 TEST_DSN=":memory:" GO111MODULE=on SHUFFLE_CASES=1 PARALLEL_TESTS=2
   - env: TEST_DB=sqlite3 TEST_DSN=":memory:" GO111MODULE=on SHUFFLE_CASES=1 PARALLEL_TESTS=2
   - env: TEST_DB=mysql TEST_DSN="root@tcp(localhost)/sqlmail_test" GO111MODULE=on SHUFFLE_CASES=1 PARALLEL_TESTS=1
     addons:

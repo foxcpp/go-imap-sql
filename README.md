@@ -10,7 +10,7 @@ SQL-based storage backend for [go-imap] library.
 Building
 ----------
 
-Go 1.11 is required because we are using modules. Things may work on older versions
+Go 1.11.4 is required because we are using modules. Things may work on older versions
 but these configurations will not be supported.
 
 RDBMS support

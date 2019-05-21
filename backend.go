@@ -324,17 +324,30 @@ func (b *Backend) Updates() <-chan backend.Update {
 // UserCreds returns internal identifier and credentials for user named
 // username.
 func (b *Backend) UserCreds(username string) (id uint64, passHash []byte, passSalt []byte, err error) {
-	row := b.userCreds.QueryRow(username)
-	id, passHashHex, passSaltHex := uint64(0), "", ""
+	return b.getUserCreds(nil, username)
+}
+
+func (b *Backend) getUserCreds(tx *sql.Tx, username string) (id uint64, passHash []byte, passSalt []byte, err error) {
+	var row *sql.Row
+	if tx != nil {
+		row = tx.Stmt(b.userCreds).QueryRow(username)
+	} else {
+		row = b.userCreds.QueryRow(username)
+	}
+	var passHashHex, passSaltHex sql.NullString
 	if err := row.Scan(&id, &passHashHex, &passSaltHex); err != nil {
 		return 0, nil, nil, err
 	}
 
-	passHash, err = hex.DecodeString(passHashHex)
+	if !passHashHex.Valid || !passSaltHex.Valid {
+		return id, nil, nil, nil
+	}
+
+	passHash, err = hex.DecodeString(passHashHex.String)
 	if err != nil {
 		return 0, nil, nil, err
 	}
-	passSalt, err = hex.DecodeString(passSaltHex)
+	passSalt, err = hex.DecodeString(passSaltHex.String)
 	if err != nil {
 		return 0, nil, nil, err
 	}
@@ -348,19 +361,43 @@ func (b *Backend) UserCreds(username string) (id uint64, passHash []byte, passSa
 // It is error to create account with username that already exists.
 // ErrUserAlreadyExists will be returned in this case.
 func (b *Backend) CreateUser(username, password string) error {
-	salt := make([]byte, 16)
-	if n, err := rand.Read(salt); err != nil {
-		return errors.Wrap(err, "CreateUser")
-	} else if n != 16 {
-		return errors.New("CreateUser: failed to read enough entropy for salt from CSPRNG")
+	return b.createUser(nil, username, &password)
+}
+
+// CreateUserNoPass creates new user account without a password set.
+//
+// It will be unable to log in until SetUserPassword is called for it.
+func (b *Backend) CreateUserNoPass(username string) error {
+	return b.createUser(nil, username, nil)
+}
+
+func (b *Backend) createUser(tx *sql.Tx, username string, password *string) error {
+	var passHash, passSalt sql.NullString
+	if password != nil {
+		salt := make([]byte, 16)
+		if n, err := rand.Read(salt); err != nil {
+			return errors.Wrap(err, "CreateUser")
+		} else if n != 16 {
+			return errors.New("CreateUser: failed to read enough entropy for salt from CSPRNG")
+		}
+
+		pass := make([]byte, 0, len(*password)+len(salt))
+		pass = append(pass, []byte(*password)...)
+		pass = append(pass, salt...)
+		digest := sha3.Sum512(pass)
+
+		passHash.Valid = true
+		passHash.String = hex.EncodeToString(digest[:])
+		passSalt.Valid = true
+		passSalt.String = hex.EncodeToString(salt)
 	}
 
-	pass := make([]byte, 0, len(password)+len(salt))
-	pass = append(pass, []byte(password)...)
-	pass = append(pass, salt...)
-	digest := sha3.Sum512(pass)
-
-	_, err := b.addUser.Exec(username, hex.EncodeToString(digest[:]), hex.EncodeToString(salt))
+	var err error
+	if tx != nil {
+		_, err = tx.Stmt(b.addUser).Exec(username, passHash, passSalt)
+	} else {
+		_, err = b.addUser.Exec(username, passHash, passSalt)
+	}
 	if err != nil && (strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "Duplicate entry") || strings.Contains(err.Error(), "unique")) {
 		return ErrUserAlreadyExists
 	}
@@ -382,6 +419,23 @@ func (b *Backend) DeleteUser(username string) error {
 		return errors.Wrap(err, "DeleteUser")
 	}
 
+	if affected == 0 {
+		return ErrUserDoesntExists
+	}
+	return nil
+}
+
+// ResetPassword sets user account password to invalid value such that Login
+// and CheckPlain will always return "invalid credentials" error.
+func (b *Backend) ResetPassword(username string) error {
+	stats, err := b.setUserPass.Exec(nil, nil, username)
+	if err != nil {
+		return errors.Wrap(err, "ResetPassword")
+	}
+	affected, err := stats.RowsAffected()
+	if err != nil {
+		return errors.Wrap(err, "ResetPassword")
+	}
 	if affected == 0 {
 		return ErrUserDoesntExists
 	}
@@ -461,17 +515,25 @@ func (b *Backend) GetUser(username string) (backend.User, error) {
 
 // GetOrCreateUser is a convenience wrapper for GetUser and CreateUser.
 //
-// Users are created with empty password (it is still valid password, be
-// careful with it!).
-// Operation is not atomic!
+// Users are created with invalid password such that CheckPlain and Login
+// will always return "invalid credentials" error.
+//
+// All database operations are executed within one transaction so
+// this method is atomic as defined by used RDBMS.
 func (b *Backend) GetOrCreateUser(username string) (backend.User, error) {
-	uid, _, _, err := b.UserCreds(username)
+	tx, err := b.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	uid, _, _, err := b.getUserCreds(tx, username)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			if err := b.CreateUser(username, ""); err != nil {
+			if err := b.createUser(tx, username, nil); err != nil {
 				return nil, err
 			}
-			uid, _, _, err = b.UserCreds(username)
+			uid, _, _, err = b.getUserCreds(tx, username)
 			if err != nil {
 				return nil, err
 			}
@@ -483,9 +545,13 @@ func (b *Backend) GetOrCreateUser(username string) (backend.User, error) {
 }
 
 func (b *Backend) checkUser(username, password string) (uint64, error) {
-	uid, passHash, passSalt, err := b.UserCreds(username)
+	uid, passHash, passSalt, err := b.getUserCreds(nil, username)
 	if err != nil {
 		return 0, backend.ErrInvalidCredentials
+	}
+
+	if passHash == nil || passSalt == nil {
+		return uid, backend.ErrInvalidCredentials
 	}
 
 	pass := make([]byte, 0, len(password)+len(passSalt))
@@ -493,7 +559,7 @@ func (b *Backend) checkUser(username, password string) (uint64, error) {
 	pass = append(pass, passSalt...)
 	digest := sha3.Sum512(pass)
 	if subtle.ConstantTimeCompare(digest[:], passHash) != 1 {
-		return 0, backend.ErrInvalidCredentials
+		return uid, backend.ErrInvalidCredentials
 	}
 
 	return uid, nil

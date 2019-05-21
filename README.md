@@ -7,28 +7,39 @@ go-imap-sql
 
 SQL-based storage backend for [go-imap] library.
 
-#### Building
+Building
+----------
 
 Go 1.11 is required because we are using modules. Things may work on older versions
 but these configurations will not be supported.
 
-#### RDBMS support
+RDBMS support
+---------------
 
 go-imap-sql is known to work with (and constantly being tested against) following RDBMS:
 - SQLite 3.25.0
 - MySQL 8.0 (or MariaDB 10.2)
 - PostgreSQL 9.6
 
-#### IMAP Extensions Supported
+IMAP Extensions Supported
+---------------------------
 
 Due to go-imap architecture, some extensions require support from used backend.
 Here are extensions supported by go-imap-sql:
 - [CHILDREN]
 - [APPEND-LIMIT]
-- ~~[UIDPLUS]~~ _(planned)_
 - [MOVE]
 
-#### UIDVALIDITY
+Authentication
+-------------------
+
+go-imap-sql stores passwords hashed using SHA3-512 with salt generated using
+system CSPRNG. Password check is contstant-time operation.
+
+User accounts can have null password. Authentication will always fail for them.
+
+UIDVALIDITY
+-------------
 
 go-imap-sql never invalidates UIDs in an existing mailbox. If mailbox is
 DELETE'd then UIDVALIDITY value changes.
@@ -49,7 +60,8 @@ time on initialization (in `New`).
 You can provide custom pre-seeded struct implementing `math/rand.Source` 
 in `Opts` struct (`PRNG` field).
 
-#### Internal/External BLOBs
+Internal/External BLOBs
+-------------------------
 
 go-imap-sql can store message bodies in two ways: In database rows (works well
 with SQLite3) or in "external" key-value store (works better with any
@@ -64,11 +76,13 @@ will be stored in the external store, but old ones will be still in DB.
 This repository provides simple filesystem-based key-value store
 implementation, see fsstore package.
 
-#### Maddy
+Maddy
+-------
 
 You can use go-imap-sql as part of the [maddy] mail server.
 
-#### imapsql-ctl
+imapsql-ctl
+-------------
 
 For direct access to database you can use imapsql-ctl console utility. See more information in
 separate README [here](cmd/imapsql-ctl).

@@ -31,6 +31,10 @@ type Rand interface {
 // Please use names to reference structure members on creation,
 // fields may be reordered or added without major version increment.
 type Opts struct {
+	// Adding unexported name to structures makes it impossible to
+	// reference fields without naming them explicitly.
+	disallowUnnamedFields struct{}
+
 	// Maximum amount of bytes that backend will accept.
 	// Intended for use with APPENDLIMIT extension.
 	// nil value means no limit, 0 means zero limit (no new messages allowed)
@@ -71,6 +75,8 @@ type Opts struct {
 	// (SQLite3 only) Repack database file into minimal amount of disk space on
 	// Close.
 	// It runs VACUUM and PRAGMA wal_checkpoint(TRUNCATE).
+	// Failures of these operations are ignored and don't affect return value
+	// of Close.
 	MinimizeOnClose bool
 
 	// External storage to use to store message bodies. If specified - all new messages
@@ -85,8 +91,23 @@ type Opts struct {
 type Backend struct {
 	db db
 
+	// Opts structure used to construct this Backend object.
+	//
+	// For most cases it is safe to change options while backend is serving
+	// requests.
+	// Options that should NOT be changed while backend is processing commands:
+	// - ExternalStore
+	// - PRNG
+	// Changes for the following options have no effect after backend initialization:
+	// - AllowSchemaUpgrade
+	// - ExclusiveLock
+	// - CacheSize
+	// - NoWAL
+	// - UpdatesChan
 	Opts Opts
-	DB   *sql.DB
+
+	// database/sql.DB object created by New.
+	DB *sql.DB
 
 	childrenExt bool
 
@@ -183,6 +204,13 @@ type Backend struct {
 	deleteZeroRef         *sql.Stmt
 }
 
+// New creates new Backend instance using provided configuration.
+//
+// driver and dsn arguments are passed directly to sql.Open.
+//
+// Note that it is not safe to create multiple Backend instances working with
+// the single database as they need to keep some state synchronized and there
+// is no measures for this implemented in go-imap-sql.
 func New(driver, dsn string, opts Opts) (*Backend, error) {
 	b := &Backend{
 		fetchStmtsCache:       make(map[string]*sql.Stmt),
@@ -259,6 +287,9 @@ func New(driver, dsn string, opts Opts) (*Backend, error) {
 	return b, nil
 }
 
+// EnableChildrenExt enables generation of /HasChildren and /HasNoChildren
+// attributes for mailboxes. It should be used only if server advertises
+// CHILDREN extension support (see children subpackage).
 func (b *Backend) EnableChildrenExt() bool {
 	b.childrenExt = true
 	return true
@@ -290,18 +321,20 @@ func (b *Backend) Updates() <-chan backend.Update {
 	return b.updates
 }
 
-func (b *Backend) UserCreds(username string) (uint64, []byte, []byte, error) {
+// UserCreds returns internal identifier and credentials for user named
+// username.
+func (b *Backend) UserCreds(username string) (id uint64, passHash []byte, passSalt []byte, err error) {
 	row := b.userCreds.QueryRow(username)
 	id, passHashHex, passSaltHex := uint64(0), "", ""
 	if err := row.Scan(&id, &passHashHex, &passSaltHex); err != nil {
 		return 0, nil, nil, err
 	}
 
-	passHash, err := hex.DecodeString(passHashHex)
+	passHash, err = hex.DecodeString(passHashHex)
 	if err != nil {
 		return 0, nil, nil, err
 	}
-	passSalt, err := hex.DecodeString(passSaltHex)
+	passSalt, err = hex.DecodeString(passSaltHex)
 	if err != nil {
 		return 0, nil, nil, err
 	}
@@ -309,6 +342,11 @@ func (b *Backend) UserCreds(username string) (uint64, []byte, []byte, error) {
 	return id, passHash, passSalt, nil
 }
 
+// CreateUser creates user account with specified credentials.
+//
+// This method can fail if used crypto/rand fails to create enough entropy.
+// It is error to create account with username that already exists.
+// ErrUserAlreadyExists will be returned in this case.
 func (b *Backend) CreateUser(username, password string) error {
 	salt := make([]byte, 16)
 	if n, err := rand.Read(salt); err != nil {
@@ -330,6 +368,10 @@ func (b *Backend) CreateUser(username, password string) error {
 	return errors.Wrap(err, "CreateUser")
 }
 
+// DeleteUser deleted user account with specified username.
+//
+// It is error to delete account that doesn't exist, ErrUserDoesntExists will
+// be returned in this case.
 func (b *Backend) DeleteUser(username string) error {
 	stats, err := b.delUser.Exec(username)
 	if err != nil {
@@ -346,6 +388,13 @@ func (b *Backend) DeleteUser(username string) error {
 	return nil
 }
 
+// SetUserPassword changes password associated with account with specified
+// username.
+//
+// This method can fail if crypto/rand fails to generate enough entropy.
+//
+// It is error to change password for account that doesn't exist,
+// ErrUserDoesntExists will be returned in this case.
 func (b *Backend) SetUserPassword(username, newPassword string) error {
 	salt := make([]byte, 16)
 	if n, err := rand.Read(salt); err != nil {
@@ -373,6 +422,9 @@ func (b *Backend) SetUserPassword(username, newPassword string) error {
 	return nil
 }
 
+// ListUsers returns list of existing usernames.
+//
+// It may return nil slice if no users are registered.
 func (b *Backend) ListUsers() ([]string, error) {
 	var res []string
 	rows, err := b.listUsers.Query()
@@ -393,6 +445,9 @@ func (b *Backend) ListUsers() ([]string, error) {
 	return res, nil
 }
 
+// GetUser creates backend.User object without for the user credentials.
+//
+// If you want to check user credentials, you should use Login or CheckPlain.
 func (b *Backend) GetUser(username string) (backend.User, error) {
 	uid, _, _, err := b.UserCreds(username)
 	if err != nil {
@@ -404,6 +459,11 @@ func (b *Backend) GetUser(username string) (backend.User, error) {
 	return &User{id: uid, username: username, parent: b}, nil
 }
 
+// GetOrCreateUser is a convenience wrapper for GetUser and CreateUser.
+//
+// Users are created with empty password (it is still valid password, be
+// careful with it!).
+// Operation is not atomic!
 func (b *Backend) GetOrCreateUser(username string) (backend.User, error) {
 	uid, _, _, err := b.UserCreds(username)
 	if err != nil {
@@ -439,6 +499,7 @@ func (b *Backend) checkUser(username, password string) (uint64, error) {
 	return uid, nil
 }
 
+// CheckPlain checks the credentials of the user account.
 func (b *Backend) CheckPlain(username, password string) bool {
 	_, err := b.checkUser(username, password)
 	return err == nil
@@ -457,6 +518,9 @@ func (b *Backend) CreateMessageLimit() *uint32 {
 	return b.Opts.MaxMsgBytes
 }
 
+// Change global APPEND limit, Opts.MaxMsgBytes.
+//
+// Provided to implement interfaces used by go-imap-backend-tests.
 func (b *Backend) SetMessageLimit(val *uint32) error {
 	b.Opts.MaxMsgBytes = val
 	return nil

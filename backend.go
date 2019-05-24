@@ -90,6 +90,12 @@ type Opts struct {
 	// by default.
 	// Support for aditional algoritms can be enabled using EnableHashAlgo.
 	DefaultHashAlgo string
+
+	// Bcrypt cost value to use when computing password hashes.
+	// Default is 10. Can't be smaller than 4, can't be bigger than 31.
+	//
+	// It is safe to change it, existing records will not be affected.
+	BcryptCost int
 }
 
 type Backend struct {
@@ -235,6 +241,9 @@ func New(driver, dsn string, opts Opts) (*Backend, error) {
 	b.enableDefaultHashAlgs()
 	if b.Opts.DefaultHashAlgo == "" {
 		b.Opts.DefaultHashAlgo = "sha3-512"
+	}
+	if b.Opts.BcryptCost == 0 {
+		b.Opts.BcryptCost = 10
 	}
 
 	if b.Opts.PRNG != nil {
@@ -385,23 +394,27 @@ func (b *Backend) getUserCreds(tx *sql.Tx, username string) (id uint64, hashAlgo
 // It is error to create account with username that already exists.
 // ErrUserAlreadyExists will be returned in this case.
 func (b *Backend) CreateUser(username, password string) error {
-	return b.createUser(nil, username, &password)
+	return b.createUser(nil, username, b.Opts.DefaultHashAlgo, &password)
+}
+
+func (b *Backend) CreateUserWithHash(username, hashAlgo, password string) error {
+	return b.createUser(nil, username, hashAlgo, &password)
 }
 
 // CreateUserNoPass creates new user account without a password set.
 //
 // It will be unable to log in until SetUserPassword is called for it.
 func (b *Backend) CreateUserNoPass(username string) error {
-	return b.createUser(nil, username, nil)
+	return b.createUser(nil, username, b.Opts.DefaultHashAlgo, nil)
 }
 
-func (b *Backend) createUser(tx *sql.Tx, username string, password *string) error {
+func (b *Backend) createUser(tx *sql.Tx, username string, passHashAlgo string, password *string) error {
 	var passHash, passSalt sql.NullString
 	if password != nil {
 		var err error
 		passHash.Valid = true
 		passSalt.Valid = true
-		passHash.String, passSalt.String, err = b.hashCredentials("sha3-512", *password)
+		passHash.String, passSalt.String, err = b.hashCredentials(passHashAlgo, *password)
 		if err != nil {
 			return errors.Wrap(err, "CreateUser")
 		}
@@ -545,7 +558,7 @@ func (b *Backend) GetOrCreateUser(username string) (backend.User, error) {
 	uid, _, _, _, err := b.getUserCreds(tx, username)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			if err := b.createUser(tx, username, nil); err != nil {
+			if err := b.createUser(tx, username, b.Opts.DefaultHashAlgo, nil); err != nil {
 				return nil, err
 			}
 			uid, _, _, _, err = b.getUserCreds(tx, username)

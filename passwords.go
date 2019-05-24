@@ -7,6 +7,7 @@ import (
 
 	"github.com/emersion/go-imap/backend"
 	"github.com/pkg/errors"
+	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -22,6 +23,12 @@ func (b *Backend) enableDefaultHashAlgs() {
 	}, func(pass, hash []byte) bool {
 		digest := sha3.Sum512(pass)
 		return subtle.ConstantTimeCompare(digest[:], hash) == 1
+	})
+	b.EnableHashAlgo("bcrypt", func(pass []byte) []byte {
+		digest, _ := bcrypt.GenerateFromPassword(pass, b.Opts.BcryptCost)
+		return digest[:]
+	}, func(pass, hash []byte) bool {
+		return bcrypt.CompareHashAndPassword(pass, hash) == nil
 	})
 }
 

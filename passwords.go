@@ -10,13 +10,35 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
+type hashAlgorithm struct {
+	hashFunc  func([]byte) []byte
+	checkFunc func([]byte, []byte) bool
+}
+
+func (b *Backend) enableDefaultHashAlgs() {
+	b.EnableHashAlgo("sha3-512", func(pass []byte) []byte {
+		digest := sha3.Sum512(pass)
+		return digest[:]
+	}, func(pass, hash []byte) bool {
+		digest := sha3.Sum512(pass)
+		return subtle.ConstantTimeCompare(digest[:], hash) == 1
+	})
+}
+
+func (b *Backend) EnableHashAlgo(name string,
+	hashFunc func(saltedPass []byte) []byte,
+	checkFunc func(saltedPass, hash []byte) bool) {
+	b.hashAlgorithms[name] = hashAlgorithm{hashFunc, checkFunc}
+}
+
 func (b *Backend) checkUser(username, password string) (uint64, error) {
 	uid, hashAlgo, passHash, passSalt, err := b.getUserCreds(nil, username)
 	if err != nil {
 		return 0, backend.ErrInvalidCredentials
 	}
 
-	if hashAlgo != "sha3-512" {
+	algoFuncs, ok := b.hashAlgorithms[hashAlgo]
+	if !ok {
 		return 0, errors.New("unsupported hash algorithm")
 	}
 
@@ -27,8 +49,7 @@ func (b *Backend) checkUser(username, password string) (uint64, error) {
 	pass := make([]byte, 0, len(password)+len(passSalt))
 	pass = append(pass, []byte(password)...)
 	pass = append(pass, passSalt...)
-	digest := sha3.Sum512(pass)
-	if subtle.ConstantTimeCompare(digest[:], passHash) != 1 {
+	if !algoFuncs.checkFunc(pass, passHash) {
 		return uid, backend.ErrInvalidCredentials
 	}
 
@@ -43,15 +64,16 @@ func (b *Backend) hashCredentials(algo, password string) (digest, salt string, e
 		return "", "", errors.New("failed to read enough entropy for salt from CSPRNG")
 	}
 
-	if algo != "sha3-512" {
+	algoFuncs, ok := b.hashAlgorithms[algo]
+	if !ok {
 		return "", "", errors.New("unsupported hash algorithm")
 	}
 
 	pass := make([]byte, 0, len(password)+len(saltBytes))
 	pass = append(pass, []byte(password)...)
 	pass = append(pass, saltBytes...)
-	digestBytes := sha3.Sum512(pass)
-	digest = "sha3-512:" + hex.EncodeToString(digestBytes[:])
+	digestBytes := algoFuncs.hashFunc(pass)
+	digest = algo + ":" + hex.EncodeToString(digestBytes[:])
 	salt = hex.EncodeToString(saltBytes)
 
 	return digest, salt, nil

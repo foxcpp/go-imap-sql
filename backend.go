@@ -83,6 +83,13 @@ type Opts struct {
 
 	// Automatically update database schema on imapsql.New.
 	AllowSchemaUpgrade bool
+
+	// Hash algorithm to use for authentication passwords when no algorithm is
+	// explicitly specified.
+	// "sha3-512" and "bcrypt" are supported out of the box. "sha3-512" is used
+	// by default.
+	// Support for aditional algoritms can be enabled using EnableHashAlgo.
+	DefaultHashAlgo string
 }
 
 type Backend struct {
@@ -108,7 +115,8 @@ type Backend struct {
 
 	childrenExt bool
 
-	prng Rand
+	prng           Rand
+	hashAlgorithms map[string]hashAlgorithm
 
 	updates chan backend.Update
 	// updates channel is lazily initalized, so we need to ensure thread-safety.
@@ -212,6 +220,7 @@ func New(driver, dsn string, opts Opts) (*Backend, error) {
 	b := &Backend{
 		fetchStmtsCache:       make(map[string]*sql.Stmt),
 		flagsSearchStmtsCache: make(map[string]*sql.Stmt),
+		hashAlgorithms:        make(map[string]hashAlgorithm),
 	}
 	var err error
 
@@ -221,6 +230,11 @@ func New(driver, dsn string, opts Opts) (*Backend, error) {
 		if b.updates == nil {
 			b.updates = make(chan backend.Update, 20)
 		}
+	}
+
+	b.enableDefaultHashAlgs()
+	if b.Opts.DefaultHashAlgo == "" {
+		b.Opts.DefaultHashAlgo = "sha3-512"
 	}
 
 	if b.Opts.PRNG != nil {
@@ -446,12 +460,19 @@ func (b *Backend) ResetPassword(username string) error {
 // SetUserPassword changes password associated with account with specified
 // username.
 //
+// Opts.DefaultHashAlgo is used for password hashing.
 // This method can fail if crypto/rand fails to generate enough entropy.
 //
 // It is error to change password for account that doesn't exist,
 // ErrUserDoesntExists will be returned in this case.
 func (b *Backend) SetUserPassword(username, newPassword string) error {
-	digest, salt, err := b.hashCredentials("sha3-512", newPassword)
+	return b.SetUserPasswordWithHash(b.Opts.DefaultHashAlgo, username, newPassword)
+}
+
+// SetUserPasswordWithHash is a version of SetUserPassword that allows to
+// specify any supported hash algorithm instead of Opts.DefaultHashAlgo.
+func (b *Backend) SetUserPasswordWithHash(hashAlgo, username, newPassword string) error {
+	digest, salt, err := b.hashCredentials(hashAlgo, newPassword)
 	if err != nil {
 		return err
 	}

@@ -1,8 +1,6 @@
 package imapsql
 
 import (
-	"crypto/rand"
-	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
 	mathrand "math/rand"
@@ -13,7 +11,6 @@ import (
 	imap "github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/backend"
 	"github.com/pkg/errors"
-	"golang.org/x/crypto/sha3"
 )
 
 var (
@@ -327,11 +324,14 @@ func (b *Backend) Updates() <-chan backend.Update {
 
 // UserCreds returns internal identifier and credentials for user named
 // username.
-func (b *Backend) UserCreds(username string) (id uint64, passHash []byte, passSalt []byte, err error) {
+//
+// It is exported for use by extensions and is not considered part of the
+// public API. Hence it can be changed between minor releases.
+func (b *Backend) UserCreds(username string) (id uint64, hashAlgo string, passHash []byte, passSalt []byte, err error) {
 	return b.getUserCreds(nil, username)
 }
 
-func (b *Backend) getUserCreds(tx *sql.Tx, username string) (id uint64, passHash []byte, passSalt []byte, err error) {
+func (b *Backend) getUserCreds(tx *sql.Tx, username string) (id uint64, hashAlgo string, passHash []byte, passSalt []byte, err error) {
 	var row *sql.Row
 	if tx != nil {
 		row = tx.Stmt(b.userCreds).QueryRow(username)
@@ -340,23 +340,29 @@ func (b *Backend) getUserCreds(tx *sql.Tx, username string) (id uint64, passHash
 	}
 	var passHashHex, passSaltHex sql.NullString
 	if err := row.Scan(&id, &passHashHex, &passSaltHex); err != nil {
-		return 0, nil, nil, err
+		return 0, "", nil, nil, err
 	}
 
 	if !passHashHex.Valid || !passSaltHex.Valid {
-		return id, nil, nil, nil
+		return id, "", nil, nil, nil
 	}
 
-	passHash, err = hex.DecodeString(passHashHex.String)
+	hashHexParts := strings.Split(passHashHex.String, ":")
+	if len(hashHexParts) != 2 {
+		return id, "", nil, nil, errors.Errorf("malformed database column value for password, need algo:hexhash, got %s", passHashHex.String)
+	}
+
+	hashAlgo = hashHexParts[0]
+	passHash, err = hex.DecodeString(hashHexParts[1])
 	if err != nil {
-		return 0, nil, nil, err
+		return 0, "", nil, nil, err
 	}
 	passSalt, err = hex.DecodeString(passSaltHex.String)
 	if err != nil {
-		return 0, nil, nil, err
+		return 0, "", nil, nil, err
 	}
 
-	return id, passHash, passSalt, nil
+	return id, hashAlgo, passHash, passSalt, nil
 }
 
 // CreateUser creates user account with specified credentials.
@@ -378,22 +384,13 @@ func (b *Backend) CreateUserNoPass(username string) error {
 func (b *Backend) createUser(tx *sql.Tx, username string, password *string) error {
 	var passHash, passSalt sql.NullString
 	if password != nil {
-		salt := make([]byte, 16)
-		if n, err := rand.Read(salt); err != nil {
-			return errors.Wrap(err, "CreateUser")
-		} else if n != 16 {
-			return errors.New("CreateUser: failed to read enough entropy for salt from CSPRNG")
-		}
-
-		pass := make([]byte, 0, len(*password)+len(salt))
-		pass = append(pass, []byte(*password)...)
-		pass = append(pass, salt...)
-		digest := sha3.Sum512(pass)
-
+		var err error
 		passHash.Valid = true
-		passHash.String = hex.EncodeToString(digest[:])
 		passSalt.Valid = true
-		passSalt.String = hex.EncodeToString(salt)
+		passHash.String, passSalt.String, err = b.hashCredentials("sha3-512", *password)
+		if err != nil {
+			return errors.Wrap(err, "CreateUser")
+		}
 	}
 
 	var err error
@@ -454,19 +451,12 @@ func (b *Backend) ResetPassword(username string) error {
 // It is error to change password for account that doesn't exist,
 // ErrUserDoesntExists will be returned in this case.
 func (b *Backend) SetUserPassword(username, newPassword string) error {
-	salt := make([]byte, 16)
-	if n, err := rand.Read(salt); err != nil {
-		return errors.Wrap(err, "SetUserPassword")
-	} else if n != 16 {
-		return errors.New("SetUserPassword: failed to read enough entropy for salt from CSPRNG")
+	digest, salt, err := b.hashCredentials("sha3-512", newPassword)
+	if err != nil {
+		return err
 	}
 
-	pass := make([]byte, 0, len(newPassword)+len(salt))
-	pass = append(pass, []byte(newPassword)...)
-	pass = append(pass, salt...)
-	digest := sha3.Sum512(pass)
-
-	stats, err := b.setUserPass.Exec(hex.EncodeToString(digest[:]), hex.EncodeToString(salt), username)
+	stats, err := b.setUserPass.Exec(digest, salt, username)
 	if err != nil {
 		return errors.Wrap(err, "SetUserPassword")
 	}
@@ -507,7 +497,7 @@ func (b *Backend) ListUsers() ([]string, error) {
 //
 // If you want to check user credentials, you should use Login or CheckPlain.
 func (b *Backend) GetUser(username string) (backend.User, error) {
-	uid, _, _, err := b.UserCreds(username)
+	uid, _, _, _, err := b.UserCreds(username)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrUserDoesntExists
@@ -531,13 +521,13 @@ func (b *Backend) GetOrCreateUser(username string) (backend.User, error) {
 	}
 	defer tx.Rollback()
 
-	uid, _, _, err := b.getUserCreds(tx, username)
+	uid, _, _, _, err := b.getUserCreds(tx, username)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			if err := b.createUser(tx, username, nil); err != nil {
 				return nil, err
 			}
-			uid, _, _, err = b.getUserCreds(tx, username)
+			uid, _, _, _, err = b.getUserCreds(tx, username)
 			if err != nil {
 				return nil, err
 			}
@@ -546,27 +536,6 @@ func (b *Backend) GetOrCreateUser(username string) (backend.User, error) {
 		}
 	}
 	return &User{id: uid, username: username, parent: b}, tx.Commit()
-}
-
-func (b *Backend) checkUser(username, password string) (uint64, error) {
-	uid, passHash, passSalt, err := b.getUserCreds(nil, username)
-	if err != nil {
-		return 0, backend.ErrInvalidCredentials
-	}
-
-	if passHash == nil || passSalt == nil {
-		return uid, backend.ErrInvalidCredentials
-	}
-
-	pass := make([]byte, 0, len(password)+len(passSalt))
-	pass = append(pass, []byte(password)...)
-	pass = append(pass, passSalt...)
-	digest := sha3.Sum512(pass)
-	if subtle.ConstantTimeCompare(digest[:], passHash) != 1 {
-		return uid, backend.ErrInvalidCredentials
-	}
-
-	return uid, nil
 }
 
 // CheckPlain checks the credentials of the user account.

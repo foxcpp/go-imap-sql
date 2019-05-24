@@ -1,9 +1,7 @@
 package imapsql
 
 import (
-	"bytes"
 	"database/sql"
-	"log"
 
 	"github.com/pkg/errors"
 )
@@ -42,70 +40,16 @@ func (b *Backend) upgradeSchema(currentVer int) error {
 	}
 	defer tx.Rollback()
 
-	if currentVer == 1 {
-		if err := b.schemaUpgrade1To2(tx); err != nil {
-			return errors.Wrap(err, "1->2 upgrade")
-		}
-		currentVer = 2
-	}
+	// Functions for schema upgrade go here. Example:
+	//if currentVer == 1 {
+	//	if err := b.schemaUpgrade1To2(tx); err != nil {
+	//		return errors.Wrap(err, "1->2 upgrade")
+	//	}
+	//	currentVer = 2
+	//}
 
 	if currentVer != SchemaVersion {
 		return errors.New("database schema version is too old and can't be upgraded using this go-imap-sql version")
 	}
 	return tx.Commit()
-}
-
-func (b *Backend) schemaUpgrade1To2(tx *sql.Tx) error {
-	rows, err := tx.Query(b.db.rewriteSQL(`SELECT mboxId, msgId, body FROM msgs`))
-	if err != nil {
-		return err
-	}
-
-	if _, err := tx.Exec(b.db.rewriteSQL(`ALTER TABLE msgs ADD COLUMN header LONGTEXT`)); err != nil {
-		return errors.Wrap(err, "add col header")
-	}
-	// TODO: Figure out how to add NOT NULL constrait.
-	if _, err := tx.Exec(b.db.rewriteSQL(`ALTER TABLE msgs ADD COLUMN bodyStructure LONGTEXT`)); err != nil {
-		return errors.Wrap(err, "add col bodyStructure")
-	}
-	if _, err := tx.Exec(b.db.rewriteSQL(`ALTER TABLE msgs ADD COLUMN cachedHeader LONGTEXT`)); err != nil {
-		return errors.Wrap(err, "add col cachedHeader")
-	}
-	if _, err := tx.Exec(b.db.rewriteSQL(`ALTER TABLE msgs ADD COLUMN extBodyKey VARCHAR(255) REFERENCES extKeys(id) ON DELETE RESTRICT DEFAULT NULL`)); err != nil {
-		return errors.Wrap(err, "add col extBodyKey")
-	}
-
-	updStmt, err := tx.Prepare(b.db.rewriteSQL(`
-		UPDATE msgs
-		SET body = ?,
-			header = ?,
-			bodyStructure = ?,
-			cachedHeader = ?
-		WHERE mboxId = ?
-		AND msgId = ?`))
-	if err != nil {
-		return err
-	}
-
-	for rows.Next() {
-		var mboxId, msgId uint
-		var srcBody []byte
-
-		if err := rows.Scan(&mboxId, &msgId, &srcBody); err != nil {
-			return err
-		}
-
-		hdr, body := splitHeader(srcBody)
-		bodyStruct, cachedHdr, err := extractCachedData(bytes.NewReader(srcBody))
-		if err != nil {
-			log.Printf("Possibly non RFC 282 message in database, it will remain in DB but will be unreadable, mboxId = %d, msgId = %d\n", mboxId, msgId)
-			log.Printf("extractCachedData failed: %v\n", err)
-		}
-
-		if _, err := updStmt.Exec(body, hdr, bodyStruct, cachedHdr, mboxId, msgId); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }

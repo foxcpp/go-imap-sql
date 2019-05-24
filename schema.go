@@ -47,9 +47,18 @@ func (b *Backend) upgradeSchema(currentVer int) error {
 	//	}
 	//	currentVer = 2
 	//}
+	if currentVer == 2 {
+		if err := b.schemaUpgrade2To3(tx); err != nil {
+			return errors.Wrap(err, "2->3 upgrade")
+		}
+	}
 
 	if currentVer != SchemaVersion {
 		return errors.New("database schema version is too old and can't be upgraded using this go-imap-sql version")
 	}
 	return tx.Commit()
+}
+
+func (b *Backend) schemaUpgrade2To3(tx *sql.Tx) error {
+	return errors.New("not implemented")
 }

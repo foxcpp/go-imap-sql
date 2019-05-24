@@ -60,5 +60,6 @@ func (b *Backend) upgradeSchema(currentVer int) error {
 }
 
 func (b *Backend) schemaUpgrade2To3(tx *sql.Tx) error {
-	return errors.New("not implemented")
+	_, err := tx.Exec(b.db.rewriteSQL(`UPDATE users SET password = 'sha3-512:' || password`))
+	return err
 }

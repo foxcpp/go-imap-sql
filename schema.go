@@ -35,23 +35,27 @@ func (b *Backend) setSchemaVersion(newVer int) error {
 	return err
 }
 
-func (b *Backend) upgradeSchema(previousVer int) error {
+func (b *Backend) upgradeSchema(currentVer int) error {
 	tx, err := b.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	if previousVer < 2 {
-		if err := b.schemaUpgradeTo2(tx); err != nil {
+	if currentVer == 1 {
+		if err := b.schemaUpgrade1To2(tx); err != nil {
 			return errors.Wrap(err, "1->2 upgrade")
 		}
+		currentVer = 2
 	}
 
+	if currentVer != SchemaVersion {
+		return errors.New("database schema version is too old and can't be upgraded using this go-imap-sql version")
+	}
 	return tx.Commit()
 }
 
-func (b *Backend) schemaUpgradeTo2(tx *sql.Tx) error {
+func (b *Backend) schemaUpgrade1To2(tx *sql.Tx) error {
 	rows, err := tx.Query(b.db.rewriteSQL(`SELECT mboxId, msgId, body FROM msgs`))
 	if err != nil {
 		return err

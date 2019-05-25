@@ -9,6 +9,7 @@ import (
 	imapsql "github.com/foxcpp/go-imap-sql"
 	"github.com/foxcpp/go-imap-sql/fsstore"
 	"github.com/urfave/cli"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var backend *imapsql.Backend
@@ -287,6 +288,16 @@ func main() {
 							Name:  "null,n",
 							Usage: "Create account with null password",
 						},
+						cli.StringFlag{
+							Name:  "hash",
+							Usage: "Use specified hash algorithm. Valid values: sha3-512, bcrypt",
+							Value: "sha3-512",
+						},
+						cli.IntFlag{
+							Name:  "bcrypt-cost",
+							Usage: "Specify bcrypt cost value",
+							Value: bcrypt.DefaultCost,
+						},
 					},
 					Action: usersCreate,
 				},
@@ -315,6 +326,16 @@ func main() {
 						cli.BoolFlag{
 							Name:  "null,n",
 							Usage: "Set password to null",
+						},
+						cli.StringFlag{
+							Name:  "hash",
+							Usage: "Use specified hash algorithm. Valid values: sha3-512, bcrypt",
+							Value: "sha3-512",
+						},
+						cli.IntFlag{
+							Name:  "bcrypt-cost",
+							Usage: "Specify bcrypt cost value",
+							Value: bcrypt.DefaultCost,
 						},
 					},
 					Action: usersPassword,

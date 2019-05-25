@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/urfave/cli"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func usersList(ctx *cli.Context) error {
@@ -45,6 +46,19 @@ func usersCreate(ctx *cli.Context) error {
 
 	if ctx.IsSet("null") {
 		return backend.CreateUserNoPass(username)
+	}
+
+	if ctx.IsSet("hash") {
+		backend.Opts.DefaultHashAlgo = ctx.String("hash")
+	}
+	if ctx.IsSet("bcrypt-cost") {
+		if ctx.Int("bcrypt-cost") > bcrypt.MaxCost {
+			return errors.New("Error: too big bcrypt cost")
+		}
+		if ctx.Int("bcrypt-cost") < bcrypt.MinCost {
+			return errors.New("Error: too small bcrypt cost")
+		}
+		backend.Opts.BcryptCost = ctx.Int("bcrypt-cost")
 	}
 
 	var pass string
@@ -105,6 +119,19 @@ func usersPassword(ctx *cli.Context) error {
 
 	if ctx.IsSet("null") {
 		return backend.ResetPassword(username)
+	}
+
+	if ctx.IsSet("hash") {
+		backend.Opts.DefaultHashAlgo = ctx.String("hash")
+	}
+	if ctx.IsSet("bcrypt-cost") {
+		if ctx.Int("bcrypt-cost") > bcrypt.MaxCost {
+			return errors.New("Error: too big bcrypt cost")
+		}
+		if ctx.Int("bcrypt-cost") < bcrypt.MinCost {
+			return errors.New("Error: too small bcrypt cost")
+		}
+		backend.Opts.BcryptCost = ctx.Int("bcrypt-cost")
 	}
 
 	var pass string

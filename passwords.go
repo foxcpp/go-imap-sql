@@ -28,7 +28,7 @@ func (b *Backend) enableDefaultHashAlgs() {
 		digest, _ := bcrypt.GenerateFromPassword(pass, b.Opts.BcryptCost)
 		return digest[:]
 	}, func(pass, hash []byte) bool {
-		return bcrypt.CompareHashAndPassword(pass, hash) == nil
+		return bcrypt.CompareHashAndPassword(hash, pass) == nil
 	})
 }
 

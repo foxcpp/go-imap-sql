@@ -30,13 +30,15 @@ Here are extensions supported by go-imap-sql:
 - [APPEND-LIMIT]
 - [MOVE]
 
-Authentication
+Passwords hashing
 -------------------
 
-go-imap-sql stores passwords hashed using SHA3-512 with salt generated using
-system CSPRNG. Password check is contstant-time operation.
+go-imap-sql uses bcrypt hash function for account passwords. This makes passwords
+hard to brute-force, but also significantly increases CPU load.
 
-User accounts can have null password. Authentication will always fail for them.
+Backend users should either change hash function to sha3-512 (see Opts
+structure documentation) or implement restrictions on authentication attempts
+that will block access after certain number of attempts.
 
 secure_delete
 -------------

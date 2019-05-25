@@ -378,10 +378,7 @@ func (b *Backend) getUserCreds(tx *sql.Tx, username string) (id uint64, hashAlgo
 	}
 
 	hashAlgo = hashHexParts[0]
-	passHash, err = hex.DecodeString(hashHexParts[1])
-	if err != nil {
-		return 0, "", nil, nil, err
-	}
+	passHash = []byte(hashHexParts[1])
 	passSalt, err = hex.DecodeString(passSaltHex.String)
 	if err != nil {
 		return 0, "", nil, nil, err

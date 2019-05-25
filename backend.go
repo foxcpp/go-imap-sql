@@ -86,7 +86,7 @@ type Opts struct {
 
 	// Hash algorithm to use for authentication passwords when no algorithm is
 	// explicitly specified.
-	// "sha3-512" and "bcrypt" are supported out of the box. "sha3-512" is used
+	// "sha3-512" and "bcrypt" are supported out of the box. "bcrypt" is used
 	// by default.
 	// Support for aditional algoritms can be enabled using EnableHashAlgo.
 	DefaultHashAlgo string
@@ -240,7 +240,7 @@ func New(driver, dsn string, opts Opts) (*Backend, error) {
 
 	b.enableDefaultHashAlgs()
 	if b.Opts.DefaultHashAlgo == "" {
-		b.Opts.DefaultHashAlgo = "sha3-512"
+		b.Opts.DefaultHashAlgo = "bcrypt"
 	}
 	if b.Opts.BcryptCost == 0 {
 		b.Opts.BcryptCost = 10

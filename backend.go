@@ -215,6 +215,8 @@ type Backend struct {
 	deleteZeroRef         *sql.Stmt
 }
 
+var defaultPassHashAlgo = "bcrypt"
+
 // New creates new Backend instance using provided configuration.
 //
 // driver and dsn arguments are passed directly to sql.Open.
@@ -240,7 +242,7 @@ func New(driver, dsn string, opts Opts) (*Backend, error) {
 
 	b.enableDefaultHashAlgs()
 	if b.Opts.DefaultHashAlgo == "" {
-		b.Opts.DefaultHashAlgo = "bcrypt"
+		b.Opts.DefaultHashAlgo = defaultPassHashAlgo
 	}
 	if b.Opts.BcryptCost == 0 {
 		b.Opts.BcryptCost = 10

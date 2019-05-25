@@ -12,9 +12,12 @@ go:
 
 matrix:
   include:
-  # also test against the latest Go version
+  # this build job is catch-all for "different" test conditions
   - go: "1.x"
     env: TEST_DB=sqlite3 TEST_DSN=":memory:" GO111MODULE=on SHUFFLE_CASES=1 PARALLEL_TESTS=2
+    script:
+    - go test ./... -race -coverprofile=coverage.txt -covermode=atomic -tags $TEST_DB -count 8 -p $PARALLEL_TESTS -ldflags '-X github.com/foxcpp/go-imap-sql.defaultPassHashAlgo=sha3-512'
+    - go test ./... -v -run 'TestBackend/User.*' -coverprofile=coverage-users.txt -covermode=atomic -tags $TEST_DB
   - env: TEST_DB=sqlite3 TEST_DSN=":memory:" GO111MODULE=on SHUFFLE_CASES=1 PARALLEL_TESTS=2
   - env: TEST_DB=mysql TEST_DSN="root@tcp(localhost)/sqlmail_test" GO111MODULE=on SHUFFLE_CASES=1 PARALLEL_TESTS=1
     addons:
@@ -31,7 +34,7 @@ before_script:
 - go mod verify # ensure cache consistency
 
 script:
-- go test ./... -race -coverprofile=coverage.txt -covermode=atomic -tags $TEST_DB -count 8 -p $PARALLEL_TESTS
+- go test ./... -race -coverprofile=coverage.txt -covermode=atomic -tags $TEST_DB -count 8 -p $PARALLEL_TESTS -ldflags '-X github.com/foxcpp/go-imap-sql.defaultPassHashAlgo=sha3-512'
 
 after_success:
 - bash <(curl -s https://codecov.io/bash)

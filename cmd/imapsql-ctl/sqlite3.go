@@ -1,4 +1,4 @@
-// +build sqlite3
+// +build cgo
 
 package main
 

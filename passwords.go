@@ -3,6 +3,7 @@ package imapsql
 import (
 	"crypto/rand"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/hex"
 
 	"github.com/emersion/go-imap/backend"
@@ -52,7 +53,10 @@ func (b *Backend) EnableHashAlgo(name string,
 func (b *Backend) checkUser(username, password string) (uint64, error) {
 	uid, hashAlgo, passHash, passSalt, err := b.getUserCreds(nil, username)
 	if err != nil {
-		return 0, backend.ErrInvalidCredentials
+		if err == sql.ErrNoRows {
+			return 0, backend.ErrInvalidCredentials
+		}
+		return 0, err
 	}
 
 	algoFuncs, ok := b.hashAlgorithms[hashAlgo]

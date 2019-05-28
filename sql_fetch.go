@@ -28,6 +28,8 @@ var cachedHeaderFields = map[string]struct{}{
 	"in-reply-to":  struct{}{},
 	"content-type": struct{}{},
 	"reply-to":     struct{}{},
+	"importance":   struct{}{},
+	"list-post":    struct{}{},
 
 	// Requested by Apple Mail
 	"x-uniform-type-identifier":       struct{}{},

@@ -272,6 +272,13 @@ func (m *Mailbox) processBody(literal imap.Literal) (headerBlob, bodyBlob, bodyS
 		return nil, nil, nil, nil, sql.NullString{}, errors.Wrap(err, "CreateMessage (extractCachedData)")
 	}
 
+	// Consume all remaining body so io.TeeReader used with external store will
+	// copy everything to extWriter.
+	_, err = io.Copy(ioutil.Discard, bodyReader)
+	if err != nil {
+		return nil, nil, nil, nil, sql.NullString{}, errors.Wrap(err, "CreateMessage (ReadAll consume)")
+	}
+
 	return
 }
 

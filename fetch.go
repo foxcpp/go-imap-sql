@@ -133,6 +133,9 @@ func (m *Mailbox) scanMessages(rows *sql.Rows, items []imap.FetchItem, ch chan<-
 			return err
 		}
 
+		// Don't take header fields from previous message.
+		data.parsedHeader = nil
+
 		if data.cachedHeaderBlob != nil {
 			if err := jsoniter.Unmarshal(data.cachedHeaderBlob, &data.cachedHeader); err != nil {
 				return err

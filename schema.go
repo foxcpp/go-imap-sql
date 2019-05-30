@@ -29,8 +29,20 @@ func (b *Backend) setSchemaVersion(newVer int) error {
 		return err
 	}
 
-	_, err = b.db.Exec(`UPDATE schema_version SET version = ?`, newVer)
-	return err
+	info, err := b.db.Exec(`UPDATE schema_version SET version = ?`, newVer)
+	if err != nil {
+		return err
+	}
+	affected, err := info.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if affected == 0 {
+		_, err = b.db.Exec(`INSERT INTO schema_version VALUES (?)`, newVer)
+	}
+
+	return nil
 }
 
 func (b *Backend) upgradeSchema(currentVer int) error {
@@ -51,6 +63,7 @@ func (b *Backend) upgradeSchema(currentVer int) error {
 		if err := b.schemaUpgrade2To3(tx); err != nil {
 			return errors.Wrap(err, "2->3 upgrade")
 		}
+		currentVer = 3
 	}
 
 	if currentVer != SchemaVersion {

@@ -133,8 +133,8 @@ func (m *Mailbox) scanMessages(rows *sql.Rows, items []imap.FetchItem, ch chan<-
 			return err
 		}
 
-		// Don't take header fields from previous message.
 		data.parsedHeader = nil
+		data.bodyStructure = nil
 
 		if data.cachedHeaderBlob != nil {
 			if err := jsoniter.Unmarshal(data.cachedHeaderBlob, &data.cachedHeader); err != nil {
@@ -142,9 +142,6 @@ func (m *Mailbox) scanMessages(rows *sql.Rows, items []imap.FetchItem, ch chan<-
 			}
 		}
 		if data.bodyStructureBlob != nil {
-			// don't reuse structure already sent to the channel
-			data.bodyStructure = nil
-
 			if err := jsoniter.Unmarshal(data.bodyStructureBlob, &data.bodyStructure); err != nil {
 				return err
 			}
@@ -219,7 +216,7 @@ func (m *Mailbox) extractBodyPart(item imap.FetchItem, data *scanData, msg *imap
 
 		msg.Body[sect], err = backendutil.FetchBodySection(ent, sect)
 		if err != nil {
-			msg.Body[sect] = bytes.NewReader(nil)
+			return err
 		}
 	}
 

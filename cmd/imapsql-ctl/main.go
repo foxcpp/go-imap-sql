@@ -71,9 +71,10 @@ func main() {
 	stdinScnr = bufio.NewScanner(os.Stdin)
 
 	app := cli.NewApp()
+	app.Name = "imapsql-ctl"
+	app.Copyright = "(c) 2019 Max Mazurov <fox.cpp@disroot.org>\n   Published under the terms of the MIT license (https://opensource.org/licenses/MIT)"
 	app.Usage = "go-imap-sql database management utility"
 	app.Version = fmt.Sprintf("%s (go-imap-sql), %d (DB schema)", imapsql.VersionStr, imapsql.SchemaVersion)
-	app.HideVersion = false
 	app.After = closeBackend
 
 	app.Flags = []cli.Flag{

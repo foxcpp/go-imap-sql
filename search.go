@@ -8,7 +8,6 @@ import (
 
 	imap "github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/backend/backendutil"
-	"github.com/emersion/go-message"
 	"github.com/emersion/go-message/textproto"
 )
 
@@ -66,30 +65,25 @@ func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uin
 			flags = nil
 		}
 
-		var ent *message.Entity
+		var parsedHeader textproto.Header
+		var bufferedBody *bufio.Reader
 		if needBody {
 			body, err := m.openBody(extBodyKey, headerBlob, bodyBlob)
 			if err != nil {
 				return nil, err
 			}
-			bufferedBody := bufio.NewReader(body)
+			bufferedBody = bufio.NewReader(body)
 
-			parsedHeader, err := textproto.ReadHeader(bufferedBody)
-			if err != nil {
-				return nil, err
-			}
-			ent, err = message.New(message.Header{Header: parsedHeader}, bufferedBody)
+			parsedHeader, err = textproto.ReadHeader(bufferedBody)
 			if err != nil {
 				return nil, err
 			}
 		} else {
-			ent, err = message.New(message.Header{}, nil)
-			if err != nil {
-				panic(err)
-			}
+			parsedHeader = textproto.Header{}
+			bufferedBody = nil
 		}
 
-		matched, err := backendutil.Match(ent, seqNum, msgId, time.Unix(dateUnix, 0), flags, criteria)
+		matched, err := backendutil.Match(parsedHeader, bufferedBody, seqNum, msgId, time.Unix(dateUnix, 0), flags, criteria)
 		if err != nil {
 			return nil, err
 		}

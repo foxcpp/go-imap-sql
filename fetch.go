@@ -11,7 +11,6 @@ import (
 
 	imap "github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/backend/backendutil"
-	"github.com/emersion/go-message"
 	"github.com/emersion/go-message/textproto"
 	jsoniter "github.com/json-iterator/go"
 )
@@ -78,7 +77,7 @@ type scanData struct {
 	bodyReader    io.ReadCloser
 	bodyStructure *imap.BodyStructure
 	cachedHeader  map[string][]string
-	parsedHeader  *message.Header
+	parsedHeader  *textproto.Header
 }
 
 func makeScanArgs(data *scanData, rows *sql.Rows) ([]interface{}, error) {
@@ -195,7 +194,6 @@ func (m *Mailbox) extractBodyPart(item imap.FetchItem, data *scanData, msg *imap
 			return err
 		}
 	case needHeader, needFullBody:
-		var ent *message.Entity
 		body, err := m.openBody(data.extBodyKey, data.headerBlob, data.bodyBlob)
 		if err != nil {
 			return err
@@ -207,14 +205,10 @@ func (m *Mailbox) extractBodyPart(item imap.FetchItem, data *scanData, msg *imap
 			if err != nil {
 				return err
 			}
-			data.parsedHeader = &message.Header{Header: hdr}
-		}
-		ent, err = message.New(*data.parsedHeader, bufferedBody)
-		if err != nil {
-			return err
+			data.parsedHeader = &hdr
 		}
 
-		msg.Body[sect], err = backendutil.FetchBodySection(ent, sect)
+		msg.Body[sect], err = backendutil.FetchBodySection(*data.parsedHeader, bufferedBody, sect)
 		if err != nil {
 			return err
 		}
@@ -235,7 +229,7 @@ func (m *Mailbox) openBody(extBodyKey sql.NullString, headerBlob, bodyBlob []byt
 }
 
 func headerSubsetFromCached(sect *imap.BodySectionName, cachedHeader map[string][]string) (imap.Literal, error) {
-	hdr := message.Header{}
+	hdr := textproto.Header{}
 	for i := len(sect.Fields) - 1; i >= 0; i-- {
 		field := sect.Fields[i]
 
@@ -247,11 +241,9 @@ func headerSubsetFromCached(sect *imap.BodySectionName, cachedHeader map[string]
 	}
 
 	buf := new(bytes.Buffer)
-	w, err := message.CreateWriter(buf, hdr)
-	if err != nil {
+	if err := textproto.WriteHeader(buf, hdr); err != nil {
 		return nil, err
 	}
-	w.Close()
 
 	var l imap.Literal = buf
 	if sect.Partial != nil {

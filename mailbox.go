@@ -1,6 +1,7 @@
 package imapsql
 
 import (
+	"bufio"
 	"bytes"
 	"database/sql"
 	"io"
@@ -12,7 +13,7 @@ import (
 	appendlimit "github.com/emersion/go-imap-appendlimit"
 	"github.com/emersion/go-imap/backend"
 	"github.com/emersion/go-imap/backend/backendutil"
-	"github.com/emersion/go-message"
+	"github.com/emersion/go-message/textproto"
 	"github.com/foxcpp/go-imap-sql/children"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/pkg/errors"
@@ -215,19 +216,21 @@ func splitHeader(blob []byte) (header, body []byte) {
 }
 
 func extractCachedData(bodyReader io.Reader) (bodyStructBlob, cachedHeadersBlob []byte, err error) {
-	msg, err := message.Read(bodyReader)
+	bufferedBody := bufio.NewReader(bodyReader)
+	hdr, err := textproto.ReadHeader(bufferedBody)
 	if err != nil {
 		return nil, nil, err
 	}
+
 	hdrs := make(map[string][]string, len(cachedHeaderFields))
-	for field := msg.Header.Fields(); field.Next(); {
+	for field := hdr.Fields(); field.Next(); {
 		if _, ok := cachedHeaderFields[strings.ToLower(field.Key())]; !ok {
 			continue
 		}
 		hdrs[strings.ToLower(field.Key())] = append(hdrs[strings.ToLower(field.Key())], field.Value())
 	}
 
-	bodyStruct, err := backendutil.FetchBodyStructure(msg, true)
+	bodyStruct, err := backendutil.FetchBodyStructure(hdr, bufferedBody, true)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -163,6 +163,7 @@ type Backend struct {
 	msgFlagsUid        *sql.Stmt
 	msgFlagsSeq        *sql.Stmt
 	usedFlags          *sql.Stmt
+	listMsgUids        *sql.Stmt
 
 	addRecentToLast *sql.Stmt
 

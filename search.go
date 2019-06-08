@@ -14,6 +14,10 @@ import (
 
 func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uint32, error) {
 	if searchOnlyWithFlags(criteria) {
+		if criteria.Not == nil && criteria.Or == nil && criteria.WithFlags == nil && criteria.WithoutFlags == nil {
+			return m.allSearch(uid)
+		}
+
 		return m.flagSearch(uid, criteria.WithFlags, criteria.WithoutFlags)
 	}
 
@@ -170,6 +174,38 @@ func noSeqNumNeeded(criteria *imap.SearchCriteria) bool {
 	}
 
 	return true
+}
+
+func (m *Mailbox) allSearch(uid bool) ([]uint32, error) {
+	if !uid {
+		row := m.parent.msgsCount.QueryRow(m.id)
+		var count uint32
+		if err := row.Scan(&count); err != nil {
+			return nil, err
+		}
+
+		seqs := make([]uint32, 0, count)
+		for i := uint32(1); i <= count; i++ {
+			seqs = append(seqs, i)
+		}
+		return seqs, nil
+	}
+
+	rows, err := m.parent.listMsgUids.Query(m.id)
+	if err != nil {
+		return nil, err
+	}
+
+	var uids []uint32
+	for rows.Next() {
+		var uid uint32
+		if err := rows.Scan(&uid); err != nil {
+			return nil, err
+		}
+
+		uids = append(uids, uid)
+	}
+	return uids, nil
 }
 
 func (m *Mailbox) flagSearch(uid bool, withFlags, withoutFlags []string) ([]uint32, error) {

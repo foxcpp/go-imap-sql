@@ -559,6 +559,13 @@ func (b *Backend) prepareStmts() error {
 	if err != nil {
 		return errors.Wrap(err, "usedFlags prep")
 	}
+	b.listMsgUids, err = b.db.Prepare(`
+        SELECT msgId
+        FROM msgs
+        WHERE mboxId = ?`)
+	if err != nil {
+		return errors.Wrap(err, "listMsgUids prep")
+	}
 
 	b.searchFetchNoBody, err = b.db.Prepare(`
 		SELECT seqnum, msgs.msgId, date, bodyLen, ` + b.db.aggrValuesSet("flag", "{") + `

@@ -1,7 +1,6 @@
 package imapsql
 
 import (
-	"bufio"
 	"database/sql"
 	"strings"
 	"time"
@@ -9,7 +8,6 @@ import (
 	imap "github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/backend/backendutil"
 	"github.com/emersion/go-message"
-	"github.com/emersion/go-message/textproto"
 )
 
 func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uint32, error) {
@@ -72,13 +70,7 @@ func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uin
 			if err != nil {
 				return nil, err
 			}
-			bufferedBody := bufio.NewReader(body)
-
-			parsedHeader, err := textproto.ReadHeader(bufferedBody)
-			if err != nil {
-				return nil, err
-			}
-			ent, err = message.New(message.Header{Header: parsedHeader}, bufferedBody)
+			ent, err = message.Read(body)
 			if err != nil {
 				return nil, err
 			}

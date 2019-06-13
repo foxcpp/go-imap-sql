@@ -30,6 +30,15 @@ Here are extensions supported by go-imap-sql:
 - [APPEND-LIMIT]
 - [MOVE]
 
+
+Usernames case-insensitivity
+------------------------------
+
+Usernames are always converted to lower-case before doing anything.
+This means that if you type `imapsql-ctl ... users create FOXCPP`.  Account
+with username `foxcpp` will be created. Also this means that you can use any
+case in account settings in your IMAP client.
+
 Passwords hashing
 -------------------
 

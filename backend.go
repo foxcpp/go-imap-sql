@@ -354,7 +354,7 @@ func (b *Backend) Updates() <-chan backend.Update {
 // It is exported for use by extensions and is not considered part of the
 // public API. Hence it can be changed between minor releases.
 func (b *Backend) UserCreds(username string) (id uint64, hashAlgo string, passHash []byte, passSalt []byte, err error) {
-	return b.getUserCreds(nil, username)
+	return b.getUserCreds(nil, strings.ToLower(username))
 }
 
 func (b *Backend) getUserCreds(tx *sql.Tx, username string) (id uint64, hashAlgo string, passHash []byte, passSalt []byte, err error) {
@@ -394,18 +394,18 @@ func (b *Backend) getUserCreds(tx *sql.Tx, username string) (id uint64, hashAlgo
 // It is error to create account with username that already exists.
 // ErrUserAlreadyExists will be returned in this case.
 func (b *Backend) CreateUser(username, password string) error {
-	return b.createUser(nil, username, b.Opts.DefaultHashAlgo, &password)
+	return b.createUser(nil, strings.ToLower(username), b.Opts.DefaultHashAlgo, &password)
 }
 
 func (b *Backend) CreateUserWithHash(username, hashAlgo, password string) error {
-	return b.createUser(nil, username, hashAlgo, &password)
+	return b.createUser(nil, strings.ToLower(username), hashAlgo, &password)
 }
 
 // CreateUserNoPass creates new user account without a password set.
 //
 // It will be unable to log in until SetUserPassword is called for it.
 func (b *Backend) CreateUserNoPass(username string) error {
-	return b.createUser(nil, username, b.Opts.DefaultHashAlgo, nil)
+	return b.createUser(nil, strings.ToLower(username), b.Opts.DefaultHashAlgo, nil)
 }
 
 func (b *Backend) createUser(tx *sql.Tx, username string, passHashAlgo string, password *string) error {
@@ -438,6 +438,8 @@ func (b *Backend) createUser(tx *sql.Tx, username string, passHashAlgo string, p
 // It is error to delete account that doesn't exist, ErrUserDoesntExists will
 // be returned in this case.
 func (b *Backend) DeleteUser(username string) error {
+	username = strings.ToLower(username)
+
 	stats, err := b.delUser.Exec(username)
 	if err != nil {
 		return errors.Wrap(err, "DeleteUser")
@@ -456,6 +458,8 @@ func (b *Backend) DeleteUser(username string) error {
 // ResetPassword sets user account password to invalid value such that Login
 // and CheckPlain will always return "invalid credentials" error.
 func (b *Backend) ResetPassword(username string) error {
+	username = strings.ToLower(username)
+
 	stats, err := b.setUserPass.Exec(nil, nil, username)
 	if err != nil {
 		return errors.Wrap(err, "ResetPassword")
@@ -485,6 +489,8 @@ func (b *Backend) SetUserPassword(username, newPassword string) error {
 // SetUserPasswordWithHash is a version of SetUserPassword that allows to
 // specify any supported hash algorithm instead of Opts.DefaultHashAlgo.
 func (b *Backend) SetUserPasswordWithHash(hashAlgo, username, newPassword string) error {
+	username = strings.ToLower(username)
+
 	digest, salt, err := b.hashCredentials(hashAlgo, newPassword)
 	if err != nil {
 		return err
@@ -531,6 +537,8 @@ func (b *Backend) ListUsers() ([]string, error) {
 //
 // If you want to check user credentials, you should use Login or CheckPlain.
 func (b *Backend) GetUser(username string) (backend.User, error) {
+	username = strings.ToLower(username)
+
 	uid, _, _, _, err := b.UserCreds(username)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -549,6 +557,8 @@ func (b *Backend) GetUser(username string) (backend.User, error) {
 // All database operations are executed within one transaction so
 // this method is atomic as defined by used RDBMS.
 func (b *Backend) GetOrCreateUser(username string) (backend.User, error) {
+	username = strings.ToLower(username)
+
 	tx, err := b.db.Begin()
 	if err != nil {
 		return nil, err
@@ -574,12 +584,12 @@ func (b *Backend) GetOrCreateUser(username string) (backend.User, error) {
 
 // CheckPlain checks the credentials of the user account.
 func (b *Backend) CheckPlain(username, password string) bool {
-	_, err := b.checkUser(username, password)
+	_, err := b.checkUser(strings.ToLower(username), password)
 	return err == nil
 }
 
 func (b *Backend) Login(_ *imap.ConnInfo, username, password string) (backend.User, error) {
-	uid, err := b.checkUser(username, password)
+	uid, err := b.checkUser(strings.ToLower(username), password)
 	if err != nil {
 		return nil, err
 	}

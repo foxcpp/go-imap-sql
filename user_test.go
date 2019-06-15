@@ -8,6 +8,7 @@ import (
 
 func TestUserCaseInsensitivity(t *testing.T) {
 	b := initTestBackend().(*Backend)
+	defer cleanBackend(b)
 	b.Opts.DefaultHashAlgo = "sha3-512"
 
 	assert.NilError(t, b.CreateUser("foXcpp", ""))

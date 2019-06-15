@@ -8,6 +8,7 @@ import (
 
 func TestInboxCreation(t *testing.T) {
 	b := initTestBackend().(*Backend)
+	defer cleanBackend(b)
 
 	assert.NilError(t, b.CreateUser("foxcpp", ""))
 

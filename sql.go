@@ -93,6 +93,7 @@ func (b *Backend) initSchema() error {
 			msgsizelimit INTEGER DEFAULT NULL,
 			uidnext INTEGER NOT NULL DEFAULT 1,
 			uidvalidity BIGINT NOT NULL,
+            specialuse VARCHAR(255) DEFAULT NULL,
 
 			UNIQUE(uid, name)
 		)`)
@@ -192,8 +193,8 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "listSubbedMboxes prep")
 	}
 	b.createMbox, err = b.db.Prepare(`
-		INSERT INTO mboxes(uid, name, uidvalidity)
-		VALUES (?, ?, ?)`)
+		INSERT INTO mboxes(uid, name, uidvalidity, specialuse)
+		VALUES (?, ?, ?, ?)`)
 	if err != nil {
 		return errors.Wrap(err, "createMbox prep")
 	}
@@ -227,11 +228,11 @@ func (b *Backend) prepareStmts() error {
 	if err != nil {
 		return errors.Wrap(err, "renameMboxChilds prep")
 	}
-	b.getMboxMark, err = b.db.Prepare(`
-		SELECT mark FROM mboxes
+	b.getMboxAttrs, err = b.db.Prepare(`
+		SELECT mark, specialuse FROM mboxes
 		WHERE uid = ? AND name = ?`)
 	if err != nil {
-		return errors.Wrap(err, "getMboxMark prep")
+		return errors.Wrap(err, "getMboxAttrs prep")
 	}
 	b.setSubbed, err = b.db.Prepare(`
 		UPDATE mboxes SET sub = ?

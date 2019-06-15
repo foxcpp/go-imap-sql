@@ -65,6 +65,13 @@ func (b *Backend) upgradeSchema(currentVer int) error {
 		}
 		currentVer = 3
 	}
+	if currentVer == 3 {
+		_, err := tx.Exec(b.db.rewriteSQL(`ALTER TABLE mboxes ADD COLUMN specialuse VARCHAR(255) DEFAULT NULL`))
+		if err != nil {
+			return errors.Wrap(err, "3->4 upgrade")
+		}
+		currentVer = 4
+	}
 
 	if currentVer != SchemaVersion {
 		return errors.New("database schema version is too old and can't be upgraded using this go-imap-sql version")

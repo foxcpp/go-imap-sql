@@ -119,7 +119,8 @@ type Backend struct {
 	// database/sql.DB object created by New.
 	DB *sql.DB
 
-	childrenExt bool
+	childrenExt   bool
+	specialUseExt bool
 
 	prng           Rand
 	hashAlgorithms map[string]hashAlgorithm
@@ -141,7 +142,7 @@ type Backend struct {
 	deleteMbox         *sql.Stmt
 	renameMbox         *sql.Stmt
 	renameMboxChilds   *sql.Stmt
-	getMboxMark        *sql.Stmt
+	getMboxAttrs       *sql.Stmt
 	setSubbed          *sql.Stmt
 	uidNext            *sql.Stmt
 	addUidNext         *sql.Stmt
@@ -322,6 +323,14 @@ func (b *Backend) EnableChildrenExt() bool {
 	return true
 }
 
+// EnableSpecialUseExt enables generation of special-use attributes for
+// mailboxes. It should be used only if server advertises SPECIAL-USE extension
+// support (see go-imap-specialuse).
+func (b *Backend) EnableSpecialUseExt() bool {
+	b.specialUseExt = true
+	return true
+}
+
 func (b *Backend) Close() error {
 	if b.db.driver == "sqlite3" {
 		// These operations are not critical, so it's not a problem if they fail.
@@ -442,7 +451,7 @@ func (b *Backend) createUser(tx *sql.Tx, username string, passHashAlgo string, p
 	}
 
 	// Every new user needs to have at least one mailbox (INBOX).
-	if _, err := tx.Stmt(b.createMbox).Exec(uid, "INBOX", b.prng.Uint32()); err != nil {
+	if _, err := tx.Stmt(b.createMbox).Exec(uid, "INBOX", b.prng.Uint32(), nil); err != nil {
 		return errors.Wrap(err, "CreateUser")
 	}
 
@@ -597,7 +606,7 @@ func (b *Backend) GetOrCreateUser(username string) (backend.User, error) {
 			}
 
 			// Every new user needs to have at least one mailbox (INBOX).
-			if _, err := tx.Stmt(b.createMbox).Exec(uid, "INBOX", b.prng.Uint32()); err != nil {
+			if _, err := tx.Stmt(b.createMbox).Exec(uid, "INBOX", b.prng.Uint32(), nil); err != nil {
 				return nil, err
 			}
 		} else {

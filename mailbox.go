@@ -41,13 +41,17 @@ func (m *Mailbox) Info() (*imap.MailboxInfo, error) {
 		Delimiter:  MailboxPathSep,
 		Name:       m.name,
 	}
-	row := m.parent.getMboxMark.QueryRow(m.uid, m.name)
-	mark := 0
-	if err := row.Scan(&mark); err != nil {
+	row := m.parent.getMboxAttrs.QueryRow(m.uid, m.name)
+	var mark int
+	var specialUse sql.NullString
+	if err := row.Scan(&mark, &specialUse); err != nil {
 		return nil, errors.Wrapf(err, "Info %s", m.name)
 	}
 	if mark == 1 {
 		res.Attributes = []string{imap.MarkedAttr}
+	}
+	if specialUse.Valid && m.parent.specialUseExt {
+		res.Attributes = []string{specialUse.String}
 	}
 
 	if m.parent.childrenExt {

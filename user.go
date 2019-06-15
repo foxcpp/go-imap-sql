@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/emersion/go-imap-specialuse"
 	"github.com/emersion/go-imap/backend"
 	"github.com/pkg/errors"
 )
@@ -95,11 +96,43 @@ func (u *User) CreateMailbox(name string) error {
 		return errors.Wrapf(err, "CreateMailbox (parents) %s", name)
 	}
 
-	if _, err := tx.Stmt(u.parent.createMbox).Exec(u.id, name, u.parent.prng.Uint32()); err != nil {
+	if _, err := tx.Stmt(u.parent.createMbox).Exec(u.id, name, u.parent.prng.Uint32(), nil); err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "Duplicate entry") { // TODO: Check error messages for other RDBMS.
 			return backend.ErrMailboxAlreadyExists
 		}
 		return errors.Wrapf(err, "CreateMailbox %s", name)
+	}
+
+	return errors.Wrapf(tx.Commit(), "CreateMailbox %s", name)
+}
+
+var ErrUnsupportedSpecialAttr = errors.New("imap: special attribute is not supported")
+
+// CreateMailboxSpecial creates a mailbox with SPECIAL-USE attribute set.
+func (u *User) CreateMailboxSpecial(name, specialUseAttr string) error {
+	switch specialUseAttr {
+	case specialuse.All, specialuse.Flagged:
+		return ErrUnsupportedSpecialAttr
+	case specialuse.Archive, specialuse.Drafts, specialuse.Junk, specialuse.Sent, specialuse.Trash:
+	default:
+		return ErrUnsupportedSpecialAttr
+	}
+
+	tx, err := u.parent.db.Begin()
+	if err != nil {
+		return errors.Wrapf(err, "CreateMailboxSpecial %s", name)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if err := u.createParentDirs(tx, name); err != nil {
+		return errors.Wrapf(err, "CreateMailboxSpecial (parents) %s", name)
+	}
+
+	if _, err := tx.Stmt(u.parent.createMbox).Exec(u.id, name, u.parent.prng.Uint32(), specialUseAttr); err != nil {
+		if strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "Duplicate entry") { // TODO: Check error messages for other RDBMS.
+			return backend.ErrMailboxAlreadyExists
+		}
+		return errors.Wrapf(err, "CreateMailboxSpecial %s", name)
 	}
 
 	return errors.Wrapf(tx.Commit(), "CreateMailbox %s", name)
@@ -147,7 +180,7 @@ func (u *User) RenameMailbox(existingName, newName string) error {
 	}
 
 	if existingName == "INBOX" {
-		if _, err := tx.Stmt(u.parent.createMbox).Exec(u.id, existingName, time.Now().Unix()); err != nil {
+		if _, err := tx.Stmt(u.parent.createMbox).Exec(u.id, existingName, time.Now().Unix(), nil); err != nil {
 			return errors.Wrapf(err, "RenameMailbox %s, %s", existingName, newName)
 		}
 	}

@@ -7,4 +7,4 @@ package imapsql
 const VersionStr = "0.3.1"
 
 // SchemaVersion is incremented each time DB schema changes.
-const SchemaVersion = 3
+const SchemaVersion = 4

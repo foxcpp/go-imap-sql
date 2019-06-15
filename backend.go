@@ -420,17 +420,36 @@ func (b *Backend) createUser(tx *sql.Tx, username string, passHashAlgo string, p
 		}
 	}
 
-	var err error
-	if tx != nil {
-		_, err = tx.Stmt(b.addUser).Exec(username, passHash, passSalt)
-	} else {
-		_, err = b.addUser.Exec(username, passHash, passSalt)
+	var shouldCommit bool
+	if tx == nil {
+		var err error
+		tx, err = b.db.Begin()
+		if err != nil {
+			return errors.Wrap(err, "CreateUser")
+		}
+		defer tx.Rollback()
+		shouldCommit = true
 	}
+
+	_, err := tx.Stmt(b.addUser).Exec(username, passHash, passSalt)
 	if err != nil && (strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "Duplicate entry") || strings.Contains(err.Error(), "unique")) {
 		return ErrUserAlreadyExists
 	}
 
-	return errors.Wrap(err, "CreateUser")
+	uid, _, _, _, err := b.getUserCreds(tx, username)
+	if err != nil {
+		return errors.Wrap(err, "CreateUser")
+	}
+
+	// Every new user needs to have at least one mailbox (INBOX).
+	if _, err := tx.Stmt(b.createMbox).Exec(uid, "INBOX", b.prng.Uint32()); err != nil {
+		return errors.Wrap(err, "CreateUser")
+	}
+
+	if shouldCommit {
+		return tx.Commit()
+	}
+	return nil
 }
 
 // DeleteUser deleted user account with specified username.
@@ -571,8 +590,14 @@ func (b *Backend) GetOrCreateUser(username string) (backend.User, error) {
 			if err := b.createUser(tx, username, b.Opts.DefaultHashAlgo, nil); err != nil {
 				return nil, err
 			}
+
 			uid, _, _, _, err = b.getUserCreds(tx, username)
 			if err != nil {
+				return nil, err
+			}
+
+			// Every new user needs to have at least one mailbox (INBOX).
+			if _, err := tx.Stmt(b.createMbox).Exec(uid, "INBOX", b.prng.Uint32()); err != nil {
 				return nil, err
 			}
 		} else {

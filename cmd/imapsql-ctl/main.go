@@ -57,6 +57,9 @@ func connectToDB(ctx *cli.Context) (err error) {
 	}
 
 	backend, err = imapsql.New(driver, dsn, opts)
+
+	backend.EnableSpecialUseExt()
+
 	return
 }
 
@@ -136,6 +139,12 @@ func main() {
 					Usage:     "Create mailbox",
 					ArgsUsage: "USERNAME NAME",
 					Action:    mboxesCreate,
+					Flags: []cli.Flag{
+						cli.StringFlag{
+							Name:  "special",
+							Usage: "Set SPECIAL-USE attribute on mailbox; valid values: archive, drafts, junk, sent, trash",
+						},
+					},
 				},
 				{
 					Name:        "remove",

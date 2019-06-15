@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	eimap "github.com/emersion/go-imap"
+	"github.com/foxcpp/go-imap-sql"
 	"github.com/urfave/cli"
 )
 
@@ -34,7 +36,16 @@ func mboxesList(ctx *cli.Context) error {
 	}
 
 	for _, mbox := range mboxes {
-		fmt.Println(mbox.Name())
+		info, err := mbox.Info()
+		if err != nil {
+			return err
+		}
+
+		if len(info.Attributes) != 0 {
+			fmt.Print(info.Name, "\t", info.Attributes, "\n")
+		} else {
+			fmt.Println(info.Name)
+		}
 	}
 
 	return nil
@@ -59,11 +70,12 @@ func mboxesCreate(ctx *cli.Context) error {
 		return err
 	}
 
-	if err := u.CreateMailbox(name); err != nil {
-		return err
+	if ctx.IsSet("special") {
+		attr := "\\" + strings.Title(ctx.String("special"))
+		return u.(*imapsql.User).CreateMailboxSpecial(name, attr)
 	}
 
-	return nil
+	return u.CreateMailbox(name)
 }
 
 func mboxesRemove(ctx *cli.Context) error {

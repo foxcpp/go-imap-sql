@@ -23,7 +23,7 @@ func TestUserCaseInsensitivity(t *testing.T) {
 	u2, err := b.GetOrCreateUser("FOXcpp")
 	assert.NilError(t, err, "b.GetOrCreateUser")
 
-	assert.NilError(t, u1.CreateMailbox("INBOX"))
-	_, err = u2.GetMailbox("INBOX")
+	assert.NilError(t, u1.CreateMailbox("BOX"))
+	_, err = u2.GetMailbox("BOX")
 	assert.NilError(t, err, "u2.GetMailbox")
 }

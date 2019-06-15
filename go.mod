@@ -5,7 +5,7 @@ require (
 	github.com/emersion/go-imap v1.0.0-rc.1.0.20190609205151-1bdc3f86477c
 	github.com/emersion/go-imap-appendlimit v0.0.0-20190308131241-25671c986a6a
 	github.com/emersion/go-message v0.10.4-0.20190609165112-592ace5bc1ca
-	github.com/foxcpp/go-imap-backend-tests v0.0.0-20190609205803-d16f38cb23ad
+	github.com/foxcpp/go-imap-backend-tests v0.0.0-20190615132041-281c43ad777b
 	github.com/go-sql-driver/mysql v1.4.1
 	github.com/google/go-cmp v0.3.0 // indirect
 	github.com/json-iterator/go v1.1.6
@@ -21,3 +21,5 @@ require (
 	google.golang.org/appengine v1.6.1 // indirect
 	gotest.tools v2.2.0+incompatible
 )
+
+replace github.com/foxcpp/go-imap-backend-tests => ../go-imap-backend-tests

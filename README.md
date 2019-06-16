@@ -24,11 +24,10 @@ go-imap-sql is known to work with (and constantly being tested against) followin
 IMAP Extensions Supported
 ---------------------------
 
-Due to go-imap architecture, some extensions require support from used backend.
-Here are extensions supported by go-imap-sql:
 - [CHILDREN]
 - [APPEND-LIMIT]
 - [MOVE]
+- [SPECIAL-USE]
 
 
 Usernames case-insensitivity
@@ -118,5 +117,6 @@ go install github.com/foxcpp/go-imap-sql/cmd/imapsql-ctl
 [APPEND-LIMIT]: https://tools.ietf.org/html/rfc7889
 [UIDPLUS]: https://tools.ietf.org/html/rfc4315
 [MOVE]: https://tools.ietf.org/html/rfc6851
+[SPECIAL-USE]: https://tools.ietf.org/html/rfc6154
 [go-imap]: https://github.com/emersion/go-imap
 [maddy]: https://github.com/emersion/maddy

@@ -202,6 +202,45 @@ func main() {
 					Action: msgsAdd,
 				},
 				{
+					Name:        "add-flags",
+					Usage:       "Add flags to messages (requires --unsafe)",
+					ArgsUsage:   "USERNAME MAILBOX SEQ FLAGS...",
+					Description: "Add flags to all messages matched by SEQ.",
+					Flags: []cli.Flag{
+						cli.BoolFlag{
+							Name:  "uid,u",
+							Usage: "Use UIDs for SEQSET instead of sequence numbers",
+						},
+					},
+					Action: msgsFlags,
+				},
+				{
+					Name:        "rem-flags",
+					Usage:       "Remove flags from messages (requires --unsafe)",
+					ArgsUsage:   "USERNAME MAILBOX SEQ FLAGS...",
+					Description: "Remove flags from all messages matched by SEQ.",
+					Flags: []cli.Flag{
+						cli.BoolFlag{
+							Name:  "uid,u",
+							Usage: "Use UIDs for SEQSET instead of sequence numbers",
+						},
+					},
+					Action: msgsFlags,
+				},
+				{
+					Name:        "set-flags",
+					Usage:       "Set flags on messages (requires --unsafe)",
+					ArgsUsage:   "USERNAME MAILBOX SEQ FLAGS...",
+					Description: "Set flags on all messages matched by SEQ.",
+					Flags: []cli.Flag{
+						cli.BoolFlag{
+							Name:  "uid,u",
+							Usage: "Use UIDs for SEQSET instead of sequence numbers",
+						},
+					},
+					Action: msgsFlags,
+				},
+				{
 					Name:      "remove",
 					Usage:     "Remove messages from mailbox (requires --unsafe)",
 					ArgsUsage: "USERNAME MAILBOX SEQSET",

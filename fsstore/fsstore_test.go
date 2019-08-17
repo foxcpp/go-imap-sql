@@ -85,14 +85,5 @@ func cleanBackend(bi backendtests.Backend) {
 }
 
 func TestWithFSStore(t *testing.T) {
-	backendtests.Blacklist = []string{
-		// FIXME: not handled correctly by backendutil, https://github.com/emersion/go-imap/pull/240
-		"TestWithFSStore/Mailbox_ListMessages_Body/BODY[HEADER.FIELDS.NOT_(From_To)]",
-		"TestWithFSStore/Mailbox_ListMessages_Body/BODY[1.1.HEADER.FIELDS_(Content-Type)]",
-		"TestWithFSStore/Mailbox_ListMessages_Body/BODY[1.1.HEADER.FIELDS.NOT_(Content-Type)]",
-
-		// FIXME: not handled correctly by backendutil
-		"TestWithFSStore/Mailbox_SearchMessages/Crit_4",
-	}
 	backendtests.RunTests(t, initTestBackend, cleanBackend)
 }

@@ -219,13 +219,7 @@ func splitHeader(blob []byte) (header, body []byte) {
 	return blob[:headerEnd+endLen], blob[headerEnd+endLen:]
 }
 
-func extractCachedData(bodyReader io.Reader) (bodyStructBlob, cachedHeadersBlob []byte, err error) {
-	bufferedBody := bufio.NewReader(bodyReader)
-	hdr, err := textproto.ReadHeader(bufferedBody)
-	if err != nil {
-		return nil, nil, err
-	}
-
+func extractCachedData(hdr textproto.Header, bufferedBody *bufio.Reader) (bodyStructBlob, cachedHeadersBlob []byte, err error) {
 	hdrs := make(map[string][]string, len(cachedHeaderFields))
 	for field := hdr.Fields(); field.Next(); {
 		if _, ok := cachedHeaderFields[strings.ToLower(field.Key())]; !ok {
@@ -247,15 +241,15 @@ func extractCachedData(bodyReader io.Reader) (bodyStructBlob, cachedHeadersBlob 
 	return
 }
 
-func (m *Mailbox) processBody(literal imap.Literal) (headerBlob, bodyBlob, bodyStruct, cachedHeader []byte, extBodyKey sql.NullString, err error) {
+func (b *Backend) processBody(literal imap.Literal) (headerBlob, bodyBlob, bodyStruct, cachedHeader []byte, extBodyKey sql.NullString, err error) {
 	var bodyReader io.Reader = literal
-	if m.parent.Opts.ExternalStore != nil {
+	if b.Opts.ExternalStore != nil {
 		extBodyKey.String, err = randomKey()
 		if err != nil {
 			return nil, nil, nil, nil, sql.NullString{}, err
 		}
 		extBodyKey.Valid = true
-		extWriter, err := m.parent.Opts.ExternalStore.Create(extBodyKey.String)
+		extWriter, err := b.Opts.ExternalStore.Create(extBodyKey.String)
 		if err != nil {
 			return nil, nil, nil, nil, sql.NullString{}, err
 		}
@@ -274,14 +268,20 @@ func (m *Mailbox) processBody(literal imap.Literal) (headerBlob, bodyBlob, bodyS
 		bodyReader = bytes.NewReader(bodyBuf)
 	}
 
-	bodyStruct, cachedHeader, err = extractCachedData(bodyReader)
+	bufferedBody := bufio.NewReader(bodyReader)
+	hdr, err := textproto.ReadHeader(bufferedBody)
+	if err != nil {
+		return nil, nil, nil, nil, sql.NullString{}, errors.Wrap(err, "CreateMessage (readHeader)")
+	}
+
+	bodyStruct, cachedHeader, err = extractCachedData(hdr, bufferedBody)
 	if err != nil {
 		return nil, nil, nil, nil, sql.NullString{}, errors.Wrap(err, "CreateMessage (extractCachedData)")
 	}
 
 	// Consume all remaining body so io.TeeReader used with external store will
 	// copy everything to extWriter.
-	_, err = io.Copy(ioutil.Discard, bodyReader)
+	_, err = io.Copy(ioutil.Discard, bufferedBody)
 	if err != nil {
 		return nil, nil, nil, nil, sql.NullString{}, errors.Wrap(err, "CreateMessage (ReadAll consume)")
 	}
@@ -289,19 +289,26 @@ func (m *Mailbox) processBody(literal imap.Literal) (headerBlob, bodyBlob, bodyS
 	return
 }
 
-func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Literal) error {
+func (m *Mailbox) checkAppendLimit(length int) error {
 	mboxLimit := m.CreateMessageLimit()
-	if mboxLimit != nil && uint32(fullBody.Len()) > *mboxLimit {
+	if mboxLimit != nil && uint32(length) > *mboxLimit {
 		return appendlimit.ErrTooBig
 	} else if mboxLimit == nil {
 		userLimit := m.user.CreateMessageLimit()
-		if userLimit != nil && uint32(fullBody.Len()) > *userLimit {
+		if userLimit != nil && uint32(length) > *userLimit {
 			return appendlimit.ErrTooBig
 		} else if userLimit == nil {
-			if m.parent.Opts.MaxMsgBytes != nil && uint32(fullBody.Len()) > *m.parent.Opts.MaxMsgBytes {
+			if m.parent.Opts.MaxMsgBytes != nil && uint32(length) > *m.parent.Opts.MaxMsgBytes {
 				return appendlimit.ErrTooBig
 			}
 		}
+	}
+	return nil
+}
+
+func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Literal) error {
+	if err := m.checkAppendLimit(fullBody.Len()); err != nil {
+		return err
 	}
 
 	// Important to run before transaction, otherwise it will deadlock on
@@ -332,13 +339,13 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 	}
 
 	bodyLen := fullBody.Len()
-	hdr, body, bodyStruct, cachedHdr, extBodyKey, err := m.processBody(fullBody)
+	hdr, body, bodyStruct, cachedHdr, extBodyKey, err := m.parent.processBody(fullBody)
 	if err != nil {
 		return err
 	}
 
 	if extBodyKey.Valid {
-		if _, err = tx.Stmt(m.parent.addExtKey).Exec(extBodyKey); err != nil {
+		if _, err = tx.Stmt(m.parent.addExtKey).Exec(extBodyKey, 1); err != nil {
 			return errors.Wrap(err, "CreateMessage (addExtKey)")
 		}
 	}

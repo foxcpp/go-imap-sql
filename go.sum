@@ -26,6 +26,8 @@ github.com/emersion/go-textwrapper v0.0.0-20160606182133-d0e65e56babe h1:40SWqY0
 github.com/emersion/go-textwrapper v0.0.0-20160606182133-d0e65e56babe/go.mod h1:aqO8z8wPrjkscevZJFVE1wXJrLpC5LtJG7fqLOsPb2U=
 github.com/foxcpp/go-imap-backend-tests v0.0.0-20190609205803-d16f38cb23ad h1:RBnPU7NLJ5ERxzAdblWkG1/nUGqEKS4OGlp1W7uD8HE=
 github.com/foxcpp/go-imap-backend-tests v0.0.0-20190609205803-d16f38cb23ad/go.mod h1:yUISYv/uXLQ6tQZcds/p/hdcZ5JzrEUifyED2VffWpc=
+github.com/foxcpp/go-imap-backend-tests v0.0.0-20190615132041-281c43ad777b h1:tCVjSRWQreyO85eyG7RBwjaEqFksylHTrNuuQMYte+c=
+github.com/foxcpp/go-imap-backend-tests v0.0.0-20190615132041-281c43ad777b/go.mod h1:yUISYv/uXLQ6tQZcds/p/hdcZ5JzrEUifyED2VffWpc=
 github.com/go-sql-driver/mysql v1.4.1 h1:g24URVg0OFbNUTx9qqY1IRZ9D9z3iPyi5zKhQZpNwpA=
 github.com/go-sql-driver/mysql v1.4.1/go.mod h1:zAC/RDZ24gD3HViQzih4MyKcchzm+sOG5ZlKdlhCg5w=
 github.com/golang/protobuf v1.3.1/go.mod h1:6lQm79b+lXiMfvg/cZm0SGofjICqVBUtrP5yJMmIC1U=

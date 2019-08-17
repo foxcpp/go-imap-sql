@@ -628,8 +628,8 @@ func (b *Backend) prepareStmts() error {
 	}
 
 	b.addExtKey, err = b.db.Prepare(`
-		INSERT INTO extKeys(id)
-		VALUES (?)`)
+		INSERT INTO extKeys(id, refs)
+		VALUES (?, ?)`)
 	if err != nil {
 		return errors.Wrap(err, "addExtKey prep")
 	}
@@ -708,4 +708,8 @@ func (b *Backend) prepareStmts() error {
 	}
 
 	return nil
+}
+
+func isForeignKeyErr(err error) bool {
+	return strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "Duplicate entry") || strings.Contains(err.Error(), "unique")
 }

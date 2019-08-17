@@ -441,7 +441,7 @@ func (b *Backend) createUser(tx *sql.Tx, username string, passHashAlgo string, p
 	}
 
 	_, err := tx.Stmt(b.addUser).Exec(username, passHash, passSalt)
-	if err != nil && (strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "Duplicate entry") || strings.Contains(err.Error(), "unique")) {
+	if err != nil && isForeignKeyErr(err) {
 		return ErrUserAlreadyExists
 	}
 

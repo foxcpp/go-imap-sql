@@ -97,7 +97,7 @@ func (u *User) CreateMailbox(name string) error {
 	}
 
 	if _, err := tx.Stmt(u.parent.createMbox).Exec(u.id, name, u.parent.prng.Uint32(), nil); err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "Duplicate entry") { // TODO: Check error messages for other RDBMS.
+		if isForeignKeyErr(err) {
 			return backend.ErrMailboxAlreadyExists
 		}
 		return errors.Wrapf(err, "CreateMailbox %s", name)
@@ -129,7 +129,7 @@ func (u *User) CreateMailboxSpecial(name, specialUseAttr string) error {
 	}
 
 	if _, err := tx.Stmt(u.parent.createMbox).Exec(u.id, name, u.parent.prng.Uint32(), specialUseAttr); err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "Duplicate entry") { // TODO: Check error messages for other RDBMS.
+		if isForeignKeyErr(err) {
 			return backend.ErrMailboxAlreadyExists
 		}
 		return errors.Wrapf(err, "CreateMailboxSpecial %s", name)

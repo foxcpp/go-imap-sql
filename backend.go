@@ -215,6 +215,9 @@ type Backend struct {
 	incrementRefSeq       *sql.Stmt
 	zeroRef               *sql.Stmt
 	deleteZeroRef         *sql.Stmt
+
+	// Used by Delivery.SpecialMailbox.
+	specialUseMbox *sql.Stmt
 }
 
 var defaultPassHashAlgo = "bcrypt"

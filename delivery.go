@@ -36,6 +36,7 @@ func (b *Backend) StartDelivery() (*Delivery, error) {
 type Delivery struct {
 	b       *Backend
 	tx      *sql.Tx
+	users   []*User
 	mboxes  []*Mailbox
 	extKey  string
 	updates []backend.Update
@@ -50,20 +51,87 @@ type Delivery struct {
 // is called, but it can disappear before Body* call, in which case
 // Delivery will be terminated with ErrDeliveryInterrupted error.
 // See Backend.StartDelivery method documentation for details.
-func (d *Delivery) AddRcpt(username, mailbox string) error {
+func (d *Delivery) AddRcpt(username string) error {
 	u, err := d.b.GetUser(username)
 	if err != nil {
 		return err
 	}
-	mbox, err := u.GetMailbox(mailbox)
-	if err != nil {
-		return err
-	}
-	d.mboxes = append(d.mboxes, mbox.(*Mailbox))
+	d.users = append(d.users, u.(*User))
 	return nil
 }
 
 // FIXME: Fix that goddamned code duplication.
+
+// Mailbox command changes the target mailbox for all recipients.
+// It should be called before BodyParsed/BodyRaw.
+//
+// If it is not called, it defaults to INBOX. If mailbox doesn't
+// exist for some users - it will created.
+func (d *Delivery) Mailbox(name string) error {
+	d.mboxes = make([]*Mailbox, 0, len(d.users))
+	for _, u := range d.users {
+		mbox, err := u.GetMailbox(name)
+		if err != nil {
+			if err != backend.ErrNoSuchMailbox {
+				d.mboxes = nil
+				return err
+			}
+
+			if err := u.CreateMailbox(name); err != nil && err != backend.ErrMailboxAlreadyExists {
+				d.mboxes = nil
+				return err
+			}
+
+			mbox, err = u.GetMailbox(name)
+			if err != nil {
+				d.mboxes = nil
+				return err
+			}
+		}
+
+		d.mboxes = append(d.mboxes, mbox.(*Mailbox))
+	}
+	return nil
+}
+
+// SpecialMailbox is similar to Mailbox method but instead of looking up mailboxes
+// by name it looks it up by the SPECIAL-USE attribute.
+//
+// If no such mailbox exists for some user, it will be created with
+// fallbackName and requested SPECIAL-USE attribute set.
+//
+// The main use-case of this function is to reroute messages into Junk directory
+// during multi-recipient delivery.
+func (d *Delivery) SpecialMailbox(attribute, fallbackName string) error {
+	d.mboxes = make([]*Mailbox, 0, len(d.users))
+	for _, u := range d.users {
+		var mboxId uint64
+		var mboxName string
+		err := d.b.specialUseMbox.QueryRow(u.id, attribute).Scan(&mboxName, &mboxId)
+		if err != nil {
+			if err != sql.ErrNoRows {
+				d.mboxes = nil
+				return err
+			}
+
+			if err := u.CreateMailboxSpecial(fallbackName, attribute); err != nil && err != backend.ErrMailboxAlreadyExists {
+				d.mboxes = nil
+				return err
+			}
+
+			mbox, err := u.GetMailbox(fallbackName)
+			if err != nil {
+				d.mboxes = nil
+				return err
+			}
+			d.mboxes = append(d.mboxes, mbox.(*Mailbox))
+			continue
+		}
+
+		d.mboxes = append(d.mboxes, &Mailbox{user: u, uid: u.id, id: mboxId, name: mboxName, parent: d.b})
+	}
+	return nil
+}
 
 // BodyRaw assigns the raw message blob to the delivery.
 //
@@ -74,6 +142,12 @@ func (d *Delivery) AddRcpt(username, mailbox string) error {
 // Also note that BodyRaw/BodyParsed can be called only once for a Delivery object.
 // Behavior is undefined when it is called multiple times.
 func (d *Delivery) BodyRaw(fullMsg imap.Literal) error {
+	if d.mboxes == nil {
+		if err := d.Mailbox("INBOX"); err != nil {
+			return err
+		}
+	}
+
 	d.updates = make([]backend.Update, 0, len(d.mboxes))
 	flagsStmt, err := d.b.makeFlagsAddStmt(true, []string{imap.RecentFlag})
 	if err != nil {
@@ -133,6 +207,12 @@ func (d *Delivery) BodyRaw(fullMsg imap.Literal) error {
 }
 
 func (d *Delivery) BodyParsed(header textproto.Header, body imap.Literal) error {
+	if d.mboxes == nil {
+		if err := d.Mailbox("INBOX"); err != nil {
+			return err
+		}
+	}
+
 	d.updates = make([]backend.Update, 0, len(d.mboxes))
 	flagsStmt, err := d.b.makeFlagsAddStmt(true, []string{imap.RecentFlag})
 	if err != nil {

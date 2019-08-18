@@ -707,6 +707,16 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "deleteZeroRef prep")
 	}
 
+	b.specialUseMbox, err = b.db.Prepare(`
+		SELECT name, id 
+		FROM mboxes
+		WHERE uid = ?
+		AND specialuse = ?
+		LIMIT 1`)
+	if err != nil {
+		return errors.Wrap(err, "specialUseMbox")
+	}
+
 	return nil
 }
 

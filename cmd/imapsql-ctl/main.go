@@ -15,7 +15,7 @@ import (
 var backend *imapsql.Backend
 var stdinScnr *bufio.Scanner
 
-func connectToDB(ctx *cli.Context) (err error) {
+func connectToDB(ctx *cli.Context) error {
 	if ctx.GlobalIsSet("unsafe") && !ctx.GlobalIsSet("quiet") {
 		fmt.Fprintln(os.Stderr, "WARNING: Using --unsafe with running server may lead to accidential damage to data due to desynchronization with connected clients.")
 	}
@@ -56,11 +56,15 @@ func connectToDB(ctx *cli.Context) (err error) {
 		opts.ExternalStore = &fsstore.Store{Root: store}
 	}
 
+	var err error
 	backend, err = imapsql.New(driver, dsn, opts)
+	if err != nil {
+		return err
+	}
 
 	backend.EnableSpecialUseExt()
 
-	return
+	return nil
 }
 
 func closeBackend(ctx *cli.Context) (err error) {

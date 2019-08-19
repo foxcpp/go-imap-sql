@@ -9,9 +9,16 @@ import (
 	"gotest.tools/assert"
 )
 
-var testMsgBody = `From: <foxcpp@foxcpp.dev>
-
-Hello!`
+const (
+	testMsgHeader = "From: <foxcpp@foxcpp.dev>\r\n" +
+		"Subject: Hello!\r\n" +
+		"Content-Type: text/plain; charset=ascii\r\n" +
+		"Non-Cached-Header: 1\r\n" +
+		"\r\n"
+	testMsgBody = "Hello!\r\n"
+	testMsg     = testMsgHeader +
+		testMsgBody
+)
 
 func TestIssue7(t *testing.T) {
 	b := initTestBackend()
@@ -23,7 +30,7 @@ func TestIssue7(t *testing.T) {
 	mbox, err := usr.GetMailbox(t.Name())
 	assert.NilError(t, err)
 	for i := 0; i < 5; i++ {
-		assert.NilError(t, mbox.CreateMessage([]string{"flag1", "flag2"}, time.Now(), strings.NewReader(testMsgBody)))
+		assert.NilError(t, mbox.CreateMessage([]string{"flag1", "flag2"}, time.Now(), strings.NewReader(testMsg)))
 	}
 
 	t.Run("seq", func(t *testing.T) {

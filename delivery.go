@@ -133,15 +133,7 @@ func (d *Delivery) SpecialMailbox(attribute, fallbackName string) error {
 	return nil
 }
 
-// BodyRaw assigns the raw message blob to the delivery.
-//
-// go-imap-sql needs to parse the header to extract the envelope information
-// so if you already have parsed header object - it is preferable to use BodyParsed
-// method instead of BodyRaw.
-//
-// Also note that BodyRaw/BodyParsed can be called only once for a Delivery object.
-// Behavior is undefined when it is called multiple times.
-func (d *Delivery) BodyRaw(fullMsg imap.Literal) error {
+func (d *Delivery) body(extBodyKey sql.NullString, length int, bodyBlob []byte, headerBlob []byte, bodyStruct []byte, cachedHeader []byte) error {
 	if d.mboxes == nil {
 		if err := d.Mailbox("INBOX"); err != nil {
 			return err
@@ -161,17 +153,11 @@ func (d *Delivery) BodyRaw(fullMsg imap.Literal) error {
 		return errors.Wrap(err, "Body")
 	}
 
-	headerBlob, bodyBlob, bodyStruct, cachedHeader, extBodyKey, err := d.b.processBody(fullMsg)
-	if err != nil {
-		return err
-	}
-
 	if extBodyKey.Valid {
 		if _, err = d.tx.Stmt(d.b.addExtKey).Exec(extBodyKey, len(d.mboxes)); err != nil {
 			return errors.Wrap(err, "Body")
 		}
 	}
-
 	for _, mbox := range d.mboxes {
 		msgId, err := mbox.uidNext(d.tx)
 		if err != nil {
@@ -180,7 +166,7 @@ func (d *Delivery) BodyRaw(fullMsg imap.Literal) error {
 
 		_, err = d.tx.Stmt(d.b.addMsg).Exec(
 			mbox.id, msgId, date.Unix(),
-			fullMsg.Len(), bodyBlob, headerBlob,
+			length, bodyBlob, headerBlob,
 			bodyStruct, cachedHeader, extBodyKey,
 		)
 		if err != nil {
@@ -202,30 +188,27 @@ func (d *Delivery) BodyRaw(fullMsg imap.Literal) error {
 		}
 		d.updates = append(d.updates, upd)
 	}
-
 	return nil
 }
 
+// BodyRaw assigns the raw message blob to the delivery.
+//
+// go-imap-sql needs to parse the header to extract the envelope information
+// so if you already have parsed header object - it is preferable to use BodyParsed
+// method instead of BodyRaw.
+//
+// Also note that BodyRaw/BodyParsed can be called only once for a Delivery object.
+// Behavior is undefined when it is called multiple times.
+func (d *Delivery) BodyRaw(fullMsg imap.Literal) error {
+	headerBlob, bodyBlob, bodyStruct, cachedHeader, extBodyKey, err := d.b.processBody(fullMsg)
+	if err != nil {
+		return err
+	}
+
+	return d.body(extBodyKey, fullMsg.Len(), bodyBlob, headerBlob, bodyStruct, cachedHeader)
+}
+
 func (d *Delivery) BodyParsed(header textproto.Header, body imap.Literal) error {
-	if d.mboxes == nil {
-		if err := d.Mailbox("INBOX"); err != nil {
-			return err
-		}
-	}
-
-	d.updates = make([]backend.Update, 0, len(d.mboxes))
-	flagsStmt, err := d.b.makeFlagsAddStmt(true, []string{imap.RecentFlag})
-	if err != nil {
-		return errors.Wrap(err, "Body")
-	}
-
-	date := time.Now()
-
-	d.tx, err = d.b.db.Begin()
-	if err != nil {
-		return errors.Wrap(err, "Body")
-	}
-
 	headerBlob := bytes.Buffer{}
 	if err := textproto.WriteHeader(&headerBlob, header); err != nil {
 		return errors.Wrap(err, "Body")
@@ -238,45 +221,7 @@ func (d *Delivery) BodyParsed(header textproto.Header, body imap.Literal) error 
 		return err
 	}
 
-	if extBodyKey.Valid {
-		if _, err = d.tx.Stmt(d.b.addExtKey).Exec(extBodyKey, len(d.mboxes)); err != nil {
-			return errors.Wrap(err, "Body")
-		}
-	}
-
-	for _, mbox := range d.mboxes {
-		msgId, err := mbox.uidNext(d.tx)
-		if err != nil {
-			return errors.Wrap(err, "Body")
-		}
-
-		_, err = d.tx.Stmt(d.b.addMsg).Exec(
-			mbox.id, msgId, date.Unix(),
-			bodyLen, bodyBlob, headerBlobField,
-			bodyStruct, cachedHeader, extBodyKey,
-		)
-		if err != nil {
-
-			return errors.Wrap(err, "Body")
-		}
-
-		params := mbox.makeFlagsAddStmtArgs(true, []string{imap.RecentFlag}, imap.Seq{Start: msgId, Stop: msgId})
-		if _, err := d.tx.Stmt(flagsStmt).Exec(params...); err != nil {
-			return errors.Wrap(err, "Body")
-		}
-
-		if _, err := d.tx.Stmt(d.b.addUidNext).Exec(1, mbox.id); err != nil {
-			return errors.Wrap(err, "Body")
-		}
-
-		upd, err := mbox.statusUpdate(d.tx)
-		if err != nil {
-			return errors.Wrap(err, "Body")
-		}
-		d.updates = append(d.updates, upd)
-	}
-
-	return nil
+	return d.body(extBodyKey, bodyLen, bodyBlob, headerBlobField, bodyStruct, cachedHeader)
 }
 
 func (d *Delivery) Abort() error {
@@ -338,13 +283,9 @@ func (b *Backend) processParsedBody(headerInput []byte, header textproto.Header,
 		if err != nil {
 			return nil, nil, nil, nil, sql.NullString{}, err
 		}
+		headerBlob = headerInput
+		bodyBlob = bodyBuf
 		bodyReader = bytes.NewReader(bodyBuf)
-
-		// TODO: Make an approximation for buffer size so we can pre-allocate it.
-		headerBuf := bytes.Buffer{}
-		if err := textproto.WriteHeader(&headerBuf, header); err != nil {
-			return nil, nil, nil, nil, sql.NullString{}, err
-		}
 	}
 
 	bufferedBody := bufio.NewReader(bodyReader)

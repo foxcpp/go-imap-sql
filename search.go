@@ -44,61 +44,12 @@ func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uin
 
 	var res []uint32
 	for rows.Next() {
-		var seqNum, msgId uint32
-		var dateUnix int64
-		var bodyLen int
-		var headerBlob, bodyBlob []byte
-		var flagStr string
-		var extBodyKey sql.NullString
-
-		if needBody {
-			err = rows.Scan(&seqNum, &msgId, &dateUnix, &headerBlob, &bodyLen, &extBodyKey, &bodyBlob, &flagStr)
-		} else {
-			err = rows.Scan(&seqNum, &msgId, &dateUnix, &bodyLen, &flagStr)
-		}
+		id, err := m.searchMatches(uid, needBody, rows, criteria)
 		if err != nil {
 			return nil, err
 		}
-
-		flags := strings.Split(flagStr, flagsSep)
-		if len(flags) == 1 && flags[0] == "" {
-			flags = nil
-		}
-
-		var hdr textproto.Header
-		var bufferedBody BufferedReadCloser
-		if needBody {
-			bufferedBody, err = m.openBody(true, extBodyKey, headerBlob, bodyBlob)
-			if err != nil {
-				return nil, err
-			}
-			// FIXME: This will backfire if we have a lot of messages to scan
-			// and we are reading them from files.
-			defer bufferedBody.Close()
-
-			hdr, err = textproto.ReadHeader(bufferedBody.Reader)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		ent, err := message.New(message.Header{Header: hdr}, bufferedBody.Reader)
-		if err != nil {
-			return nil, err
-		}
-
-		matched, err := backendutil.Match(ent, seqNum, msgId, time.Unix(dateUnix, 0), flags, criteria)
-		if err != nil {
-			return nil, err
-		}
-		if !matched {
-			continue
-		}
-
-		if uid {
-			res = append(res, msgId)
-		} else {
-			res = append(res, seqNum)
+		if id != 0 {
+			res = append(res, id)
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -106,6 +57,64 @@ func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uin
 	}
 
 	return res, nil
+}
+
+func (m *Mailbox) searchMatches(uid, needBody bool, rows *sql.Rows, criteria *imap.SearchCriteria) (uint32, error) {
+	var seqNum, msgId uint32
+	var dateUnix int64
+	var bodyLen int
+	var headerBlob, bodyBlob []byte
+	var flagStr string
+	var extBodyKey sql.NullString
+
+	var err error
+	if needBody {
+		err = rows.Scan(&seqNum, &msgId, &dateUnix, &headerBlob, &bodyLen, &extBodyKey, &bodyBlob, &flagStr)
+	} else {
+		err = rows.Scan(&seqNum, &msgId, &dateUnix, &bodyLen, &flagStr)
+	}
+	if err != nil {
+		return 0, err
+	}
+
+	flags := strings.Split(flagStr, flagsSep)
+	if len(flags) == 1 && flags[0] == "" {
+		flags = nil
+	}
+
+	var hdr textproto.Header
+	var bufferedBody BufferedReadCloser
+	if needBody {
+		bufferedBody, err = m.openBody(true, extBodyKey, headerBlob, bodyBlob)
+		if err != nil {
+			return 0, err
+		}
+		defer bufferedBody.Close()
+
+		hdr, err = textproto.ReadHeader(bufferedBody.Reader)
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	ent, err := message.New(message.Header{Header: hdr}, bufferedBody.Reader)
+	if err != nil {
+		return 0, err
+	}
+
+	matched, err := backendutil.Match(ent, seqNum, msgId, time.Unix(dateUnix, 0), flags, criteria)
+	if err != nil {
+		return 0, err
+	}
+	if !matched {
+		return 0, nil
+	}
+
+	if uid {
+		return msgId, nil
+	} else {
+		return seqNum, nil
+	}
 }
 
 func searchNeedsBody(criteria *imap.SearchCriteria) bool {

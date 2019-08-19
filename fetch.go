@@ -119,7 +119,7 @@ func makeScanArgs(data *scanData, rows *sql.Rows) ([]interface{}, error) {
 
 func (m *Mailbox) scanMessages(rows *sql.Rows, items []imap.FetchItem, ch chan<- *imap.Message) error {
 	defer rows.Close()
-	data := scanData{bodyLen: 15}
+	data := scanData{}
 
 	scanArgs, err := makeScanArgs(&data, rows)
 	if err != nil {

@@ -5,11 +5,10 @@ import (
 	"bytes"
 	"database/sql"
 	"io"
-	"io/ioutil"
 	"strings"
 	"time"
 
-	imap "github.com/emersion/go-imap"
+	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/backend/backendutil"
 	"github.com/emersion/go-message/textproto"
 	jsoniter "github.com/json-iterator/go"
@@ -194,21 +193,21 @@ func (m *Mailbox) extractBodyPart(item imap.FetchItem, data *scanData, msg *imap
 			return err
 		}
 	case needHeader, needFullBody:
-		body, err := m.openBody(data.extBodyKey, data.headerBlob, data.bodyBlob)
+		bufferedBody, err := m.openBody(data.parsedHeader == nil, data.extBodyKey, data.headerBlob, data.bodyBlob)
 		if err != nil {
 			return err
 		}
-		bufferedBody := bufio.NewReader(body)
+		defer bufferedBody.Close()
 
 		if data.parsedHeader == nil {
-			hdr, err := textproto.ReadHeader(bufferedBody)
+			hdr, err := textproto.ReadHeader(bufferedBody.Reader)
 			if err != nil {
 				return err
 			}
 			data.parsedHeader = &hdr
 		}
 
-		msg.Body[sect], err = backendutil.FetchBodySection(*data.parsedHeader, bufferedBody, sect)
+		msg.Body[sect], err = backendutil.FetchBodySection(*data.parsedHeader, bufferedBody.Reader, sect)
 		if err != nil {
 			return err
 		}
@@ -217,15 +216,36 @@ func (m *Mailbox) extractBodyPart(item imap.FetchItem, data *scanData, msg *imap
 	return nil
 }
 
-func (m *Mailbox) openBody(extBodyKey sql.NullString, headerBlob, bodyBlob []byte) (io.ReadCloser, error) {
+type BufferedReadCloser struct {
+	*bufio.Reader
+	io.Closer
+}
+
+type nopCloser struct{}
+
+func (n nopCloser) Close() error {
+	return nil
+}
+
+func (m *Mailbox) openBody(needHeader bool, extBodyKey sql.NullString, headerBlob, bodyBlob []byte) (BufferedReadCloser, error) {
 	if extBodyKey.Valid {
 		rdr, err := m.parent.Opts.ExternalStore.Open(extBodyKey.String)
 		if err != nil {
-			return nil, err
+			return BufferedReadCloser{}, err
 		}
-		return rdr, nil
+		return BufferedReadCloser{Reader: bufio.NewReader(rdr), Closer: rdr}, nil
 	}
-	return ioutil.NopCloser(io.MultiReader(bytes.NewReader(headerBlob), bytes.NewReader(bodyBlob))), nil
+	if needHeader {
+		return BufferedReadCloser{
+			Reader: bufio.NewReader(io.MultiReader(bytes.NewReader(headerBlob), bytes.NewReader(bodyBlob))),
+			Closer: nopCloser{},
+		}, nil
+	} else {
+		return BufferedReadCloser{
+			Reader: bufio.NewReader(bytes.NewReader(bodyBlob)),
+			Closer: nopCloser{},
+		}, nil
+	}
 }
 
 func headerSubsetFromCached(sect *imap.BodySectionName, cachedHeader map[string][]string) (imap.Literal, error) {

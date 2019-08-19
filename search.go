@@ -5,9 +5,10 @@ import (
 	"strings"
 	"time"
 
-	imap "github.com/emersion/go-imap"
+	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/backend/backendutil"
 	"github.com/emersion/go-message"
+	"github.com/emersion/go-message/textproto"
 )
 
 func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uint32, error) {
@@ -64,21 +65,26 @@ func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uin
 			flags = nil
 		}
 
-		var ent *message.Entity
+		var hdr textproto.Header
+		var bufferedBody BufferedReadCloser
 		if needBody {
-			body, err := m.openBody(extBodyKey, headerBlob, bodyBlob)
+			bufferedBody, err = m.openBody(true, extBodyKey, headerBlob, bodyBlob)
 			if err != nil {
 				return nil, err
 			}
-			ent, err = message.Read(body)
+			// FIXME: This will backfire if we have a lot of messages to scan
+			// and we are reading them from files.
+			defer bufferedBody.Close()
+
+			hdr, err = textproto.ReadHeader(bufferedBody.Reader)
 			if err != nil {
 				return nil, err
 			}
-		} else {
-			ent, err = message.New(message.Header{}, nil)
-			if err != nil {
-				panic(err)
-			}
+		}
+
+		ent, err := message.New(message.Header{Header: hdr}, bufferedBody.Reader)
+		if err != nil {
+			return nil, err
 		}
 
 		matched, err := backendutil.Match(ent, seqNum, msgId, time.Unix(dateUnix, 0), flags, criteria)

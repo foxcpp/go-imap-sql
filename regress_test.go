@@ -1,12 +1,14 @@
 package imapsql
 
 import (
+	"io/ioutil"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/emersion/go-imap"
 	"gotest.tools/assert"
+	is "gotest.tools/assert/cmp"
 )
 
 const (
@@ -58,5 +60,45 @@ func TestIssue7(t *testing.T) {
 			assert.Check(t, !seenUids[uid], "Duplicate UID in SEARCH ALL response")
 			seenUids[uid] = true
 		}
+	})
+}
+
+func TestHeaderInMultipleBodyFetch(t *testing.T) {
+	test := func(t *testing.T, fetchItems []imap.FetchItem) {
+		b := initTestBackend()
+		defer cleanBackend(b)
+		assert.NilError(t, b.CreateUser(t.Name(), ""))
+		usr, err := b.GetUser(t.Name())
+		assert.NilError(t, err)
+		assert.NilError(t, usr.CreateMailbox(t.Name()))
+		mbox, err := usr.GetMailbox(t.Name())
+		assert.NilError(t, err)
+		for i := 0; i < 5; i++ {
+			assert.NilError(t, mbox.CreateMessage([]string{}, time.Now(), strings.NewReader(testMsg)))
+		}
+
+		seq, _ := imap.ParseSeqSet("1")
+		ch := make(chan *imap.Message, 5)
+		assert.NilError(t, mbox.ListMessages(false, seq, fetchItems, ch), "ListMessages")
+		assert.Assert(t, is.Len(ch, 1))
+		msg := <-ch
+
+		for name, literal := range msg.Body {
+			blob, err := ioutil.ReadAll(literal)
+			assert.NilError(t, err, "ReadAll literal")
+			switch name.FetchItem() {
+			case "BODY.PEEK[HEADER]":
+				assert.Equal(t, string(blob), testMsgHeader)
+			case "BODY.PEEK[TEXT]":
+				assert.Equal(t, string(blob), testMsgBody)
+			}
+		}
+	}
+
+	t.Run("text/text", func(t *testing.T) {
+		test(t, []imap.FetchItem{"BODY.PEEK[TEXT]", "BODY.PEEK[TEXT]"})
+	})
+	t.Run("header/text", func(t *testing.T) {
+		test(t, []imap.FetchItem{"BODY.PEEK[HEADER]", "BODY.PEEK[TEXT]"})
 	})
 }

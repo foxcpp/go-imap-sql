@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"io"
 	"io/ioutil"
+	"strings"
 	"time"
 
 	"github.com/emersion/go-imap"
@@ -30,16 +31,17 @@ var ErrDeliveryInterrupted = errors.New("sql: delivery transaction interrupted, 
 // In that case, either Body* or Commit will return ErrDeliveryInterrupt.
 // Sender should retry delivery after a short delay.
 func (b *Backend) StartDelivery() (*Delivery, error) {
-	return &Delivery{b: b}, nil
+	return &Delivery{b: b, perRcptHeader: map[string]textproto.Header{}}, nil
 }
 
 type Delivery struct {
-	b       *Backend
-	tx      *sql.Tx
-	users   []*User
-	mboxes  []*Mailbox
-	extKey  string
-	updates []backend.Update
+	b             *Backend
+	tx            *sql.Tx
+	users         []*User
+	mboxes        []*Mailbox
+	extKey        string
+	updates       []backend.Update
+	perRcptHeader map[string]textproto.Header
 }
 
 // AddRcpt adds the recipient username/mailbox pair to the delivery.
@@ -51,12 +53,19 @@ type Delivery struct {
 // is called, but it can disappear before Body* call, in which case
 // Delivery will be terminated with ErrDeliveryInterrupted error.
 // See Backend.StartDelivery method documentation for details.
-func (d *Delivery) AddRcpt(username string) error {
+//
+// Fields from userHeader, if any, will be prepended to the message header
+// *only* for that recipient. Use this to add Received and Delivered-To
+// fields with recipient-specific information (e.g. its address).
+func (d *Delivery) AddRcpt(username string, userHeader textproto.Header) error {
 	u, err := d.b.GetUser(username)
 	if err != nil {
 		return err
 	}
 	d.users = append(d.users, u.(*User))
+
+	d.perRcptHeader[strings.ToLower(username)] = userHeader
+
 	return nil
 }
 
@@ -133,7 +142,39 @@ func (d *Delivery) SpecialMailbox(attribute, fallbackName string) error {
 	return nil
 }
 
-func (d *Delivery) body(extBodyKey sql.NullString, length int, bodyBlob []byte, headerBlob []byte, bodyStruct []byte, cachedHeader []byte) error {
+type memoryBuffer struct {
+	slice []byte
+}
+
+func (mb memoryBuffer) Open() (io.ReadCloser, error) {
+	return ioutil.NopCloser(bytes.NewReader(mb.slice)), nil
+}
+
+// BodyRaw is convenience wrapper for BodyParsed. Use it only for most simple cases (e.g. for tests).
+//
+// You want to use BodyParsed in most cases. It is much more efficient. BodyRaw reads the entire message
+// into memory.
+func (d *Delivery) BodyRaw(message io.Reader) error {
+	bufferedMsg := bufio.NewReader(message)
+	hdr, err := textproto.ReadHeader(bufferedMsg)
+	if err != nil {
+		return err
+	}
+
+	blob, err := ioutil.ReadAll(bufferedMsg)
+	if err != nil {
+		return err
+	}
+
+	return d.BodyParsed(hdr, len(blob), memoryBuffer{slice: blob})
+}
+
+// Buffer is the temporary storage for the message body.
+type Buffer interface {
+	Open() (io.ReadCloser, error)
+}
+
+func (d *Delivery) BodyParsed(header textproto.Header, bodyLen int, body Buffer) error {
 	if d.mboxes == nil {
 		if err := d.Mailbox("INBOX"); err != nil {
 			return err
@@ -153,75 +194,80 @@ func (d *Delivery) body(extBodyKey sql.NullString, length int, bodyBlob []byte, 
 		return errors.Wrap(err, "Body")
 	}
 
-	if extBodyKey.Valid {
-		if _, err = d.tx.Stmt(d.b.addExtKey).Exec(extBodyKey, len(d.mboxes)); err != nil {
-			return errors.Wrap(err, "Body")
-		}
-	}
 	for _, mbox := range d.mboxes {
-		msgId, err := mbox.uidNext(d.tx)
+		err := d.mboxDelivery(header, mbox, bodyLen, body, date, flagsStmt)
 		if err != nil {
-			return errors.Wrap(err, "Body")
+			return err
 		}
-
-		_, err = d.tx.Stmt(d.b.addMsg).Exec(
-			mbox.id, msgId, date.Unix(),
-			length, bodyBlob, headerBlob,
-			bodyStruct, cachedHeader, extBodyKey,
-		)
-		if err != nil {
-			return errors.Wrap(err, "Body")
-		}
-
-		params := mbox.makeFlagsAddStmtArgs(true, []string{imap.RecentFlag}, imap.Seq{Start: msgId, Stop: msgId})
-		if _, err := d.tx.Stmt(flagsStmt).Exec(params...); err != nil {
-			return errors.Wrap(err, "Body")
-		}
-
-		if _, err := d.tx.Stmt(d.b.addUidNext).Exec(1, mbox.id); err != nil {
-			return errors.Wrap(err, "Body")
-		}
-
-		upd, err := mbox.statusUpdate(d.tx)
-		if err != nil {
-			return errors.Wrap(err, "Body")
-		}
-		d.updates = append(d.updates, upd)
 	}
+
 	return nil
 }
 
-// BodyRaw assigns the raw message blob to the delivery.
-//
-// go-imap-sql needs to parse the header to extract the envelope information
-// so if you already have parsed header object - it is preferable to use BodyParsed
-// method instead of BodyRaw.
-//
-// Also note that BodyRaw/BodyParsed can be called only once for a Delivery object.
-// Behavior is undefined when it is called multiple times.
-func (d *Delivery) BodyRaw(fullMsg imap.Literal) error {
-	headerBlob, bodyBlob, bodyStruct, cachedHeader, extBodyKey, err := d.b.processBody(fullMsg)
-	if err != nil {
-		return err
+func (d *Delivery) mboxDelivery(header textproto.Header, mbox *Mailbox, bodyLen int, body Buffer, date time.Time, flagsStmt *sql.Stmt) (err error) {
+	header = header.Copy()
+	userHeader := d.perRcptHeader[mbox.user.username]
+	for fields := userHeader.Fields(); fields.Next(); {
+		header.Add(fields.Key(), fields.Value())
 	}
 
-	return d.body(extBodyKey, fullMsg.Len(), bodyBlob, headerBlob, bodyStruct, cachedHeader)
-}
-
-func (d *Delivery) BodyParsed(header textproto.Header, body imap.Literal) error {
 	headerBlob := bytes.Buffer{}
 	if err := textproto.WriteHeader(&headerBlob, header); err != nil {
 		return errors.Wrap(err, "Body")
 	}
 
-	bodyLen := headerBlob.Len() + body.Len()
-
-	headerBlobField, bodyBlob, bodyStruct, cachedHeader, extBodyKey, err := d.b.processParsedBody(headerBlob.Bytes(), header, body)
+	length := headerBlob.Len() + bodyLen
+	bodyReader, err := body.Open()
 	if err != nil {
 		return err
 	}
 
-	return d.body(extBodyKey, bodyLen, bodyBlob, headerBlobField, bodyStruct, cachedHeader)
+	headerBlobField, bodyBlob, bodyStruct, cachedHeader, extBodyKey, err := d.b.processParsedBody(headerBlob.Bytes(), header, bodyReader)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		// Delete created ExternalStore object if something went wrong.
+		if err != nil && extBodyKey.Valid {
+			d.b.Opts.ExternalStore.Delete([]string{extBodyKey.String})
+		}
+	}()
+
+	if extBodyKey.Valid {
+		if _, err = d.tx.Stmt(d.b.addExtKey).Exec(extBodyKey, 1); err != nil {
+			return errors.Wrap(err, "Body")
+		}
+	}
+
+	msgId, err := mbox.uidNext(d.tx)
+	if err != nil {
+		return errors.Wrap(err, "Body")
+	}
+
+	_, err = d.tx.Stmt(d.b.addMsg).Exec(
+		mbox.id, msgId, date.Unix(),
+		length, bodyBlob, headerBlobField,
+		bodyStruct, cachedHeader, extBodyKey,
+	)
+	if err != nil {
+		return errors.Wrap(err, "Body")
+	}
+
+	params := mbox.makeFlagsAddStmtArgs(true, []string{imap.RecentFlag}, imap.Seq{Start: msgId, Stop: msgId})
+	if _, err := d.tx.Stmt(flagsStmt).Exec(params...); err != nil {
+		return errors.Wrap(err, "Body")
+	}
+
+	if _, err := d.tx.Stmt(d.b.addUidNext).Exec(1, mbox.id); err != nil {
+		return errors.Wrap(err, "Body")
+	}
+
+	upd, err := mbox.statusUpdate(d.tx)
+	if err != nil {
+		return errors.Wrap(err, "Body")
+	}
+	d.updates = append(d.updates, upd)
+	return nil
 }
 
 func (d *Delivery) Abort() error {
@@ -256,8 +302,8 @@ func (d *Delivery) Commit() error {
 	return nil
 }
 
-func (b *Backend) processParsedBody(headerInput []byte, header textproto.Header, bodyLiteral imap.Literal) (headerBlob, bodyBlob, bodyStruct, cachedHeader []byte, extBodyKey sql.NullString, err error) {
-	var bodyReader io.Reader = bodyLiteral
+func (b *Backend) processParsedBody(headerInput []byte, header textproto.Header, bodyLiteral io.Reader) (headerBlob, bodyBlob, bodyStruct, cachedHeader []byte, extBodyKey sql.NullString, err error) {
+	bodyReader := bodyLiteral
 	if b.Opts.ExternalStore != nil {
 		extBodyKey.String, err = randomKey()
 		if err != nil {

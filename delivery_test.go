@@ -63,8 +63,8 @@ func TestDelivery(t *testing.T) {
 	delivery, err := b.StartDelivery()
 	assert.NilError(t, err, "StartDelivery")
 
-	assert.NilError(t, delivery.AddRcpt(t.Name()+"-1"), "AddRcpt 1")
-	assert.NilError(t, delivery.AddRcpt(t.Name()+"-2"), "AddRcpt 2")
+	assert.NilError(t, delivery.AddRcpt(t.Name()+"-1", textproto.Header{}), "AddRcpt 1")
+	assert.NilError(t, delivery.AddRcpt(t.Name()+"-2", textproto.Header{}), "AddRcpt 2")
 
 	assert.NilError(t, delivery.BodyRaw(strings.NewReader(testMsg)), "BodyRaw")
 	assert.NilError(t, delivery.Commit(), "Commit")
@@ -117,7 +117,7 @@ func TestDelivery_Abort(t *testing.T) {
 
 	delivery, err := b.StartDelivery()
 	assert.NilError(t, err, "StartDelivery")
-	assert.NilError(t, delivery.AddRcpt(t.Name()), "AddRcpt")
+	assert.NilError(t, delivery.AddRcpt(t.Name(), textproto.Header{}), "AddRcpt")
 	assert.NilError(t, delivery.BodyRaw(strings.NewReader(testMsg)), "BodyRaw")
 	assert.NilError(t, delivery.Abort(), "Abort")
 
@@ -137,9 +137,9 @@ func TestDelivery_AddRcpt_NonExistent(t *testing.T) {
 
 	delivery, err := b.StartDelivery()
 	assert.NilError(t, err, "StartDelivery")
-	assert.NilError(t, delivery.AddRcpt(t.Name()))
+	assert.NilError(t, delivery.AddRcpt(t.Name(), textproto.Header{}))
 
-	err = delivery.AddRcpt("NON-EXISTENT")
+	err = delivery.AddRcpt("NON-EXISTENT", textproto.Header{})
 	assert.Assert(t, err != nil, "AddRcpt NON-EXISTENT INBOX")
 
 	// Then, however, delivery should continue as if nothing happened.
@@ -191,7 +191,7 @@ func TestDelivery_Mailbox(t *testing.T) {
 		delivery, err := b.StartDelivery()
 		assert.NilError(t, err, "StartDelivery")
 
-		assert.NilError(t, delivery.AddRcpt(t.Name()), "AddRcpt")
+		assert.NilError(t, delivery.AddRcpt(t.Name(), textproto.Header{}), "AddRcpt")
 
 		assert.NilError(t, delivery.Mailbox("Box"))
 		assert.NilError(t, delivery.BodyRaw(strings.NewReader(testMsg)), "BodyRaw")
@@ -230,7 +230,7 @@ func TestDelivery_SpecialMailbox(t *testing.T) {
 		delivery, err := b.StartDelivery()
 		assert.NilError(t, err, "StartDelivery")
 
-		assert.NilError(t, delivery.AddRcpt(t.Name()), "AddRcpt")
+		assert.NilError(t, delivery.AddRcpt(t.Name(), textproto.Header{}), "AddRcpt")
 
 		assert.NilError(t, delivery.SpecialMailbox(specialUse, "Box"))
 		assert.NilError(t, delivery.BodyRaw(strings.NewReader(testMsg)), "BodyRaw")
@@ -274,10 +274,11 @@ func TestDelivery_BodyParsed(t *testing.T) {
 	delivery, err := b.StartDelivery()
 	assert.NilError(t, err, "StartDelivery")
 
-	assert.NilError(t, delivery.AddRcpt(t.Name()), "AddRcpt")
+	assert.NilError(t, delivery.AddRcpt(t.Name(), textproto.Header{}), "AddRcpt")
 
+	buf := memoryBuffer{slice: []byte(testMsgBody)}
 	hdr, _ := textproto.ReadHeader(bufio.NewReader(strings.NewReader(testMsgHeader)))
-	assert.NilError(t, delivery.BodyParsed(hdr, strings.NewReader(testMsgBody)), "BodyParsed")
+	assert.NilError(t, delivery.BodyParsed(hdr, len(testMsgBody), buf), "BodyParsed")
 	assert.NilError(t, delivery.Commit(), "Commit")
 
 	u, err := b.GetUser(t.Name())
@@ -293,4 +294,56 @@ func TestDelivery_BodyParsed(t *testing.T) {
 	assert.Assert(t, is.Len(ch, 1))
 	msg := <-ch
 	checkTestMsg(t, msg)
+}
+
+func TestDelivery_UserHeader(t *testing.T) {
+	b := initTestBackend().(*Backend)
+	defer cleanBackend(b)
+	assert.NilError(t, b.CreateUser(t.Name()+"-1", ""), "CreateUser 1")
+	assert.NilError(t, b.CreateUser(t.Name()+"-2", ""), "CreateUser 2")
+
+	delivery, err := b.StartDelivery()
+	assert.NilError(t, err, "StartDelivery")
+
+	hdr1 := textproto.Header{}
+	hdr1.Set("Test-Header", "1")
+	assert.NilError(t, delivery.AddRcpt(t.Name()+"-1", hdr1), "AddRcpt 1")
+	hdr2 := textproto.Header{}
+	hdr2.Set("Test-Header", "2")
+	assert.NilError(t, delivery.AddRcpt(t.Name()+"-2", hdr2), "AddRcpt 2")
+
+	assert.NilError(t, delivery.BodyRaw(strings.NewReader(testMsg)), "BodyRaw")
+	assert.NilError(t, delivery.Commit(), "Commit")
+
+	u1, err := b.GetUser(t.Name() + "-1")
+	assert.NilError(t, err, "GetUser 1")
+	u2, err := b.GetUser(t.Name() + "-2")
+	assert.NilError(t, err, "GetUser 2")
+
+	mbox1, err := u1.GetMailbox("INBOX")
+	assert.NilError(t, err, "GetMailbox 1 INBOX")
+	mbox2, err := u2.GetMailbox("INBOX")
+	assert.NilError(t, err, "GetMailbox 2 INBOX")
+
+	seq, _ := imap.ParseSeqSet("*")
+	ch := make(chan *imap.Message, 10)
+
+	assert.NilError(t, mbox1.ListMessages(false, seq, []imap.FetchItem{"BODY.PEEK[HEADER]"}, ch), "ListMessages")
+	assert.Assert(t, is.Len(ch, 1))
+	msg := <-ch
+	for _, part := range msg.Body {
+		hdr, err := textproto.ReadHeader(bufio.NewReader(part))
+		assert.NilError(t, err, "ReadHeader")
+		assert.Check(t, is.Equal(hdr.Get("Test-Header"), "1"), "wrong user header stored")
+	}
+
+	ch = make(chan *imap.Message, 10)
+	assert.NilError(t, mbox2.ListMessages(false, seq, []imap.FetchItem{"BODY.PEEK[HEADER]"}, ch), "ListMessages")
+	assert.Assert(t, is.Len(ch, 1))
+	msg = <-ch
+	for _, part := range msg.Body {
+		hdr, err := textproto.ReadHeader(bufio.NewReader(part))
+		assert.NilError(t, err, "ReadHeader")
+		assert.Check(t, is.Equal(hdr.Get("Test-Header"), "2"), "wrong user header stored")
+	}
 }

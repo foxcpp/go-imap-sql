@@ -206,6 +206,10 @@ type Backend struct {
 	flagsSearchStmtsCache map[string]*sql.Stmt
 	fetchStmtsLck         sync.RWMutex
 	fetchStmtsCache       map[string]*sql.Stmt
+	addFlagsStmtsLck      sync.RWMutex
+	addFlagsStmtsCache    map[string]*sql.Stmt
+	remFlagsStmtsLck      sync.RWMutex
+	remFlagsStmtsCache    map[string]*sql.Stmt
 
 	// extkeys table
 	addExtKey             *sql.Stmt
@@ -233,6 +237,8 @@ func New(driver, dsn string, opts Opts) (*Backend, error) {
 	b := &Backend{
 		fetchStmtsCache:       make(map[string]*sql.Stmt),
 		flagsSearchStmtsCache: make(map[string]*sql.Stmt),
+		addFlagsStmtsCache:    make(map[string]*sql.Stmt),
+		remFlagsStmtsCache:    make(map[string]*sql.Stmt),
 		hashAlgorithms:        make(map[string]hashAlgorithm),
 	}
 	var err error

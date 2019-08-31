@@ -21,7 +21,7 @@ func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.Fetch
 	setSeen := shouldSetSeen(items)
 	var addSeenStmt *sql.Stmt
 	if setSeen {
-		addSeenStmt, err = m.parent.makeFlagsAddStmt(uid, []string{imap.SeenFlag})
+		addSeenStmt, err = m.parent.getFlagsAddStmt(uid, []string{imap.SeenFlag})
 		if err != nil {
 			return err
 		}

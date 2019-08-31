@@ -322,7 +322,7 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 	if !haveRecent {
 		flags = append(flags, imap.RecentFlag)
 	}
-	stmt, err := m.parent.makeFlagsAddStmt(true, flags)
+	stmt, err := m.parent.getFlagsAddStmt(true, flags)
 	if err != nil {
 		return errors.Wrap(err, "CreateMessage")
 	}

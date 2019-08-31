@@ -182,7 +182,7 @@ func (d *Delivery) BodyParsed(header textproto.Header, bodyLen int, body Buffer)
 	}
 
 	d.updates = make([]backend.Update, 0, len(d.mboxes))
-	flagsStmt, err := d.b.makeFlagsAddStmt(true, []string{imap.RecentFlag})
+	flagsStmt, err := d.b.getFlagsAddStmt(true, []string{imap.RecentFlag})
 	if err != nil {
 		return errors.Wrap(err, "Body")
 	}

@@ -14,9 +14,9 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 	var addQuery, remQuery *sql.Stmt
 	switch operation {
 	case imap.SetFlags, imap.AddFlags:
-		addQuery, err = m.parent.makeFlagsAddStmt(uid, flags)
+		addQuery, err = m.parent.getFlagsAddStmt(uid, flags)
 	case imap.RemoveFlags:
-		remQuery, err = m.parent.makeFlagsRemStmt(uid, flags)
+		remQuery, err = m.parent.getFlagsRemStmt(uid, flags)
 	}
 	if err != nil {
 		return errors.Wrap(err, "UpdateMessagesFlags")

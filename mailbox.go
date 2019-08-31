@@ -314,9 +314,13 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 	// Important to run before transaction, otherwise it will deadlock on
 	// SQLite.
 	haveRecent := false
+	haveSeen := false
 	for _, flag := range flags {
 		if flag == imap.RecentFlag {
 			haveRecent = true
+		}
+		if flag == imap.SeenFlag {
+			haveSeen = true
 		}
 	}
 	if !haveRecent {
@@ -354,6 +358,7 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		m.id, msgId, date.Unix(),
 		bodyLen, body, hdr,
 		bodyStruct, cachedHdr, extBodyKey,
+		haveSeen,
 	)
 	if err != nil {
 		return errors.Wrap(err, "CreateMessage (addMsg)")
@@ -364,7 +369,7 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		return errors.Wrap(err, "CreateMessage (flags)")
 	}
 
-	if _, err := tx.Stmt(m.parent.addUidNext).Exec(1, m.id); err != nil {
+	if _, err := tx.Stmt(m.parent.increaseMsgCount).Exec(1, 1, m.id); err != nil {
 		return errors.Wrap(err, "CreateMessage (uidnext bump)")
 	}
 
@@ -546,7 +551,11 @@ func (m *Mailbox) delMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, updsBuf
 		}
 	}
 
-	_, err = tx.Stmt(m.parent.delMarked).Exec()
+	if _, err := tx.Stmt(m.parent.delMarked).Exec(); err != nil {
+		return err
+	}
+
+	_, err = tx.Stmt(m.parent.decreaseMsgCount).Exec(len(*updsBuffer), m.id)
 	return err
 }
 
@@ -606,7 +615,7 @@ func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest s
 			return err
 		}
 
-		if _, err := tx.Stmt(m.parent.addUidNext).Exec(affected, destID); err != nil {
+		if _, err := tx.Stmt(m.parent.increaseMsgCount).Exec(affected, affected, destID); err != nil {
 			return err
 		}
 	}

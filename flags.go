@@ -28,10 +28,14 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 	}
 	defer tx.Rollback() //nolint:errcheck
 
+	seenModified := false
 	newFlagSet := make([]string, 0, len(flags))
 	for _, flag := range flags {
 		if flag == imap.RecentFlag {
 			continue
+		}
+		if flag == imap.SeenFlag {
+			seenModified = true
 		}
 		newFlagSet = append(newFlagSet, flag)
 	}
@@ -55,10 +59,32 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 			if _, err := tx.Stmt(addQuery).Exec(args...); err != nil {
 				return err
 			}
+			if seenModified {
+				start, stop := sqlRange(seq)
+				if uid {
+					_, err = tx.Stmt(m.parent.setSeenFlagUid).Exec(1, m.id, start, stop)
+				} else {
+					_, err = tx.Stmt(m.parent.setSeenFlagSeq).Exec(1, m.id, m.id, start, stop)
+				}
+				if err != nil {
+					return err
+				}
+			}
 		case imap.RemoveFlags:
 			args := m.makeFlagsRemStmtArgs(uid, flags, seq)
 			if _, err := tx.Stmt(remQuery).Exec(args...); err != nil {
 				return err
+			}
+			if seenModified {
+				start, stop := sqlRange(seq)
+				if uid {
+					_, err = tx.Stmt(m.parent.setSeenFlagUid).Exec(0, m.id, start, stop)
+				} else {
+					_, err = tx.Stmt(m.parent.setSeenFlagSeq).Exec(0, m.id, m.id, start, stop)
+				}
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}

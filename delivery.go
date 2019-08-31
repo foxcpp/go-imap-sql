@@ -248,6 +248,7 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox *Mailbox, bodyLen 
 		mbox.id, msgId, date.Unix(),
 		length, bodyBlob, headerBlobField,
 		bodyStruct, cachedHeader, extBodyKey,
+		0,
 	)
 	if err != nil {
 		return errors.Wrap(err, "Body")
@@ -258,7 +259,7 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox *Mailbox, bodyLen 
 		return errors.Wrap(err, "Body")
 	}
 
-	if _, err := d.tx.Stmt(d.b.addUidNext).Exec(1, mbox.id); err != nil {
+	if _, err := d.tx.Stmt(d.b.increaseMsgCount).Exec(1, 1, mbox.id); err != nil {
 		return errors.Wrap(err, "Body")
 	}
 

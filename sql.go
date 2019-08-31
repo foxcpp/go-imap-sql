@@ -95,6 +95,8 @@ func (b *Backend) initSchema() error {
 			uidvalidity BIGINT NOT NULL,
             specialuse VARCHAR(255) DEFAULT NULL,
 
+            msgsCount INTEGER NOT NULL DEFAULT 0,
+
 			UNIQUE(uid, name)
 		)`)
 	if err != nil {
@@ -122,6 +124,8 @@ func (b *Backend) initSchema() error {
 			cachedHeader LONGTEXT NOT NULL,
 			extBodyKey VARCHAR(255) DEFAULT NULL REFERENCES extKeys(id) ON DELETE RESTRICT,
 
+            seen INTEGER NOT NULL DEFAULT 0,
+
 			PRIMARY KEY(mboxId, msgId)
 		)`)
 	if err != nil {
@@ -139,6 +143,10 @@ func (b *Backend) initSchema() error {
 	if err != nil {
 		return errors.Wrap(err, "create table flags")
 	}
+
+	_, err = b.db.Exec(`
+        CREATE INDEX IF NOT EXISTS seen_msgs
+        ON msgs(mboxId, seen)`)
 
 	return nil
 }
@@ -254,12 +262,20 @@ func (b *Backend) prepareStmts() error {
 	if err != nil {
 		return errors.Wrap(err, "uidNext prep")
 	}
-	b.addUidNext, err = b.db.Prepare(`
+	b.increaseMsgCount, err = b.db.Prepare(`
 		UPDATE mboxes
-		SET uidnext = uidnext + ?
+		SET uidnext = uidnext + ?,
+            msgsCount = msgsCount + ?
 		WHERE id = ?`)
 	if err != nil {
-		return errors.Wrap(err, "addUidNext prep")
+		return errors.Wrap(err, "increaseMsgCount prep")
+	}
+	b.decreaseMsgCount, err = b.db.Prepare(`
+		UPDATE mboxes
+		SET msgsCount = msgsCount - ?
+		WHERE id = ?`)
+	if err != nil {
+		return errors.Wrap(err, "decreaseMsgCount prep")
 	}
 	b.uidValidity, err = b.db.Prepare(`
 		SELECT uidvalidity
@@ -269,35 +285,35 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "uidvalidity prep")
 	}
 	b.msgsCount, err = b.db.Prepare(`
-		SELECT count(*)
-		FROM msgs
-		WHERE mboxId = ?`)
+		SELECT msgsCount
+		FROM mboxes
+		WHERE id = ?`)
 	if err != nil {
 		return errors.Wrap(err, "msgsCount prep")
 	}
+	// TODO: While \Recent is not implemented, this query is smae as msgsCount.
+	// In future, it should maintain its own counter
 	b.recentCount, err = b.db.Prepare(`
-		SELECT count(*)
-		FROM flags
-		WHERE mboxId = ? AND flag = '\Recent'`)
+		SELECT msgsCount
+		FROM mboxes
+		WHERE id = ?`)
 	if err != nil {
 		return errors.Wrap(err, "recentCount prep")
 	}
-	// TODO: This query is kinda expensive, consider moving
-	// flags with special semantics (Recent, Seen, Deleted) to
-	// msgs table as columns.
 	b.firstUnseenSeqNum, err = b.db.Prepare(`
-		SELECT rownr
-		FROM (
-			SELECT row_number() OVER (ORDER BY msgId) AS rownr, msgId
-			FROM msgs
-			WHERE mboxId = ?
-		) seqnum
-		WHERE msgId NOT IN (
-			SELECT msgId
-			FROM flags
-			WHERE mboxId = ?
-			AND flag = '\Seen'
-		)`)
+        SELECT rownr
+        FROM (
+            SELECT row_number() OVER (ORDER BY msgId) AS rownr, msgId, seen
+            FROM msgs
+            WHERE mboxId = ?
+        )
+        WHERE msgId = (
+            SELECT msgId
+            FROM msgs
+            WHERE mboxId = ?
+            AND seen = 0
+            LIMIT 1
+        )`)
 	if err != nil {
 		return errors.Wrap(err, "firstUnseenSeqNum prep")
 	}
@@ -337,8 +353,8 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "mboxId prep")
 	}
 	b.addMsg, err = b.db.Prepare(`
-		INSERT INTO msgs(mboxId, msgId, date, bodyLen, body, header, bodyStructure, cachedHeader, extBodyKey)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		INSERT INTO msgs(mboxId, msgId, date, bodyLen, body, header, bodyStructure, cachedHeader, extBodyKey, seen)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return errors.Wrap(err, "addMsg prep")
 	}
@@ -348,7 +364,7 @@ func (b *Backend) prepareStmts() error {
 			SELECT uidnext - 1
 			FROM mboxes
 			WHERE id = ?
-		) + row_number() OVER (ORDER BY msgId), date, bodyLen, body, 0 AS mark, header, bodyStructure, cachedHeader, extBodyKey
+		) + row_number() OVER (ORDER BY msgId), date, bodyLen, body, 0 AS mark, header, bodyStructure, cachedHeader, extBodyKey, seen
 		FROM msgs
 		WHERE mboxId = ? AND msgId BETWEEN ? AND ?`)
 	if err != nil {
@@ -378,9 +394,9 @@ func (b *Backend) prepareStmts() error {
 			SELECT uidnext - 1
 			FROM mboxes
 			WHERE id = ?
-		) + row_number() OVER (ORDER BY msgId), date, bodyLen, body, 0 AS mark, header, bodyStructure, cachedHeader, extBodyKey
+		) + row_number() OVER (ORDER BY msgId), date, bodyLen, body, 0 AS mark, header, bodyStructure, cachedHeader, extBodyKey, seen
 		FROM (
-			SELECT msgId, date, bodyLen, body,  header, bodyStructure, cachedHeader, extBodyKey
+			SELECT msgId, date, bodyLen, body,  header, bodyStructure, cachedHeader, extBodyKey, seen
 			FROM msgs
 			WHERE mboxId = ?
 			ORDER BY msgId
@@ -468,7 +484,7 @@ func (b *Backend) prepareStmts() error {
 			WHERE seqnum BETWEEN ? AND ?
 		)`)
 	if err != nil {
-		return errors.Wrap(err, "delMsgsSeq prep")
+		return errors.Wrap(err, "markSeq prep")
 	}
 	b.delMarked, err = b.db.Prepare(`
 		DELETE FROM msgs
@@ -715,6 +731,31 @@ func (b *Backend) prepareStmts() error {
 		LIMIT 1`)
 	if err != nil {
 		return errors.Wrap(err, "specialUseMbox")
+	}
+
+	b.setSeenFlagUid, err = b.db.Prepare(`
+		UPDATE msgs
+		SET seen = ?
+		WHERE mboxId = ?
+		AND msgId BETWEEN ? AND ?`)
+	if err != nil {
+		return errors.Wrap(err, "setSeenFlagUid prep")
+	}
+	b.setSeenFlagSeq, err = b.db.Prepare(`
+		UPDATE msgs
+		SET seen = ?
+		WHERE mboxId = ?
+		AND msgId IN (
+			SELECT msgId
+			FROM (
+				SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId
+				FROM msgs
+				WHERE mboxId = ?
+			) seq
+			WHERE seqnum BETWEEN ? AND ?
+		)`)
+	if err != nil {
+		return errors.Wrap(err, "setSeenFlagSeq prep")
 	}
 
 	return nil

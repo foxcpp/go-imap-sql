@@ -72,6 +72,21 @@ func (b *Backend) upgradeSchema(currentVer int) error {
 		}
 		currentVer = 4
 	}
+	if currentVer == 4 {
+		_, err := tx.Exec(b.db.rewriteSQL(`ALTER TABLE msgs ADD COLUMN seen INTEGER NOT NULL DEFAULT 0`))
+		if err != nil {
+			return errors.Wrap(err, "4->5 upgrade")
+		}
+		_, err = tx.Exec(b.db.rewriteSQL(`ALTER TABLE mboxes ADD COLUMN msgsCount BIGINT NOT NULL DEFAULT 0`))
+		if err != nil {
+			return errors.Wrap(err, "4->5 upgrade")
+		}
+		_, err = tx.Exec(b.db.rewriteSQL(`UPDATE mboxes SET msgsCount = (SELECT count(*) FROM msgs WHERE mboxId = mboxes.id)`))
+		if err != nil {
+			return errors.Wrap(err, "4->5 upgrade")
+		}
+		currentVer = 5
+	}
 
 	if currentVer != SchemaVersion {
 		return errors.New("database schema version is too old and can't be upgraded using this go-imap-sql version")

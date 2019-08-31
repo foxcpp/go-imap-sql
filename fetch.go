@@ -50,6 +50,13 @@ func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.Fetch
 			if _, err := tx.Stmt(addSeenStmt).Exec(params...); err != nil {
 				return err
 			}
+
+			start, stop := sqlRange(seq)
+			if uid {
+				_, err = tx.Stmt(m.parent.setSeenFlagUid).Exec(1, m.id, start, stop)
+			} else {
+				_, err = tx.Stmt(m.parent.setSeenFlagSeq).Exec(1, m.id, m.id, start, stop)
+			}
 		}
 
 		rows, err := tx.Stmt(stmt).Query(m.id, m.id, begin, end)

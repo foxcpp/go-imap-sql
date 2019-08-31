@@ -145,7 +145,6 @@ type Backend struct {
 	getMboxAttrs       *sql.Stmt
 	setSubbed          *sql.Stmt
 	uidNext            *sql.Stmt
-	addUidNext         *sql.Stmt
 	hasChildren        *sql.Stmt
 	uidValidity        *sql.Stmt
 	msgsCount          *sql.Stmt
@@ -222,6 +221,11 @@ type Backend struct {
 
 	// Used by Delivery.SpecialMailbox.
 	specialUseMbox *sql.Stmt
+
+	setSeenFlagUid   *sql.Stmt
+	setSeenFlagSeq   *sql.Stmt
+	increaseMsgCount *sql.Stmt
+	decreaseMsgCount *sql.Stmt
 }
 
 var defaultPassHashAlgo = "bcrypt"

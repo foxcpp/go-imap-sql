@@ -189,7 +189,7 @@ func (d *Delivery) BodyParsed(header textproto.Header, bodyLen int, body Buffer)
 
 	date := time.Now()
 
-	d.tx, err = d.b.db.Begin()
+	d.tx, err = d.b.db.Begin(false)
 	if err != nil {
 		return errors.Wrap(err, "Body")
 	}

@@ -1,6 +1,7 @@
 package imapsql
 
 import (
+	"context"
 	"database/sql"
 	"strconv"
 	"strings"
@@ -30,8 +31,11 @@ func (d db) Exec(req string, args ...interface{}) (sql.Result, error) {
 	return d.DB.Exec(d.rewriteSQL(req), args...)
 }
 
-func (d db) Begin() (*sql.Tx, error) {
-	return d.DB.Begin()
+func (d db) Begin(readOnly bool) (*sql.Tx, error) {
+	return d.DB.BeginTx(context.TODO(), &sql.TxOptions{
+		Isolation: sql.LevelSerializable,
+		ReadOnly:  readOnly,
+	})
 }
 
 func (d db) Close() error {

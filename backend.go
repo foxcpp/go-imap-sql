@@ -445,7 +445,7 @@ func (b *Backend) createUser(tx *sql.Tx, username string, passHashAlgo string, p
 	var shouldCommit bool
 	if tx == nil {
 		var err error
-		tx, err = b.db.Begin()
+		tx, err = b.db.Begin(false)
 		if err != nil {
 			return errors.Wrap(err, "CreateUser")
 		}
@@ -600,7 +600,7 @@ func (b *Backend) GetUser(username string) (backend.User, error) {
 func (b *Backend) GetOrCreateUser(username string) (backend.User, error) {
 	username = strings.ToLower(username)
 
-	tx, err := b.db.Begin()
+	tx, err := b.db.Begin(false)
 	if err != nil {
 		return nil, err
 	}

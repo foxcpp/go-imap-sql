@@ -36,7 +36,7 @@ func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.Fetch
 	}
 
 	// don't close statement, it is owned by cache
-	tx, err := m.parent.db.Begin()
+	tx, err := m.parent.db.Begin(!setSeen)
 	if err != nil {
 		return err
 	}

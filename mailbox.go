@@ -71,7 +71,7 @@ func (m *Mailbox) Info() (*imap.MailboxInfo, error) {
 }
 
 func (m *Mailbox) Status(items []imap.StatusItem) (*imap.MailboxStatus, error) {
-	tx, err := m.parent.db.Begin()
+	tx, err := m.parent.db.Begin(true)
 	if err != nil {
 		return nil, errors.Wrapf(err, "Status %s", m.name)
 	}
@@ -420,7 +420,7 @@ func (m *Mailbox) statusUpdate(tx *sql.Tx) (backend.Update, error) {
 }
 
 func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error {
-	tx, err := m.parent.db.Begin()
+	tx, err := m.parent.db.Begin(false)
 	if err != nil {
 		return errors.Wrap(err, "MoveMessages")
 	}
@@ -451,7 +451,7 @@ func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error
 }
 
 func (m *Mailbox) CopyMessages(uid bool, seqset *imap.SeqSet, dest string) error {
-	tx, err := m.parent.db.Begin()
+	tx, err := m.parent.db.Begin(false)
 	if err != nil {
 		return errors.Wrap(err, "CopyMessages")
 	}
@@ -479,7 +479,7 @@ func (m *Mailbox) CopyMessages(uid bool, seqset *imap.SeqSet, dest string) error
 }
 
 func (m *Mailbox) DelMessages(uid bool, seqset *imap.SeqSet) error {
-	tx, err := m.parent.db.Begin()
+	tx, err := m.parent.db.Begin(false)
 	if err != nil {
 		return errors.Wrap(err, "DelMessages")
 	}
@@ -630,7 +630,7 @@ func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest s
 }
 
 func (m *Mailbox) Expunge() error {
-	tx, err := m.parent.db.Begin()
+	tx, err := m.parent.db.Begin(false)
 	if err != nil {
 		return errors.Wrap(err, "Expunge")
 	}

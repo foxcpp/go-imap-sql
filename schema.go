@@ -46,7 +46,7 @@ func (b *Backend) setSchemaVersion(newVer int) error {
 }
 
 func (b *Backend) upgradeSchema(currentVer int) error {
-	tx, err := b.db.Begin()
+	tx, err := b.db.Begin(false)
 	if err != nil {
 		return err
 	}

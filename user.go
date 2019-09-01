@@ -86,7 +86,7 @@ func (u *User) SetMessageLimit(val *uint32) error {
 }
 
 func (u *User) CreateMailbox(name string) error {
-	tx, err := u.parent.db.Begin()
+	tx, err := u.parent.db.Begin(false)
 	if err != nil {
 		return errors.Wrapf(err, "CreateMailbox %s", name)
 	}
@@ -118,7 +118,7 @@ func (u *User) CreateMailboxSpecial(name, specialUseAttr string) error {
 		return ErrUnsupportedSpecialAttr
 	}
 
-	tx, err := u.parent.db.Begin()
+	tx, err := u.parent.db.Begin(false)
 	if err != nil {
 		return errors.Wrapf(err, "CreateMailboxSpecial %s", name)
 	}
@@ -158,7 +158,7 @@ func (u *User) DeleteMailbox(name string) error {
 }
 
 func (u *User) RenameMailbox(existingName, newName string) error {
-	tx, err := u.parent.db.Begin()
+	tx, err := u.parent.db.Begin(false)
 	if err != nil {
 		return errors.Wrapf(err, "RenameMailbox %s, %s", existingName, newName)
 	}

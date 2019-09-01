@@ -314,13 +314,13 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 	// Important to run before transaction, otherwise it will deadlock on
 	// SQLite.
 	haveRecent := false
-	haveSeen := false
+	haveSeen := uint8(0) // it needs to be stored in SQL, hence integer
 	for _, flag := range flags {
 		if flag == imap.RecentFlag {
 			haveRecent = true
 		}
 		if flag == imap.SeenFlag {
-			haveSeen = true
+			haveSeen = 1
 		}
 	}
 	if !haveRecent {
@@ -331,7 +331,7 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		return errors.Wrap(err, "CreateMessage")
 	}
 
-	tx, err := m.parent.db.Begin()
+	tx, err := m.parent.db.Begin(false)
 	if err != nil {
 		return errors.Wrap(err, "CreateMessage (tx begin)")
 	}

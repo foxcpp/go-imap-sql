@@ -312,7 +312,7 @@ func (b *Backend) prepareStmts() error {
             SELECT row_number() OVER (ORDER BY msgId) AS rownr, msgId, seen
             FROM msgs
             WHERE mboxId = ?
-        )
+        ) seqnums
         WHERE msgId = (
             SELECT msgId
             FROM msgs

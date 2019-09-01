@@ -49,6 +49,12 @@ func (b *Backend) configureEngine() error {
 			if _, err := b.db.Exec(`PRAGMA page_size=16384`); err != nil {
 				return err
 			}
+
+			// Experimental. This increases write throughput at cost of small
+			// pauses from time to time.
+			if _, err := b.db.Exec(`PRAGMA wal_autocheckpoint=5000`); err != nil {
+				return err
+			}
 		}
 	}
 

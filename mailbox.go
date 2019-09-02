@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"database/sql"
+	"encoding/json"
 	"io"
 	"io/ioutil"
 	"strings"
@@ -15,7 +16,6 @@ import (
 	"github.com/emersion/go-imap/backend/backendutil"
 	"github.com/emersion/go-message/textproto"
 	"github.com/foxcpp/go-imap-sql/children"
-	jsoniter "github.com/json-iterator/go"
 	"github.com/pkg/errors"
 )
 
@@ -243,11 +243,11 @@ func extractCachedData(hdr textproto.Header, bufferedBody *bufio.Reader) (bodySt
 		return nil, nil, err
 	}
 
-	bodyStructBlob, err = jsoniter.Marshal(bodyStruct)
+	bodyStructBlob, err = json.Marshal(bodyStruct)
 	if err != nil {
 		return
 	}
-	cachedHeadersBlob, err = jsoniter.Marshal(hdrs)
+	cachedHeadersBlob, err = json.Marshal(hdrs)
 	return
 }
 

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"database/sql"
+	"encoding/json"
 	"io"
 	"strings"
 	"time"
@@ -11,7 +12,6 @@ import (
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/backend/backendutil"
 	"github.com/emersion/go-message/textproto"
-	jsoniter "github.com/json-iterator/go"
 )
 
 func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.FetchItem, ch chan<- *imap.Message) error {
@@ -142,12 +142,12 @@ func (m *Mailbox) scanMessages(rows *sql.Rows, items []imap.FetchItem, ch chan<-
 		data.bodyStructure = nil
 
 		if data.cachedHeaderBlob != nil {
-			if err := jsoniter.Unmarshal(data.cachedHeaderBlob, &data.cachedHeader); err != nil {
+			if err := json.Unmarshal(data.cachedHeaderBlob, &data.cachedHeader); err != nil {
 				return err
 			}
 		}
 		if data.bodyStructureBlob != nil {
-			if err := jsoniter.Unmarshal(data.bodyStructureBlob, &data.bodyStructure); err != nil {
+			if err := json.Unmarshal(data.bodyStructureBlob, &data.bodyStructure); err != nil {
 				return err
 			}
 		}

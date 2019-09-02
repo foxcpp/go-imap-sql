@@ -115,12 +115,22 @@ func (m *Mailbox) Status(items []imap.StatusItem) (*imap.MailboxStatus, error) {
 	for _, item := range items {
 		switch item {
 		case imap.StatusMessages:
+			// While \Recent support is not implemented, the result is
+			// always the same as msgsCount, don't do the query twice.
+			if res.Recent != 0 {
+				res.Messages = res.Recent
+				continue
+			}
 			row := tx.Stmt(m.parent.msgsCount).QueryRow(m.id)
 			if err := row.Scan(&res.Messages); err != nil {
 				return nil, errors.Wrapf(err, "Status (messages) %s", m.name)
 			}
 		case imap.StatusRecent:
-			row := tx.Stmt(m.parent.recentCount).QueryRow(m.id)
+			if res.Messages != 0 {
+				res.Recent = res.Messages
+				continue
+			}
+			row := tx.Stmt(m.parent.msgsCount).QueryRow(m.id)
 			if err := row.Scan(&res.Recent); err != nil {
 				return nil, errors.Wrapf(err, "Status (recent) %s", m.name)
 			}

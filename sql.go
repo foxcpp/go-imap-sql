@@ -301,15 +301,6 @@ func (b *Backend) prepareStmts() error {
 	if err != nil {
 		return errors.Wrap(err, "msgsCount prep")
 	}
-	// TODO: While \Recent is not implemented, this query is smae as msgsCount.
-	// In future, it should maintain its own counter
-	b.recentCount, err = b.db.Prepare(`
-		SELECT msgsCount
-		FROM mboxes
-		WHERE id = ?`)
-	if err != nil {
-		return errors.Wrap(err, "recentCount prep")
-	}
 	b.firstUnseenSeqNum, err = b.db.Prepare(`
         SELECT rownr
         FROM (

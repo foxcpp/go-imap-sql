@@ -22,7 +22,7 @@ func (b *Backend) buildFlagsAddStmt(uid bool, flags []string) string {
 		return `
             INSERT INTO flags
             SELECT ? AS mboxId, msgId, column1 AS flag
-            FROM (SELECT msgId FROM msgs WHERE mboxId = ? LIMIT ? OFFSET ?) msgIds
+            FROM (SELECT msgId FROM msgs WHERE mboxId = ? ORDER BY msgId LIMIT ? OFFSET ?) msgIds
             CROSS JOIN (` + b.db.valuesSubquery(flags) + `) flagset ON 1=1
             ON CONFLICT DO NOTHING`
 	} else {
@@ -30,7 +30,7 @@ func (b *Backend) buildFlagsAddStmt(uid bool, flags []string) string {
 		return `
             INSERT INTO flags
             SELECT ? AS mboxId, msgId, column1 AS flag
-            FROM (SELECT msgId FROM msgs WHERE mboxId = ? LIMIT ? OFFSET ?) msgIds
+            FROM (SELECT msgId FROM msgs WHERE mboxId = ? ORDER BY msgId LIMIT ? OFFSET ?) msgIds
             CROSS JOIN (` + b.db.valuesSubquery(flags) + `) flagset
             ON CONFLICT DO NOTHING`
 	}

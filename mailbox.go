@@ -155,6 +155,24 @@ func (m *Mailbox) Status(items []imap.StatusItem) (*imap.MailboxStatus, error) {
 	return res, nil
 }
 
+func (m *Mailbox) uidNextLocked(tx *sql.Tx) (uint32, error) {
+	var row *sql.Row
+	if tx != nil {
+		row = tx.Stmt(m.parent.uidNextLocked).QueryRow(m.id)
+	} else {
+		row = m.parent.uidNextLocked.QueryRow(m.id)
+	}
+	res := sql.NullInt64{}
+	if err := row.Scan(&res); err != nil {
+		return 0, err
+	}
+	if res.Valid {
+		return uint32(res.Int64), nil
+	} else {
+		return 1, nil
+	}
+}
+
 func (m *Mailbox) uidNext(tx *sql.Tx) (uint32, error) {
 	var row *sql.Row
 	if tx != nil {

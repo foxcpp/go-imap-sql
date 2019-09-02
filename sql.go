@@ -65,9 +65,9 @@ func (b *Backend) configureEngine() error {
 			return err
 		}
 
-		// Turn on strictiest transaction isolation.
-		// TODO: Review if this is really needed to ensure consistentcy.
-		_, err = b.db.Exec(`SET SESSION TRANSACTION ISOLATION LEVEL READ REPEATABLE`)
+		// Turn on strict transaction isolation by default, it is overriden
+		// by per-transaction isolation levels where necessary.
+		_, err = b.db.Exec(`SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ`)
 		if err != nil {
 			return err
 		}
@@ -265,11 +265,18 @@ func (b *Backend) prepareStmts() error {
 	if err != nil {
 		return errors.Wrap(err, "hasChildren prep")
 	}
-	b.uidNext, err = b.db.Prepare(`
+	b.uidNextLocked, err = b.db.Prepare(`
 		SELECT uidnext
 		FROM mboxes
 		WHERE id = ?
 		FOR UPDATE`)
+	if err != nil {
+		return errors.Wrap(err, "uidNext prep")
+	}
+	b.uidNext, err = b.db.Prepare(`
+		SELECT uidnext
+		FROM mboxes
+		WHERE id = ?`)
 	if err != nil {
 		return errors.Wrap(err, "uidNext prep")
 	}

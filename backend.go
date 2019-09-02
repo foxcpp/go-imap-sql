@@ -144,6 +144,7 @@ type Backend struct {
 	renameMboxChilds   *sql.Stmt
 	getMboxAttrs       *sql.Stmt
 	setSubbed          *sql.Stmt
+	uidNextLocked      *sql.Stmt
 	uidNext            *sql.Stmt
 	hasChildren        *sql.Stmt
 	uidValidity        *sql.Stmt

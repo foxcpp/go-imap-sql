@@ -402,18 +402,8 @@ func (m *Mailbox) statusUpdate(tx *sql.Tx) (backend.Update, error) {
 		return nil, errors.Wrap(err, "CreateMessage (exists read)")
 	}
 
-	unseenSeqNum := uint32(0)
-	row = tx.Stmt(m.parent.firstUnseenSeqNum).QueryRow(m.id, m.id)
-	if err := row.Scan(&unseenSeqNum); err != nil && err != sql.ErrNoRows {
-		return nil, errors.Wrap(err, "CreateMessage (unseen seq num read)")
-	}
-	if unseenSeqNum == 0 {
-		delete(upd.MailboxStatus.Items, imap.StatusUnseen)
-	}
-
 	upd.MailboxStatus.Flags = nil
 	upd.MailboxStatus.PermanentFlags = nil
-	upd.MailboxStatus.UnseenSeqNum = unseenSeqNum
 	upd.MailboxStatus.Messages = newCount
 
 	return &upd, nil

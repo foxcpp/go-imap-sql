@@ -33,7 +33,14 @@ func (d db) Exec(req string, args ...interface{}) (sql.Result, error) {
 
 func (d db) Begin(readOnly bool) (*sql.Tx, error) {
 	return d.DB.BeginTx(context.TODO(), &sql.TxOptions{
-		Isolation: sql.LevelSerializable,
+		Isolation: sql.LevelRepeatableRead,
+		ReadOnly:  readOnly,
+	})
+}
+
+func (d db) BeginLevel(isolation sql.IsolationLevel, readOnly bool) (*sql.Tx, error) {
+	return d.DB.BeginTx(context.TODO(), &sql.TxOptions{
+		Isolation: isolation,
 		ReadOnly:  readOnly,
 	})
 }
@@ -78,6 +85,10 @@ func (d db) rewriteSQL(req string) (res string) {
 		if strings.HasSuffix(res, "ON CONFLICT DO NOTHING") && strings.HasPrefix(res, "INSERT") {
 			res = strings.Replace(res, "ON CONFLICT DO NOTHING", "", -1)
 			res = strings.Replace(res, "INSERT", "INSERT OR IGNORE", 1)
+		}
+		// SQLite3 got no notion of locking and always uses Serialized Isolation.
+		if strings.HasPrefix(res, "SELECT") {
+			res = strings.Replace(res, "FOR UPDATE", "", -1)
 		}
 	}
 

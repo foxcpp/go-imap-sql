@@ -22,7 +22,7 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 		return errors.Wrap(err, "UpdateMessagesFlags")
 	}
 
-	tx, err := m.parent.db.Begin(false)
+	tx, err := m.parent.db.BeginLevel(sql.LevelRepeatableRead, false)
 	if err != nil {
 		return errors.Wrap(err, "UpdateMessagesFlags")
 	}

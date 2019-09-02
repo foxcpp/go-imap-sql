@@ -341,7 +341,7 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		return errors.Wrap(err, "CreateMessage")
 	}
 
-	tx, err := m.parent.db.Begin(false)
+	tx, err := m.parent.db.BeginLevel(sql.LevelReadCommitted, false)
 	if err != nil {
 		return errors.Wrap(err, "CreateMessage (tx begin)")
 	}
@@ -451,7 +451,7 @@ func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error
 }
 
 func (m *Mailbox) CopyMessages(uid bool, seqset *imap.SeqSet, dest string) error {
-	tx, err := m.parent.db.Begin(false)
+	tx, err := m.parent.db.BeginLevel(sql.LevelRepeatableRead, false)
 	if err != nil {
 		return errors.Wrap(err, "CopyMessages")
 	}
@@ -479,7 +479,7 @@ func (m *Mailbox) CopyMessages(uid bool, seqset *imap.SeqSet, dest string) error
 }
 
 func (m *Mailbox) DelMessages(uid bool, seqset *imap.SeqSet) error {
-	tx, err := m.parent.db.Begin(false)
+	tx, err := m.parent.db.BeginLevel(sql.LevelRepeatableRead, false)
 	if err != nil {
 		return errors.Wrap(err, "DelMessages")
 	}
@@ -599,6 +599,10 @@ func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest s
 			return err
 		}
 
+		if _, err := tx.Stmt(m.parent.addRecentToLast).Exec(destID, destID, affected); err != nil {
+			return err
+		}
+
 		if m.parent.Opts.ExternalStore != nil {
 			if uid {
 				if _, err := tx.Stmt(m.parent.incrementRefUid).Exec(srcId, start, stop); err != nil {
@@ -609,10 +613,6 @@ func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest s
 					return err
 				}
 			}
-		}
-
-		if _, err := tx.Stmt(m.parent.addRecentToLast).Exec(destID, destID, affected); err != nil {
-			return err
 		}
 
 		if _, err := tx.Stmt(m.parent.increaseMsgCount).Exec(affected, affected, destID); err != nil {

@@ -197,7 +197,7 @@ func (d *Delivery) BodyParsed(header textproto.Header, bodyLen int, body Buffer)
 
 	date := time.Now()
 
-	d.tx, err = d.b.db.Begin(false)
+	d.tx, err = d.b.db.BeginLevel(sql.LevelReadCommitted, false)
 	if err != nil {
 		return errors.Wrap(err, "Body")
 	}
@@ -247,23 +247,13 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox *Mailbox, bodyLen 
 		}
 	}
 
+	// Note that we are extremely careful here with ordering to
+	// decrease change of deadlocks as a result of transaction
+	// serialization.
+
+	// --- operations that involve mboxes table ---
 	msgId, err := mbox.uidNext(d.tx)
 	if err != nil {
-		return errors.Wrap(err, "Body")
-	}
-
-	_, err = d.tx.Stmt(d.b.addMsg).Exec(
-		mbox.id, msgId, date.Unix(),
-		length, bodyBlob, headerBlobField,
-		bodyStruct, cachedHeader, extBodyKey,
-		0,
-	)
-	if err != nil {
-		return errors.Wrap(err, "Body")
-	}
-
-	params := mbox.makeFlagsAddStmtArgs(true, []string{imap.RecentFlag}, imap.Seq{Start: msgId, Stop: msgId})
-	if _, err := d.tx.Stmt(flagsStmt).Exec(params...); err != nil {
 		return errors.Wrap(err, "Body")
 	}
 
@@ -276,6 +266,27 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox *Mailbox, bodyLen 
 		return errors.Wrap(err, "Body")
 	}
 	d.updates = append(d.updates, upd)
+	// --- end of operations that involve mboxes table ---
+
+	// --- operations that involve msgs table ---
+	_, err = d.tx.Stmt(d.b.addMsg).Exec(
+		mbox.id, msgId, date.Unix(),
+		length, bodyBlob, headerBlobField,
+		bodyStruct, cachedHeader, extBodyKey,
+		0,
+	)
+	if err != nil {
+		return errors.Wrap(err, "Body")
+	}
+	// --- end of operations that involve msgs table ---
+
+	// --- operations that involve flags table ---
+	params := mbox.makeFlagsAddStmtArgs(true, []string{imap.RecentFlag}, imap.Seq{Start: msgId, Stop: msgId})
+	if _, err := d.tx.Stmt(flagsStmt).Exec(params...); err != nil {
+		return errors.Wrap(err, "Body")
+	}
+	// --- end operations that involve flags table ---
+
 	return nil
 }
 

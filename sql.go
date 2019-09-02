@@ -323,7 +323,8 @@ func (b *Backend) prepareStmts() error {
             WHERE mboxId = ?
             AND seen = 0
             LIMIT 1
-        )`)
+        )
+        LIMIT 1`)
 	if err != nil {
 		return errors.Wrap(err, "firstUnseenSeqNum prep")
 	}

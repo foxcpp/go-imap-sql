@@ -84,7 +84,11 @@ func (b *Backend) initSchema() error {
 			username VARCHAR(255) NOT NULL UNIQUE,
 			msgsizelimit INTEGER DEFAULT NULL,
 			password VARCHAR(255) DEFAULT NULL,
-			password_salt VARCHAR(255) DEFAULT NULL
+			password_salt VARCHAR(255) DEFAULT NULL,
+
+            -- It does not reference mboxes, since otherwise there will
+            -- be recursive foreign key constrait.
+            inboxId BIGINT DEFAULT 0
 		)`)
 	if err != nil {
 		return errors.Wrap(err, "create table users")
@@ -161,7 +165,7 @@ func (b *Backend) prepareStmts() error {
 	var err error
 
 	b.userCreds, err = b.db.Prepare(`
-		SELECT id, password, password_salt
+		SELECT id, inboxId, password, password_salt
 		FROM users
 		WHERE username = ?`)
 	if err != nil {
@@ -762,6 +766,13 @@ func (b *Backend) prepareStmts() error {
 		)`)
 	if err != nil {
 		return errors.Wrap(err, "setSeenFlagSeq prep")
+	}
+	b.setInboxId, err = b.db.Prepare(`
+        UPDATE users
+        SET inboxId = ?
+        WHERE id = ?`)
+	if err != nil {
+		return errors.Wrap(err, "setInboxId prep")
 	}
 
 	return nil

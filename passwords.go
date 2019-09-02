@@ -50,32 +50,32 @@ func (b *Backend) EnableHashAlgo(name string,
 	b.hashAlgorithms[name] = hashAlgorithm{hashFunc, checkFunc}
 }
 
-func (b *Backend) checkUser(username, password string) (uint64, error) {
-	uid, hashAlgo, passHash, passSalt, err := b.getUserCreds(nil, username)
+func (b *Backend) checkUser(username, password string) (uid uint64, inboxId uint64, err error) {
+	uid, inboxId, hashAlgo, passHash, passSalt, err := b.getUserCreds(nil, username)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return 0, backend.ErrInvalidCredentials
+			return 0, 0, backend.ErrInvalidCredentials
 		}
-		return 0, err
+		return 0, 0, err
 	}
 
 	algoFuncs, ok := b.hashAlgorithms[hashAlgo]
 	if !ok {
-		return 0, errors.New("unsupported hash algorithm")
+		return 0, 0, errors.New("unsupported hash algorithm")
 	}
 
 	if passHash == nil || passSalt == nil {
-		return uid, backend.ErrInvalidCredentials
+		return uid, 0, backend.ErrInvalidCredentials
 	}
 
 	pass := make([]byte, 0, len(password)+len(passSalt))
 	pass = append(pass, []byte(password)...)
 	pass = append(pass, passSalt...)
 	if !algoFuncs.checkFunc(pass, passHash) {
-		return uid, backend.ErrInvalidCredentials
+		return uid, 0, backend.ErrInvalidCredentials
 	}
 
-	return uid, nil
+	return uid, inboxId, nil
 }
 
 func (b *Backend) hashCredentials(algo, password string) (digest, salt string, err error) {

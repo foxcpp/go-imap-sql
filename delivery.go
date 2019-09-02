@@ -78,6 +78,14 @@ func (d *Delivery) AddRcpt(username string, userHeader textproto.Header) error {
 // exist for some users - it will created.
 func (d *Delivery) Mailbox(name string) error {
 	d.mboxes = make([]*Mailbox, 0, len(d.users))
+
+	if strings.EqualFold(name, "INBOX") {
+		for _, u := range d.users {
+			d.mboxes = append(d.mboxes, &Mailbox{user: u, uid: u.id, id: u.inboxId, name: name, parent: d.b})
+		}
+		return nil
+	}
+
 	for _, u := range d.users {
 		mbox, err := u.GetMailbox(name)
 		if err != nil {

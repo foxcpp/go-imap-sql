@@ -226,6 +226,8 @@ type Backend struct {
 	setSeenFlagSeq   *sql.Stmt
 	increaseMsgCount *sql.Stmt
 	decreaseMsgCount *sql.Stmt
+
+	setInboxId *sql.Stmt
 }
 
 var defaultPassHashAlgo = "bcrypt"
@@ -375,11 +377,11 @@ func (b *Backend) Updates() <-chan backend.Update {
 //
 // It is exported for use by extensions and is not considered part of the
 // public API. Hence it can be changed between minor releases.
-func (b *Backend) UserCreds(username string) (id uint64, hashAlgo string, passHash []byte, passSalt []byte, err error) {
+func (b *Backend) UserCreds(username string) (id uint64, inboxId uint64, hashAlgo string, passHash []byte, passSalt []byte, err error) {
 	return b.getUserCreds(nil, strings.ToLower(username))
 }
 
-func (b *Backend) getUserCreds(tx *sql.Tx, username string) (id uint64, hashAlgo string, passHash []byte, passSalt []byte, err error) {
+func (b *Backend) getUserCreds(tx *sql.Tx, username string) (id uint64, inboxId uint64, hashAlgo string, passHash []byte, passSalt []byte, err error) {
 	var row *sql.Row
 	if tx != nil {
 		row = tx.Stmt(b.userCreds).QueryRow(username)
@@ -387,27 +389,27 @@ func (b *Backend) getUserCreds(tx *sql.Tx, username string) (id uint64, hashAlgo
 		row = b.userCreds.QueryRow(username)
 	}
 	var passHashHex, passSaltHex sql.NullString
-	if err := row.Scan(&id, &passHashHex, &passSaltHex); err != nil {
-		return 0, "", nil, nil, err
+	if err := row.Scan(&id, &inboxId, &passHashHex, &passSaltHex); err != nil {
+		return 0, 0, "", nil, nil, err
 	}
 
 	if !passHashHex.Valid || !passSaltHex.Valid {
-		return id, "", nil, nil, nil
+		return id, 0, "", nil, nil, nil
 	}
 
 	hashHexParts := strings.Split(passHashHex.String, ":")
 	if len(hashHexParts) != 2 {
-		return id, "", nil, nil, errors.Errorf("malformed database column value for password, need algo:hexhash, got %s", passHashHex.String)
+		return id, 0, "", nil, nil, errors.Errorf("malformed database column value for password, need algo:hexhash, got %s", passHashHex.String)
 	}
 
 	hashAlgo = hashHexParts[0]
 	passHash = []byte(hashHexParts[1])
 	passSalt, err = hex.DecodeString(passSaltHex.String)
 	if err != nil {
-		return 0, "", nil, nil, err
+		return 0, 0, "", nil, nil, err
 	}
 
-	return id, hashAlgo, passHash, passSalt, nil
+	return id, inboxId, hashAlgo, passHash, passSalt, nil
 }
 
 // CreateUser creates user account with specified credentials.
@@ -458,13 +460,23 @@ func (b *Backend) createUser(tx *sql.Tx, username string, passHashAlgo string, p
 		return ErrUserAlreadyExists
 	}
 
-	uid, _, _, _, err := b.getUserCreds(tx, username)
+	// TODO: Cut additional query here by using RETURNING on PostgreSQL.
+	uid, _, _, _, _, err := b.getUserCreds(tx, username)
 	if err != nil {
 		return errors.Wrap(err, "CreateUser")
 	}
 
 	// Every new user needs to have at least one mailbox (INBOX).
 	if _, err := tx.Stmt(b.createMbox).Exec(uid, "INBOX", b.prng.Uint32(), nil); err != nil {
+		return errors.Wrap(err, "CreateUser")
+	}
+
+	// Cut another query here by using RETURNING on PostgreSQL.
+	var inboxId uint64
+	if err = tx.Stmt(b.mboxId).QueryRow(uid, "INBOX").Scan(&inboxId); err != nil {
+		return errors.Wrap(err, "CreateUser")
+	}
+	if _, err = tx.Stmt(b.setInboxId).Exec(uid, inboxId); err != nil {
 		return errors.Wrap(err, "CreateUser")
 	}
 
@@ -580,14 +592,14 @@ func (b *Backend) ListUsers() ([]string, error) {
 func (b *Backend) GetUser(username string) (backend.User, error) {
 	username = strings.ToLower(username)
 
-	uid, _, _, _, err := b.UserCreds(username)
+	uid, inboxId, _, _, _, err := b.UserCreds(username)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrUserDoesntExists
 		}
 		return nil, err
 	}
-	return &User{id: uid, username: username, parent: b}, nil
+	return &User{id: uid, username: username, parent: b, inboxId: inboxId}, nil
 }
 
 // GetOrCreateUser is a convenience wrapper for GetUser and CreateUser.
@@ -606,14 +618,14 @@ func (b *Backend) GetOrCreateUser(username string) (backend.User, error) {
 	}
 	defer tx.Rollback()
 
-	uid, _, _, _, err := b.getUserCreds(tx, username)
+	uid, inboxId, _, _, _, err := b.getUserCreds(tx, username)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			if err := b.createUser(tx, username, b.Opts.DefaultHashAlgo, nil); err != nil {
 				return nil, err
 			}
 
-			uid, _, _, _, err = b.getUserCreds(tx, username)
+			uid, inboxId, _, _, _, err = b.getUserCreds(tx, username)
 			if err != nil {
 				return nil, err
 			}
@@ -626,22 +638,22 @@ func (b *Backend) GetOrCreateUser(username string) (backend.User, error) {
 			return nil, err
 		}
 	}
-	return &User{id: uid, username: username, parent: b}, tx.Commit()
+	return &User{id: uid, username: username, parent: b, inboxId: inboxId}, tx.Commit()
 }
 
 // CheckPlain checks the credentials of the user account.
 func (b *Backend) CheckPlain(username, password string) bool {
-	_, err := b.checkUser(strings.ToLower(username), password)
+	_, _, err := b.checkUser(strings.ToLower(username), password)
 	return err == nil
 }
 
 func (b *Backend) Login(_ *imap.ConnInfo, username, password string) (backend.User, error) {
-	uid, err := b.checkUser(strings.ToLower(username), password)
+	uid, inboxId, err := b.checkUser(strings.ToLower(username), password)
 	if err != nil {
 		return nil, err
 	}
 
-	return &User{id: uid, username: username, parent: b}, nil
+	return &User{id: uid, username: username, parent: b, inboxId: inboxId}, nil
 }
 
 func (b *Backend) CreateMessageLimit() *uint32 {

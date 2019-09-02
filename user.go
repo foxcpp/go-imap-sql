@@ -15,6 +15,7 @@ const MailboxPathSep = "."
 type User struct {
 	id       uint64
 	username string
+	inboxId  uint64
 	parent   *Backend
 }
 
@@ -52,6 +53,10 @@ func (u *User) ListMailboxes(subscribed bool) ([]backend.Mailbox, error) {
 }
 
 func (u *User) GetMailbox(name string) (backend.Mailbox, error) {
+	if strings.EqualFold(name, "INBOX") {
+		return &Mailbox{user: u, uid: u.id, id: u.inboxId, name: name, parent: u.parent}, nil
+	}
+
 	row := u.parent.mboxId.QueryRow(u.id, name)
 	id := uint64(0)
 	if err := row.Scan(&id); err != nil {
@@ -172,6 +177,7 @@ func (u *User) RenameMailbox(existingName, newName string) error {
 		return errors.Wrapf(err, "RenameMailbox %s, %s", existingName, newName)
 	}
 
+	// TODO: Check if it possible to merge these queries.
 	existingPattern := existingName + MailboxPathSep + "%"
 	newPrefix := newName + MailboxPathSep
 	existingPrefixLen := len(existingName + MailboxPathSep)
@@ -179,8 +185,17 @@ func (u *User) RenameMailbox(existingName, newName string) error {
 		return errors.Wrapf(err, "RenameMailbox (childs) %s, %s", existingName, newName)
 	}
 
-	if existingName == "INBOX" {
-		if _, err := tx.Stmt(u.parent.createMbox).Exec(u.id, existingName, time.Now().Unix(), nil); err != nil {
+	if strings.EqualFold(existingName, "INBOX") {
+		if _, err := tx.Stmt(u.parent.createMbox).Exec(u.id, existingName, u.parent.prng.Uint32(), nil); err != nil {
+			return errors.Wrapf(err, "RenameMailbox %s, %s", existingName, newName)
+		}
+
+		// TODO: Cut a query here by using RETURNING on PostgreSQL
+		var inboxId uint64
+		if err = tx.Stmt(u.parent.mboxId).QueryRow(u.id, "INBOX").Scan(&inboxId); err != nil {
+			return errors.Wrap(err, "CreateUser")
+		}
+		if _, err := tx.Stmt(u.parent.setInboxId).Exec(u.id, inboxId); err != nil {
 			return errors.Wrapf(err, "RenameMailbox %s, %s", existingName, newName)
 		}
 	}

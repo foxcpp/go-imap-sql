@@ -3,7 +3,6 @@ package imapsql
 import (
 	"database/sql"
 	"strings"
-	"time"
 
 	"github.com/emersion/go-imap-specialuse"
 	"github.com/emersion/go-imap/backend"
@@ -216,7 +215,7 @@ func (u *User) createParentDirs(tx *sql.Tx, name string) error {
 		}
 		curDir += part
 
-		if _, err := tx.Stmt(u.parent.createMboxExistsOk).Exec(u.id, curDir, time.Now().Unix()); err != nil {
+		if _, err := tx.Stmt(u.parent.createMboxExistsOk).Exec(u.id, curDir, u.parent.prng.Uint32()); err != nil {
 			return err
 		}
 	}

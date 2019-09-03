@@ -102,3 +102,31 @@ func TestHeaderInMultipleBodyFetch(t *testing.T) {
 		test(t, []imap.FetchItem{"BODY.PEEK[HEADER]", "BODY.PEEK[TEXT]"})
 	})
 }
+
+func TestHeaderCacheReuse(t *testing.T) {
+	b := initTestBackend()
+	defer cleanBackend(b)
+	assert.NilError(t, b.CreateUser(t.Name(), ""))
+	usr, err := b.GetUser(t.Name())
+	assert.NilError(t, err)
+	assert.NilError(t, usr.CreateMailbox(t.Name()))
+	mbox, err := usr.GetMailbox(t.Name())
+	assert.NilError(t, err)
+
+	testComplete := "Subject: Test\r\n\r\nBody text"
+	testMissingSubject := "Another-Field: Test\r\n\r\nBody text"
+
+	assert.NilError(t, mbox.CreateMessage([]string{}, time.Now(), strings.NewReader(testComplete)))
+	assert.NilError(t, mbox.CreateMessage([]string{}, time.Now(), strings.NewReader(testMissingSubject)))
+
+	t.Run("envelope", func(t *testing.T) {
+		seq, _ := imap.ParseSeqSet("1:*")
+		ch := make(chan *imap.Message, 2)
+		assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchEnvelope}, ch), "ListMessages")
+		assert.Assert(t, is.Len(ch, 2))
+		<-ch
+		msg2 := <-ch
+
+		assert.Equal(t, msg2.Envelope.Subject, "")
+	})
+}

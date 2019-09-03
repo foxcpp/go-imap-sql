@@ -139,6 +139,7 @@ func (m *Mailbox) scanMessages(rows *sql.Rows, items []imap.FetchItem, ch chan<-
 		}
 
 		data.parsedHeader = nil
+		data.cachedHeader = nil
 		data.bodyStructure = nil
 
 		if data.cachedHeaderBlob != nil {

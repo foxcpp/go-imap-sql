@@ -85,6 +85,14 @@ func (b *Backend) upgradeSchema(currentVer int) error {
 		if err != nil {
 			return errors.Wrap(err, "4->5 upgrade")
 		}
+		_, err = tx.Exec(b.db.rewriteSQL(`ALTER TABLE users ADD COLUMN inboxId BIGINT NOT NULL DEFAULT 0`))
+		if err != nil {
+			return errors.Wrap(err, "4->5 upgrade")
+		}
+		_, err = tx.Exec(b.db.rewriteSQL(`UPDATE users SET inboxId = (SELECT id FROM mboxes WHERE id = mboxes.uid AND name = 'INBOX')`))
+		if err != nil {
+			return errors.Wrap(err, "4->5 upgrade")
+		}
 		currentVer = 5
 	}
 

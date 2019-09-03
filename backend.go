@@ -3,6 +3,8 @@ package imapsql
 import (
 	"database/sql"
 	"encoding/hex"
+	"io/ioutil"
+	"log"
 	mathrand "math/rand"
 	"strings"
 	"sync"
@@ -20,6 +22,11 @@ var (
 
 type Rand interface {
 	Uint32() uint32
+}
+
+type Logger interface {
+	Printf(format string, v ...interface{})
+	Println(v ...interface{})
 }
 
 // Opts structure specifies additional settings that may be set
@@ -96,6 +103,8 @@ type Opts struct {
 	//
 	// It is safe to change it, existing records will not be affected.
 	BcryptCost int
+
+	Log Logger
 }
 
 type Backend struct {
@@ -229,6 +238,8 @@ type Backend struct {
 	decreaseMsgCount *sql.Stmt
 
 	setInboxId *sql.Stmt
+
+	sqliteOptimizeLoopStop chan struct{}
 }
 
 var defaultPassHashAlgo = "bcrypt"
@@ -247,6 +258,8 @@ func New(driver, dsn string, opts Opts) (*Backend, error) {
 		addFlagsStmtsCache:    make(map[string]*sql.Stmt),
 		remFlagsStmtsCache:    make(map[string]*sql.Stmt),
 		hashAlgorithms:        make(map[string]hashAlgorithm),
+
+		sqliteOptimizeLoopStop: make(chan struct{}),
 	}
 	var err error
 
@@ -256,6 +269,10 @@ func New(driver, dsn string, opts Opts) (*Backend, error) {
 		if b.updates == nil {
 			b.updates = make(chan backend.Update, 20)
 		}
+	}
+
+	if b.Opts.Log == nil {
+		b.Opts.Log = log.New(ioutil.Discard, "", log.LstdFlags)
 	}
 
 	b.enableDefaultHashAlgs()
@@ -328,6 +345,10 @@ func New(driver, dsn string, opts Opts) (*Backend, error) {
 		}
 	}
 
+	if b.db.driver == "sqlite3" {
+		go b.sqliteOptimizeLoop()
+	}
+
 	return b, nil
 }
 
@@ -347,6 +368,21 @@ func (b *Backend) EnableSpecialUseExt() bool {
 	return true
 }
 
+func (b *Backend) sqliteOptimizeLoop() {
+	t := time.NewTicker(5 * time.Hour)
+	defer t.Stop()
+	for {
+		select {
+		case <-t.C:
+			b.Opts.Log.Println("running SQLite query planer optimization...")
+			b.db.Exec(`PRAGMA optimize`)
+			b.Opts.Log.Println("completed SQLite query planer optimization")
+		case <-b.sqliteOptimizeLoopStop:
+			return
+		}
+	}
+}
+
 func (b *Backend) Close() error {
 	if b.db.driver == "sqlite3" {
 		// These operations are not critical, so it's not a problem if they fail.
@@ -355,6 +391,7 @@ func (b *Backend) Close() error {
 			b.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
 		}
 
+		<-b.sqliteOptimizeLoopStop
 		b.db.Exec(`PRAGMA optimize`)
 	}
 

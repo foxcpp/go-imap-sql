@@ -18,7 +18,7 @@ RDBMS support
 
 go-imap-sql is known to work with (and constantly being tested against) following RDBMS:
 - SQLite 3.25.0
-- MySQL 8.0 (or MariaDB 10.2)
+- MariaDB 10.2
 - PostgreSQL 9.6
 
 IMAP Extensions Supported

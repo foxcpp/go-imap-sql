@@ -55,7 +55,7 @@ You may want to overwrite deleted messages and theirs meta-data with zeroes for
 security/privacy reasons.
 For MySQL, PostgreSQL - consult documentation (AFAIK, there is no such option).
 
-For SQLite3, you should build go-imap-sql with `sqlite3_secure_delete` build tag.
+For SQLite3, you should build go-imap-sql with `sqlite_secure_delete` build tag.
 It will enable corresponding SQLite3 feature by default for all databases.
 
 If you want to enable it per-database - you can use

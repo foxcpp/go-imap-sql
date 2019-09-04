@@ -12,6 +12,7 @@ import (
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/backend/backendutil"
 	"github.com/emersion/go-message/textproto"
+	"github.com/pkg/errors"
 )
 
 func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.FetchItem, ch chan<- *imap.Message) error {
@@ -237,6 +238,9 @@ func (n nopCloser) Close() error {
 
 func (m *Mailbox) openBody(needHeader bool, extBodyKey sql.NullString, headerBlob, bodyBlob []byte) (BufferedReadCloser, error) {
 	if extBodyKey.Valid {
+		if m.parent.Opts.ExternalStore == nil {
+			return BufferedReadCloser{}, errors.New("DB entry references External Storage, but no Storage was configured")
+		}
 		rdr, err := m.parent.Opts.ExternalStore.Open(extBodyKey.String)
 		if err != nil {
 			return BufferedReadCloser{}, err

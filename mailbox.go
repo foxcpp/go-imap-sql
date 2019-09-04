@@ -130,13 +130,11 @@ func (m *Mailbox) Status(items []imap.StatusItem) (*imap.MailboxStatus, error) {
 				res.Recent = res.Messages
 				continue
 			}
-			row := tx.Stmt(m.parent.msgsCount).QueryRow(m.id)
-			if err := row.Scan(&res.Recent); err != nil {
+			if err := tx.Stmt(m.parent.msgsCount).QueryRow(m.id).Scan(&res.Recent); err != nil {
 				return nil, errors.Wrapf(err, "Status (recent) %s", m.name)
 			}
 		case imap.StatusUidNext:
-			res.UidNext, err = m.uidNext(tx)
-			if err != nil {
+			if err := tx.Stmt(m.parent.uidNext).QueryRow(m.id).Scan(&res.UidNext); err != nil {
 				return nil, errors.Wrapf(err, "Status (uidnext) %s", m.name)
 			}
 		case imap.StatusUidValidity:
@@ -155,35 +153,27 @@ func (m *Mailbox) Status(items []imap.StatusItem) (*imap.MailboxStatus, error) {
 	return res, nil
 }
 
-func (m *Mailbox) uidNextLocked(tx *sql.Tx) (uint32, error) {
-	var row *sql.Row
-	if tx != nil {
-		row = tx.Stmt(m.parent.uidNextLocked).QueryRow(m.id)
-	} else {
-		row = m.parent.uidNextLocked.QueryRow(m.id)
+func (m *Mailbox) incrementMsgCounters(tx *sql.Tx) (uint32, error) {
+	// On PostgreSQL we can just do everything in one query.
+	// Increment both uidNext and msgsCount and return previous uidNext.
+	if m.parent.db.driver == "postgres" {
+		var nextId uint32
+		err := tx.Stmt(m.parent.increaseMsgCount).QueryRow(1, 1, m.id).Scan(&nextId)
+		return nextId, err
 	}
-	res := sql.NullInt64{}
-	if err := row.Scan(&res); err != nil {
-		return 0, err
-	}
-	if res.Valid {
-		return uint32(res.Int64), nil
-	} else {
-		return 1, nil
-	}
-}
 
-func (m *Mailbox) uidNext(tx *sql.Tx) (uint32, error) {
-	var row *sql.Row
-	if tx != nil {
-		row = tx.Stmt(m.parent.uidNext).QueryRow(m.id)
-	} else {
-		row = m.parent.uidNext.QueryRow(m.id)
-	}
+	// For other DBs we fallback to using a query
+	// with explicit locking.
+
 	res := sql.NullInt64{}
-	if err := row.Scan(&res); err != nil {
+	if err := tx.Stmt(m.parent.uidNextLocked).QueryRow(m.id).Scan(&res); err != nil {
 		return 0, err
 	}
+
+	if _, err := tx.Stmt(m.parent.increaseMsgCount).Exec(1, 1, m.id); err != nil {
+		return 0, err
+	}
+
 	if res.Valid {
 		return uint32(res.Int64), nil
 	} else {
@@ -365,7 +355,7 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	msgId, err := m.uidNext(tx)
+	msgId, err := m.incrementMsgCounters(tx)
 	if err != nil {
 		return errors.Wrap(err, "CreateMessage (uidNext)")
 	}
@@ -395,10 +385,6 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 	params := m.makeFlagsAddStmtArgs(true, flags, imap.Seq{msgId, msgId})
 	if _, err := tx.Stmt(stmt).Exec(params...); err != nil {
 		return errors.Wrap(err, "CreateMessage (flags)")
-	}
-
-	if _, err := tx.Stmt(m.parent.increaseMsgCount).Exec(1, 1, m.id); err != nil {
-		return errors.Wrap(err, "CreateMessage (uidnext bump)")
 	}
 
 	upd, err := m.statusUpdate(tx)

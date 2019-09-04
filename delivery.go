@@ -252,12 +252,8 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox *Mailbox, bodyLen 
 	// serialization.
 
 	// --- operations that involve mboxes table ---
-	msgId, err := mbox.uidNext(d.tx)
+	msgId, err := mbox.incrementMsgCounters(d.tx)
 	if err != nil {
-		return errors.Wrap(err, "Body")
-	}
-
-	if _, err := d.tx.Stmt(d.b.increaseMsgCount).Exec(1, 1, mbox.id); err != nil {
 		return errors.Wrap(err, "Body")
 	}
 

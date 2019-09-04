@@ -284,7 +284,8 @@ func (b *Backend) prepareStmts() error {
 		UPDATE mboxes
 		SET uidnext = uidnext + ?,
             msgsCount = msgsCount + ?
-		WHERE id = ?`)
+		WHERE id = ?
+		RETURNING uidnext - 1`)
 	if err != nil {
 		return errors.Wrap(err, "increaseMsgCount prep")
 	}

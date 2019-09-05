@@ -391,7 +391,7 @@ func (b *Backend) Close() error {
 			b.db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
 		}
 
-		<-b.sqliteOptimizeLoopStop
+		b.sqliteOptimizeLoopStop <- struct{}{}
 		b.db.Exec(`PRAGMA optimize`)
 	}
 

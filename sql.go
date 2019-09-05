@@ -280,12 +280,20 @@ func (b *Backend) prepareStmts() error {
 	if err != nil {
 		return errors.Wrap(err, "uidNext prep")
 	}
-	b.increaseMsgCount, err = b.db.Prepare(`
-		UPDATE mboxes
-		SET uidnext = uidnext + ?,
-            msgsCount = msgsCount + ?
-		WHERE id = ?
-		RETURNING uidnext - 1`)
+	if b.db.driver == "postgres" {
+		b.increaseMsgCount, err = b.db.Prepare(`
+		    UPDATE mboxes
+		    SET uidnext = uidnext + ?,
+                msgsCount = msgsCount + ?
+		    WHERE id = ?
+		    RETURNING uidnext - 1`)
+	} else {
+		b.increaseMsgCount, err = b.db.Prepare(`
+		    UPDATE mboxes
+		    SET uidnext = uidnext + ?,
+                msgsCount = msgsCount + ?
+		    WHERE id = ?`)
+	}
 	if err != nil {
 		return errors.Wrap(err, "increaseMsgCount prep")
 	}

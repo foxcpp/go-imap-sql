@@ -87,7 +87,7 @@ func (b *Backend) initSchema() error {
 			password_salt VARCHAR(255) DEFAULT NULL,
 
             -- It does not reference mboxes, since otherwise there will
-            -- be recursive foreign key constrait.
+            -- be recursive foreign key constraint.
             inboxId BIGINT DEFAULT 0
 		)`)
 	if err != nil {
@@ -115,11 +115,25 @@ func (b *Backend) initSchema() error {
 	_, err = b.db.Exec(`
 		CREATE TABLE IF NOT EXISTS extKeys (
 			id VARCHAR(255) PRIMARY KEY NOT NULL,
+
+			-- REFERENCES constraint is commented out otherwise
+			-- it will be impossible to delete user without
+			-- doing multiple queries to delete mboxes and stuff
+			-- or using deferred constraint checking (not supported by MySQL/MariaDB)
+			uid BIGINT NOT NULL, -- REFERENCES users(id) ON DELETE RESTRICT
 			refs INTEGER NOT NULL DEFAULT 1
 		)`)
 	if err != nil {
 		return errors.Wrap(err, "create table extkeys")
 	}
+
+	_, err = b.db.Exec(`
+        CREATE INDEX IF NOT EXISTS extKeys_uid_id
+        ON extKeys(uid, id)`)
+	if err != nil {
+		return errors.Wrap(err, "create index extKeys_uid_id")
+	}
+
 	_, err = b.db.Exec(`
 		CREATE TABLE IF NOT EXISTS msgs (
 			mboxId BIGINT NOT NULL REFERENCES mboxes(id) ON DELETE CASCADE,
@@ -663,15 +677,16 @@ func (b *Backend) prepareStmts() error {
 	}
 
 	b.addExtKey, err = b.db.Prepare(`
-		INSERT INTO extKeys(id, refs)
-		VALUES (?, ?)`)
+		INSERT INTO extKeys(id, uid, refs)
+		VALUES (?, ?, ?)`)
 	if err != nil {
 		return errors.Wrap(err, "addExtKey prep")
 	}
 	b.decreaseRefForMarked, err = b.db.Prepare(`
 		UPDATE extKeys
 		SET refs = refs - 1
-		WHERE id IN (
+		WHERE uid = ? 
+		AND id IN (
 			SELECT extBodyKey
 			FROM msgs
 			WHERE mboxId = ? AND mark = 1 AND extBodyKey IS NOT NULL
@@ -682,7 +697,8 @@ func (b *Backend) prepareStmts() error {
 	b.decreaseRefForDeleted, err = b.db.Prepare(`
 		UPDATE extKeys
 		SET refs = refs - 1
-		WHERE id IN (
+		WHERE uid = ? 
+		AND id IN (
 			SELECT extBodyKey
 			FROM msgs
 			INNER JOIN flags
@@ -697,7 +713,8 @@ func (b *Backend) prepareStmts() error {
 	b.incrementRefUid, err = b.db.Prepare(`
 		UPDATE extKeys
 		SET refs = refs + 1
-		WHERE id IN (
+		WHERE uid = ?
+		AND id IN (
 			SELECT extBodyKey
 			FROM msgs
 			WHERE mboxId = ? AND msgId BETWEEN ? AND ?
@@ -709,7 +726,8 @@ func (b *Backend) prepareStmts() error {
 	b.incrementRefSeq, err = b.db.Prepare(`
 		UPDATE extKeys
 		SET refs = refs + 1
-		WHERE id IN (
+		WHERE uid = ?
+		AND id IN (
 			SELECT extBodyKey
 			FROM msgs
 			INNER JOIN (
@@ -730,16 +748,43 @@ func (b *Backend) prepareStmts() error {
 		INNER JOIN extKeys
 		ON msgs.extBodyKey = extKeys.id
 		WHERE extBodyKey IS NOT NULL
+		AND uid = ?
 		AND mboxId = ?
 		AND refs = 0`)
 	if err != nil {
 		return errors.Wrap(err, "zeroRef prep")
 	}
+	b.zeroRefUser, err = b.db.Prepare(`
+		SELECT id
+		FROM extKeys
+		WHERE uid = ?
+		AND refs = 0`)
+	if err != nil {
+		return errors.Wrap(err, "zeroRefUser prep")
+	}
+	b.refUser, err = b.db.Prepare(`
+		SELECT id
+		FROM extKeys
+		WHERE uid = (SELECT id FROM users WHERE username = ?)`)
+	if err != nil {
+		return errors.Wrap(err, "refUser prep")
+	}
 	b.deleteZeroRef, err = b.db.Prepare(`
 		DELETE FROM extKeys
-		WHERE refs = 0`)
+		-- This is the hint to accelerate operation
+		-- when we have many users.
+		WHERE uid = ?
+		AND refs = 0`)
 	if err != nil {
 		return errors.Wrap(err, "deleteZeroRef prep")
+	}
+	b.deleteUserRef, err = b.db.Prepare(`
+		DELETE FROM extKeys
+		-- This is the hint to accelerate operation
+		-- when we have many users.
+		WHERE uid = (SELECT id FROM users WHERE username = ?)`)
+	if err != nil {
+		return errors.Wrap(err, "deleteUserRef prep")
 	}
 
 	b.specialUseMbox, err = b.db.Prepare(`
@@ -782,6 +827,19 @@ func (b *Backend) prepareStmts() error {
         WHERE id = ?`)
 	if err != nil {
 		return errors.Wrap(err, "setInboxId prep")
+	}
+
+	b.decreaseRefForMbox, err = b.db.Prepare(`
+		UPDATE extKeys
+		SET refs = refs - 1
+		WHERE uid = ?
+		AND id IN (
+			SELECT extBodyKey
+			FROM msgs
+			WHERE mboxId = (SELECT id FROM mboxes WHERE name = ?)
+		)`)
+	if err != nil {
+		return errors.Wrap(err, "decreaseRefForMbox prep")
 	}
 
 	return nil

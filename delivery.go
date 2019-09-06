@@ -242,7 +242,7 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox *Mailbox, bodyLen 
 	}()
 
 	if extBodyKey.Valid {
-		if _, err = d.tx.Stmt(d.b.addExtKey).Exec(extBodyKey, 1); err != nil {
+		if _, err = d.tx.Stmt(d.b.addExtKey).Exec(extBodyKey, mbox.uid, 1); err != nil {
 			return errors.Wrap(err, "Body")
 		}
 	}
@@ -333,6 +333,7 @@ func (b *Backend) processParsedBody(headerInput []byte, header textproto.Header,
 		defer extWriter.Close()
 
 		if _, err := extWriter.Write(headerInput); err != nil {
+			b.Opts.ExternalStore.Delete([]string{extBodyKey.String})
 			return nil, nil, nil, nil, sql.NullString{}, err
 		}
 
@@ -353,6 +354,9 @@ func (b *Backend) processParsedBody(headerInput []byte, header textproto.Header,
 	bufferedBody := bufio.NewReader(bodyReader)
 	bodyStruct, cachedHeader, err = extractCachedData(header, bufferedBody)
 	if err != nil {
+		if extBodyKey.Valid {
+			b.Opts.ExternalStore.Delete([]string{extBodyKey.String})
+		}
 		return nil, nil, nil, nil, sql.NullString{}, err
 	}
 
@@ -360,6 +364,9 @@ func (b *Backend) processParsedBody(headerInput []byte, header textproto.Header,
 	// copy everything to extWriter.
 	_, err = io.Copy(ioutil.Discard, bufferedBody)
 	if err != nil {
+		if extBodyKey.Valid {
+			b.Opts.ExternalStore.Delete([]string{extBodyKey.String})
+		}
 		return nil, nil, nil, nil, sql.NullString{}, err
 	}
 

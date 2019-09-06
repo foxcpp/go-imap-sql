@@ -363,11 +363,21 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 	bodyLen := fullBody.Len()
 	hdr, body, bodyStruct, cachedHdr, extBodyKey, err := m.parent.processBody(fullBody)
 	if err != nil {
+		if extBodyKey.Valid {
+			m.parent.Opts.ExternalStore.Delete([]string{extBodyKey.String})
+		}
 		return err
 	}
 
+	defer func() {
+		if err != nil && extBodyKey.Valid {
+			m.parent.Opts.ExternalStore.Delete([]string{extBodyKey.String})
+		}
+	}()
+
+
 	if extBodyKey.Valid {
-		if _, err = tx.Stmt(m.parent.addExtKey).Exec(extBodyKey, 1); err != nil {
+		if _, err = tx.Stmt(m.parent.addExtKey).Exec(extBodyKey, m.uid, 1); err != nil {
 			return errors.Wrap(err, "CreateMessage (addExtKey)")
 		}
 	}
@@ -383,7 +393,7 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 	}
 
 	params := m.makeFlagsAddStmtArgs(true, flags, imap.Seq{msgId, msgId})
-	if _, err := tx.Stmt(stmt).Exec(params...); err != nil {
+	if _, err = tx.Stmt(stmt).Exec(params...); err != nil {
 		return errors.Wrap(err, "CreateMessage (flags)")
 	}
 
@@ -392,7 +402,7 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		return errors.Wrap(err, "CreateMessage (status query)")
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err = tx.Commit(); err != nil {
 		return errors.Wrap(err, "CreateMessage (tx commit)")
 	}
 
@@ -609,11 +619,11 @@ func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest s
 
 		if m.parent.Opts.ExternalStore != nil {
 			if uid {
-				if _, err := tx.Stmt(m.parent.incrementRefUid).Exec(srcId, start, stop); err != nil {
+				if _, err := tx.Stmt(m.parent.incrementRefUid).Exec(m.uid, srcId, start, stop); err != nil {
 					return err
 				}
 			} else {
-				if _, err := tx.Stmt(m.parent.incrementRefSeq).Exec(srcId, srcId, start, stop); err != nil {
+				if _, err := tx.Stmt(m.parent.incrementRefSeq).Exec(m.uid, srcId, srcId, start, stop); err != nil {
 					return err
 				}
 			}
@@ -646,6 +656,7 @@ func (m *Mailbox) Expunge() error {
 	if err != nil {
 		return errors.Wrap(err, "Expunge")
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var seqnum uint32
 		if err := rows.Scan(&seqnum); err != nil {
@@ -657,15 +668,17 @@ func (m *Mailbox) Expunge() error {
 		return errors.Wrap(err, "Expunge")
 	}
 
+	if err := m.expungeExternal(tx); err != nil {
+		return err
+	}
+
 	_, err = tx.Stmt(m.parent.expungeMbox).Exec(m.id, m.id)
 	if err != nil {
 		return errors.Wrap(err, "Expunge")
 	}
 
-	if m.parent.Opts.ExternalStore != nil {
-		if err := m.expungeExternal(tx); err != nil {
-			return err
-		}
+	if _, err := tx.Stmt(m.parent.deleteZeroRef).Exec(m.uid); err != nil {
+		return errors.Wrap(err, "Expunge")
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -685,13 +698,13 @@ func (m *Mailbox) Expunge() error {
 }
 
 func (m *Mailbox) expungeExternal(tx *sql.Tx) error {
-	if _, err := tx.Stmt(m.parent.decreaseRefForDeleted).Exec(m.id); err != nil {
-		return err
+	if _, err := tx.Stmt(m.parent.decreaseRefForDeleted).Exec(m.uid, m.id); err != nil {
+		return errors.Wrap(err, "Expunge (external)")
 	}
 
-	rows, err := tx.Stmt(m.parent.zeroRef).Query(m.id)
+	rows, err := tx.Stmt(m.parent.zeroRef).Query(m.uid, m.id)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "Expunge (external)")
 	}
 	defer rows.Close()
 
@@ -699,17 +712,16 @@ func (m *Mailbox) expungeExternal(tx *sql.Tx) error {
 	for rows.Next() {
 		var extKey string
 		if err := rows.Scan(&extKey); err != nil {
-			return err
+			return errors.Wrap(err, "Expunge (external)")
 		}
 		keys = append(keys, extKey)
 
 	}
 
-	if err := m.parent.Opts.ExternalStore.Delete(keys); err != nil {
-		return err
-	}
-	if _, err := tx.Stmt(m.parent.deleteZeroRef).Exec(); err != nil {
-		return err
+	if m.parent.Opts.ExternalStore != nil {
+		if err := m.parent.Opts.ExternalStore.Delete(keys); err != nil {
+			return errors.Wrap(err, "Expunge (external)")
+		}
 	}
 
 	return nil

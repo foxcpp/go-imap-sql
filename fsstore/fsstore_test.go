@@ -61,6 +61,15 @@ func initTestBackend() backendtests.Backend {
 func cleanBackend(bi backendtests.Backend) {
 	b := bi.(*imapsql.Backend)
 	if os.Getenv("PRESERVE_DB") != "1" {
+		// Remove things manually in the right order so we will not hit
+		// foreign key constraint when dropping tables.
+		if _, err := b.DB.Exec(`DELETE FROM msgs`); err != nil {
+			log.Println("DELETE FROM msgs", err)
+		}
+		if _, err := b.DB.Exec(`DELETE FROM extKeys`); err != nil {
+			log.Println("DELETE FROM extKeys", err)
+		}
+
 		if _, err := b.DB.Exec(`DROP TABLE flags`); err != nil {
 			log.Println("DROP TABLE flags", err)
 		}

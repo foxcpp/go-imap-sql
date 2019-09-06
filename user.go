@@ -146,19 +146,57 @@ func (u *User) DeleteMailbox(name string) error {
 	if strings.ToLower(name) == "inbox" {
 		return errors.New("DeleteMailbox: can't delete INBOX")
 	}
-	if stats, err := u.parent.deleteMbox.Exec(u.id, name); err != nil {
+
+	tx, err := u.parent.db.BeginLevel(sql.LevelRepeatableRead, false)
+	if err != nil {
 		return errors.Wrapf(err, "DeleteMailbox %s", name)
-	} else {
-		affected, err := stats.RowsAffected()
-		if err != nil {
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Stmt(u.parent.decreaseRefForMbox).Exec(u.id, name); err != nil {
+		return errors.Wrapf(err, "DeleteMailbox %s", name)
+	}
+
+	rows, err := tx.Stmt(u.parent.zeroRefUser).Query(u.id)
+	if err != nil {
+		return errors.Wrapf(err, "DeleteMailbox %s", name)
+	}
+	defer rows.Close()
+
+	keys := make([]string, 0, 16)
+	for rows.Next() {
+		var extKey string
+		if err := rows.Scan(&extKey); err != nil {
 			return errors.Wrapf(err, "DeleteMailbox %s", name)
 		}
-		if affected == 0 {
-			return backend.ErrNoSuchMailbox
+		keys = append(keys, extKey)
+
+	}
+
+	if u.parent.Opts.ExternalStore != nil {
+		if err := u.parent.Opts.ExternalStore.Delete(keys); err != nil {
+			return errors.Wrapf(err, "DeleteMailbox %s", name)
 		}
 	}
 
-	return nil
+	// TODO: Grab mboxId along the way on PostgreSQL?
+	stats, err := tx.Stmt(u.parent.deleteMbox).Exec(u.id, name)
+	if err != nil {
+		return errors.Wrapf(err, "DeleteMailbox %s", name)
+	}
+	affected, err := stats.RowsAffected()
+	if err != nil {
+		return errors.Wrapf(err, "DeleteMailbox %s", name)
+	}
+	if affected == 0 {
+		return backend.ErrNoSuchMailbox
+	}
+
+	if _, err := tx.Stmt(u.parent.deleteZeroRef).Exec(u.id); err != nil {
+		return errors.Wrapf(err, "DeleteMailbox %s", name)
+	}
+
+	return tx.Commit()
 }
 
 func (u *User) RenameMailbox(existingName, newName string) error {

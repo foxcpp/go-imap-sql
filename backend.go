@@ -227,7 +227,11 @@ type Backend struct {
 	incrementRefUid       *sql.Stmt
 	incrementRefSeq       *sql.Stmt
 	zeroRef               *sql.Stmt
+	zeroRefUser           *sql.Stmt
+	refUser               *sql.Stmt
 	deleteZeroRef         *sql.Stmt
+	deleteUserRef         *sql.Stmt
+	decreaseRefForMbox    *sql.Stmt
 
 	// Used by Delivery.SpecialMailbox.
 	specialUseMbox *sql.Stmt
@@ -531,7 +535,28 @@ func (b *Backend) createUser(tx *sql.Tx, username string, passHashAlgo string, p
 func (b *Backend) DeleteUser(username string) error {
 	username = strings.ToLower(username)
 
-	stats, err := b.delUser.Exec(username)
+	tx, err := b.db.BeginLevel(sql.LevelReadCommitted, false)
+	if err != nil {
+		return errors.Wrap(err, "DeleteUser")
+	}
+	defer tx.Rollback()
+
+	// TODO: These queries definitely can be merged on PostgreSQL.
+	var keys []string
+	rows, err := tx.Stmt(b.refUser).Query(username)
+	if err != nil {
+		return errors.Wrap(err, "DeleteUser")
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return errors.Wrap(err,  "DeleteUser")
+		}
+		keys = append(keys, key)
+	}
+
+	stats, err := tx.Stmt(b.delUser).Exec(username)
 	if err != nil {
 		return errors.Wrap(err, "DeleteUser")
 	}
@@ -539,11 +564,21 @@ func (b *Backend) DeleteUser(username string) error {
 	if err != nil {
 		return errors.Wrap(err, "DeleteUser")
 	}
-
 	if affected == 0 {
 		return ErrUserDoesntExists
 	}
-	return nil
+
+	if b.Opts.ExternalStore != nil {
+		if err := b.Opts.ExternalStore.Delete(keys); err != nil {
+			return errors.Wrap(err, "DeleteUser")
+		}
+	}
+
+	if _, err := tx.Stmt(b.deleteUserRef).Exec(username); err != nil {
+		return errors.Wrap(err, "DeleteUser")
+	}
+
+	return tx.Commit()
 }
 
 // ResetPassword sets user account password to invalid value such that Login

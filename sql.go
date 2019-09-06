@@ -703,7 +703,7 @@ func (b *Backend) prepareStmts() error {
 			FROM msgs
 			INNER JOIN flags
 			ON msgs.mboxId = flags.mboxId
-			AND msgs.msgId = msgs.msgId
+			AND msgs.msgId = flags.msgId
 			AND flag = '\Deleted'
 			WHERE msgs.mboxId = ?
 		)`)

@@ -88,9 +88,6 @@ type Opts struct {
 	// directly will not be moved.
 	ExternalStore ExternalStore
 
-	// Automatically update database schema on imapsql.New.
-	AllowSchemaUpgrade bool
-
 	// Hash algorithm to use for authentication passwords when no algorithm is
 	// explicitly specified.
 	// "sha3-512" and "bcrypt" are supported out of the box. "bcrypt" is used
@@ -118,7 +115,6 @@ type Backend struct {
 	// - ExternalStore
 	// - PRNG
 	// Changes for the following options have no effect after backend initialization:
-	// - AllowSchemaUpgrade
 	// - ExclusiveLock
 	// - CacheSize
 	// - NoWAL
@@ -315,9 +311,7 @@ func New(driver, dsn string, opts Opts) (*Backend, error) {
 		return nil, errors.Errorf("incompatible database schema, too new (%d > %d)", ver, SchemaVersion)
 	}
 	if ver < SchemaVersion && ver != 0 {
-		if !opts.AllowSchemaUpgrade {
-			return nil, errors.Errorf("incompatible database schema, upgrade required (%d < %d)", ver, SchemaVersion)
-		}
+		b.Opts.Log.Printf("Upgrading database schema (from %d to %d)", ver, SchemaVersion)
 		if err := b.upgradeSchema(ver); err != nil {
 			return nil, errors.Wrap(err, "NewBackend (schemaUpgrade)")
 		}
@@ -551,7 +545,7 @@ func (b *Backend) DeleteUser(username string) error {
 	for rows.Next() {
 		var key string
 		if err := rows.Scan(&key); err != nil {
-			return errors.Wrap(err,  "DeleteUser")
+			return errors.Wrap(err, "DeleteUser")
 		}
 		keys = append(keys, key)
 	}

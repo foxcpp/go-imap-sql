@@ -50,7 +50,6 @@ func connectToDB(ctx *cli.Context) error {
 	}
 
 	opts := imapsql.Opts{LazyUpdatesInit: true}
-	opts.AllowSchemaUpgrade = ctx.GlobalIsSet("allow-schema-upgrade")
 	opts.NoWAL = ctx.GlobalIsSet("no-wal")
 	if store := ctx.GlobalString("fsstore"); store != "" {
 		opts.ExternalStore = &fsstore.Store{Root: store}

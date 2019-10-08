@@ -234,15 +234,10 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox *Mailbox, bodyLen 
 	if err != nil {
 		return err
 	}
-	defer func() {
-		// Delete created ExternalStore object if something went wrong.
-		if err != nil && extBodyKey.Valid {
-			d.b.Opts.ExternalStore.Delete([]string{extBodyKey.String})
-		}
-	}()
 
 	if extBodyKey.Valid {
 		if _, err = d.tx.Stmt(d.b.addExtKey).Exec(extBodyKey, mbox.uid, 1); err != nil {
+			d.b.Opts.ExternalStore.Delete([]string{extBodyKey.String})
 			return errors.Wrap(err, "Body (addExtKey)")
 		}
 	}
@@ -254,11 +249,17 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox *Mailbox, bodyLen 
 	// --- operations that involve mboxes table ---
 	msgId, err := mbox.incrementMsgCounters(d.tx)
 	if err != nil {
+		if extBodyKey.Valid {
+			d.b.Opts.ExternalStore.Delete([]string{extBodyKey.String})
+		}
 		return errors.Wrap(err, "Body (incrementMsgCounters)")
 	}
 
 	upd, err := mbox.statusUpdate(d.tx)
 	if err != nil {
+		if extBodyKey.Valid {
+			d.b.Opts.ExternalStore.Delete([]string{extBodyKey.String})
+		}
 		return errors.Wrap(err, "Body (statusUpdate)")
 	}
 	d.updates = append(d.updates, upd)
@@ -272,6 +273,9 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox *Mailbox, bodyLen 
 		0,
 	)
 	if err != nil {
+		if extBodyKey.Valid {
+			d.b.Opts.ExternalStore.Delete([]string{extBodyKey.String})
+		}
 		return errors.Wrap(err, "Body (addMsg)")
 	}
 	// --- end of operations that involve msgs table ---
@@ -279,6 +283,9 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox *Mailbox, bodyLen 
 	// --- operations that involve flags table ---
 	params := mbox.makeFlagsAddStmtArgs(true, []string{imap.RecentFlag}, imap.Seq{Start: msgId, Stop: msgId})
 	if _, err := d.tx.Stmt(flagsStmt).Exec(params...); err != nil {
+		if extBodyKey.Valid {
+			d.b.Opts.ExternalStore.Delete([]string{extBodyKey.String})
+		}
 		return errors.Wrap(err, "Body (flagsStmt)")
 	}
 	// --- end operations that involve flags table ---

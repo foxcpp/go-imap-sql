@@ -289,11 +289,17 @@ func (b *Backend) processBody(literal imap.Literal) (headerBlob, bodyBlob, bodyS
 	bufferedBody := bufio.NewReader(bodyReader)
 	hdr, err := textproto.ReadHeader(bufferedBody)
 	if err != nil {
+		if extBodyKey.Valid {
+			b.Opts.ExternalStore.Delete([]string{extBodyKey.String})
+		}
 		return nil, nil, nil, nil, sql.NullString{}, errors.Wrap(err, "CreateMessage (readHeader)")
 	}
 
 	bodyStruct, cachedHeader, err = extractCachedData(hdr, bufferedBody)
 	if err != nil {
+		if extBodyKey.Valid {
+			b.Opts.ExternalStore.Delete([]string{extBodyKey.String})
+		}
 		return nil, nil, nil, nil, sql.NullString{}, errors.Wrap(err, "CreateMessage (extractCachedData)")
 	}
 
@@ -301,6 +307,9 @@ func (b *Backend) processBody(literal imap.Literal) (headerBlob, bodyBlob, bodyS
 	// copy everything to extWriter.
 	_, err = io.Copy(ioutil.Discard, bufferedBody)
 	if err != nil {
+		if extBodyKey.Valid {
+			b.Opts.ExternalStore.Delete([]string{extBodyKey.String})
+		}
 		return nil, nil, nil, nil, sql.NullString{}, errors.Wrap(err, "CreateMessage (ReadAll consume)")
 	}
 
@@ -363,21 +372,12 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 	bodyLen := fullBody.Len()
 	hdr, body, bodyStruct, cachedHdr, extBodyKey, err := m.parent.processBody(fullBody)
 	if err != nil {
-		if extBodyKey.Valid {
-			m.parent.Opts.ExternalStore.Delete([]string{extBodyKey.String})
-		}
 		return err
 	}
 
-	defer func() {
-		if err != nil && extBodyKey.Valid {
-			m.parent.Opts.ExternalStore.Delete([]string{extBodyKey.String})
-		}
-	}()
-
-
 	if extBodyKey.Valid {
 		if _, err = tx.Stmt(m.parent.addExtKey).Exec(extBodyKey, m.uid, 1); err != nil {
+			m.parent.Opts.ExternalStore.Delete([]string{extBodyKey.String})
 			return errors.Wrap(err, "CreateMessage (addExtKey)")
 		}
 	}
@@ -389,20 +389,32 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		haveSeen,
 	)
 	if err != nil {
+		if extBodyKey.Valid {
+			m.parent.Opts.ExternalStore.Delete([]string{extBodyKey.String})
+		}
 		return errors.Wrap(err, "CreateMessage (addMsg)")
 	}
 
 	params := m.makeFlagsAddStmtArgs(true, flags, imap.Seq{msgId, msgId})
 	if _, err = tx.Stmt(stmt).Exec(params...); err != nil {
+		if extBodyKey.Valid {
+			m.parent.Opts.ExternalStore.Delete([]string{extBodyKey.String})
+		}
 		return errors.Wrap(err, "CreateMessage (flags)")
 	}
 
 	upd, err := m.statusUpdate(tx)
 	if err != nil {
+		if extBodyKey.Valid {
+			m.parent.Opts.ExternalStore.Delete([]string{extBodyKey.String})
+		}
 		return errors.Wrap(err, "CreateMessage (status query)")
 	}
 
 	if err = tx.Commit(); err != nil {
+		if extBodyKey.Valid {
+			m.parent.Opts.ExternalStore.Delete([]string{extBodyKey.String})
+		}
 		return errors.Wrap(err, "CreateMessage (tx commit)")
 	}
 

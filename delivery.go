@@ -221,7 +221,7 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox *Mailbox, bodyLen 
 
 	headerBlob := bytes.Buffer{}
 	if err := textproto.WriteHeader(&headerBlob, header); err != nil {
-		return errors.Wrap(err, "Body")
+		return errors.Wrap(err, "Body (WriteHeader)")
 	}
 
 	length := headerBlob.Len() + bodyLen
@@ -243,7 +243,7 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox *Mailbox, bodyLen 
 
 	if extBodyKey.Valid {
 		if _, err = d.tx.Stmt(d.b.addExtKey).Exec(extBodyKey, mbox.uid, 1); err != nil {
-			return errors.Wrap(err, "Body")
+			return errors.Wrap(err, "Body (addExtKey)")
 		}
 	}
 
@@ -254,12 +254,12 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox *Mailbox, bodyLen 
 	// --- operations that involve mboxes table ---
 	msgId, err := mbox.incrementMsgCounters(d.tx)
 	if err != nil {
-		return errors.Wrap(err, "Body")
+		return errors.Wrap(err, "Body (incrementMsgCounters)")
 	}
 
 	upd, err := mbox.statusUpdate(d.tx)
 	if err != nil {
-		return errors.Wrap(err, "Body")
+		return errors.Wrap(err, "Body (statusUpdate)")
 	}
 	d.updates = append(d.updates, upd)
 	// --- end of operations that involve mboxes table ---
@@ -272,14 +272,14 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox *Mailbox, bodyLen 
 		0,
 	)
 	if err != nil {
-		return errors.Wrap(err, "Body")
+		return errors.Wrap(err, "Body (addMsg)")
 	}
 	// --- end of operations that involve msgs table ---
 
 	// --- operations that involve flags table ---
 	params := mbox.makeFlagsAddStmtArgs(true, []string{imap.RecentFlag}, imap.Seq{Start: msgId, Stop: msgId})
 	if _, err := d.tx.Stmt(flagsStmt).Exec(params...); err != nil {
-		return errors.Wrap(err, "Body")
+		return errors.Wrap(err, "Body (flagsStmt)")
 	}
 	// --- end operations that involve flags table ---
 

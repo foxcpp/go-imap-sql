@@ -430,7 +430,7 @@ func (b *Backend) getUserCreds(tx *sql.Tx, username string) (id uint64, inboxId 
 	}
 
 	if !passHashHex.Valid || !passSaltHex.Valid {
-		return id, 0, "", nil, nil, nil
+		return id, inboxId, "", nil, nil, nil
 	}
 
 	hashHexParts := strings.Split(passHashHex.String, ":")
@@ -454,21 +454,24 @@ func (b *Backend) getUserCreds(tx *sql.Tx, username string) (id uint64, inboxId 
 // It is error to create account with username that already exists.
 // ErrUserAlreadyExists will be returned in this case.
 func (b *Backend) CreateUser(username, password string) error {
-	return b.createUser(nil, strings.ToLower(username), b.Opts.DefaultHashAlgo, &password)
+	_, _, err := b.createUser(nil, strings.ToLower(username), b.Opts.DefaultHashAlgo, &password)
+	return err
 }
 
 func (b *Backend) CreateUserWithHash(username, hashAlgo, password string) error {
-	return b.createUser(nil, strings.ToLower(username), hashAlgo, &password)
+	_, _, err := b.createUser(nil, strings.ToLower(username), hashAlgo, &password)
+	return err
 }
 
 // CreateUserNoPass creates new user account without a password set.
 //
 // It will be unable to log in until SetUserPassword is called for it.
 func (b *Backend) CreateUserNoPass(username string) error {
-	return b.createUser(nil, strings.ToLower(username), b.Opts.DefaultHashAlgo, nil)
+	_, _, err := b.createUser(nil, strings.ToLower(username), b.Opts.DefaultHashAlgo, nil)
+	return err
 }
 
-func (b *Backend) createUser(tx *sql.Tx, username string, passHashAlgo string, password *string) error {
+func (b *Backend) createUser(tx *sql.Tx, username string, passHashAlgo string, password *string) (uid, inboxId uint64, err error) {
 	var passHash, passSalt sql.NullString
 	if password != nil {
 		var err error
@@ -476,7 +479,7 @@ func (b *Backend) createUser(tx *sql.Tx, username string, passHashAlgo string, p
 		passSalt.Valid = true
 		passHash.String, passSalt.String, err = b.hashCredentials(passHashAlgo, *password)
 		if err != nil {
-			return errors.Wrap(err, "CreateUser")
+			return 0, 0, errors.Wrap(err, "CreateUser")
 		}
 	}
 
@@ -485,41 +488,40 @@ func (b *Backend) createUser(tx *sql.Tx, username string, passHashAlgo string, p
 		var err error
 		tx, err = b.db.Begin(false)
 		if err != nil {
-			return errors.Wrap(err, "CreateUser")
+			return 0, 0, errors.Wrap(err, "CreateUser")
 		}
 		defer tx.Rollback()
 		shouldCommit = true
 	}
 
-	_, err := tx.Stmt(b.addUser).Exec(username, passHash, passSalt)
+	_, err = tx.Stmt(b.addUser).Exec(username, passHash, passSalt)
 	if err != nil && isForeignKeyErr(err) {
-		return ErrUserAlreadyExists
+		return 0, 0, ErrUserAlreadyExists
 	}
 
 	// TODO: Cut additional query here by using RETURNING on PostgreSQL.
-	uid, _, _, _, _, err := b.getUserCreds(tx, username)
+	uid, _, _, _, _, err = b.getUserCreds(tx, username)
 	if err != nil {
-		return errors.Wrap(err, "CreateUser")
+		return 0, 0, errors.Wrap(err, "CreateUser")
 	}
 
 	// Every new user needs to have at least one mailbox (INBOX).
 	if _, err := tx.Stmt(b.createMbox).Exec(uid, "INBOX", b.prng.Uint32(), nil); err != nil {
-		return errors.Wrap(err, "CreateUser")
+		return 0, 0, errors.Wrap(err, "CreateUser")
 	}
 
 	// Cut another query here by using RETURNING on PostgreSQL.
-	var inboxId uint64
 	if err = tx.Stmt(b.mboxId).QueryRow(uid, "INBOX").Scan(&inboxId); err != nil {
-		return errors.Wrap(err, "CreateUser")
+		return 0, 0, errors.Wrap(err, "CreateUser")
 	}
 	if _, err = tx.Stmt(b.setInboxId).Exec(uid, inboxId); err != nil {
-		return errors.Wrap(err, "CreateUser")
+		return 0, 0, errors.Wrap(err, "CreateUser")
 	}
 
 	if shouldCommit {
-		return tx.Commit()
+		return uid, inboxId, tx.Commit()
 	}
-	return nil
+	return uid, inboxId, nil
 }
 
 // DeleteUser deleted user account with specified username.
@@ -688,17 +690,7 @@ func (b *Backend) GetOrCreateUser(username string) (backend.User, error) {
 	uid, inboxId, _, _, _, err := b.getUserCreds(tx, username)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			if err := b.createUser(tx, username, b.Opts.DefaultHashAlgo, nil); err != nil {
-				return nil, err
-			}
-
-			uid, inboxId, _, _, _, err = b.getUserCreds(tx, username)
-			if err != nil {
-				return nil, err
-			}
-
-			// Every new user needs to have at least one mailbox (INBOX).
-			if _, err := tx.Stmt(b.createMbox).Exec(uid, "INBOX", b.prng.Uint32(), nil); err != nil {
+			if uid, inboxId, err = b.createUser(tx, username, b.Opts.DefaultHashAlgo, nil); err != nil {
 				return nil, err
 			}
 		} else {

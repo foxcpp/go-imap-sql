@@ -342,7 +342,7 @@ func (b *Backend) processParsedBody(headerInput []byte, header textproto.Header,
 		headerBlob = nil
 		bodyBlob = nil
 	} else {
-		bodyBuf, err := ioutil.ReadAll(bodyLiteral)
+		bodyBuf, err := bufferBody(bodyLiteral)
 		if err != nil {
 			return nil, nil, nil, nil, sql.NullString{}, err
 		}

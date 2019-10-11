@@ -328,16 +328,16 @@ func (b *Backend) processParsedBody(headerInput []byte, header textproto.Header,
 	}
 	defer extWriter.Close()
 
-	if _, err := extWriter.Write(headerInput); err != nil {
-		b.extStore.Delete([]string{extBodyKey})
-		return nil, nil, "", err
-	}
-
 	compressW, err := b.compressAlgo.WrapCompress(extWriter, b.Opts.CompressAlgoParams)
 	if err != nil {
 		return nil, nil, "", err
 	}
 	defer compressW.Close()
+
+	if _, err := compressW.Write(headerInput); err != nil {
+		b.extStore.Delete([]string{extBodyKey})
+		return nil, nil, "", err
+	}
 
 	bodyReader = io.TeeReader(bodyLiteral, compressW)
 	bufferedBody := bufio.NewReader(bodyReader)

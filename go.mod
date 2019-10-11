@@ -11,6 +11,7 @@ require (
 	github.com/foxcpp/go-imap-backend-tests v0.0.0-20190615132041-281c43ad777b
 	github.com/frankban/quicktest v1.5.0 // indirect
 	github.com/go-sql-driver/mysql v1.4.1
+	github.com/klauspost/compress v1.8.6
 	github.com/lib/pq v1.1.1
 	github.com/mattn/go-sqlite3 v1.10.0
 	github.com/pierrec/lz4 v2.3.0+incompatible

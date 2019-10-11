@@ -4,6 +4,7 @@ import (
 	"io"
 	"strconv"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/pierrec/lz4"
 )
 
@@ -28,6 +29,7 @@ type CompressionAlgo interface {
 
 var compressionAlgos = map[string]CompressionAlgo{
 	"lz4": lz4Compression{},
+	"zstd": zstdCompression{},
 }
 
 // RegisterCompressionAlgo adds a new compression algorithm to the registry so it can
@@ -52,6 +54,24 @@ func (algo lz4Compression) WrapCompress(w io.Writer, params string) (io.WriteClo
 
 func (algo lz4Compression) WrapDecompress(r io.Reader) (io.Reader, error) {
 	return lz4.NewReader(r), nil
+}
+
+type zstdCompression struct{}
+
+func (algo zstdCompression) WrapCompress(w io.Writer, params string) (io.WriteCloser, error) {
+	encoderLvl := zstd.SpeedDefault
+	if params != "" {
+		zstdLevel, err := strconv.Atoi(params)
+		if err != nil {
+			return nil, err
+		}
+		encoderLvl = zstd.EncoderLevelFromZstd(zstdLevel)
+	}
+	return zstd.NewWriter(w, zstd.WithEncoderLevel(encoderLvl))
+}
+
+func (algo zstdCompression) WrapDecompress(r io.Reader) (io.Reader, error) {
+	return zstd.NewReader(r)
 }
 
 type nullCompression struct{}

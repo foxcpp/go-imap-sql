@@ -14,7 +14,7 @@ import (
 
 func checkKeysCount(b *Backend, expected int) is.Comparison {
 	return func() is.Result {
-		dirList, err := ioutil.ReadDir(b.extStore.(*Store).Root)
+		dirList, err := ioutil.ReadDir(b.extStore.(*FSStore).Root)
 		if err != nil {
 			return is.ResultFromError(err)
 		}

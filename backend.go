@@ -514,7 +514,7 @@ func (b *Backend) createUser(tx *sql.Tx, username string, passHashAlgo string, p
 	if err = tx.Stmt(b.mboxId).QueryRow(uid, "INBOX").Scan(&inboxId); err != nil {
 		return 0, 0, errors.Wrap(err, "CreateUser")
 	}
-	if _, err = tx.Stmt(b.setInboxId).Exec(uid, inboxId); err != nil {
+	if _, err = tx.Stmt(b.setInboxId).Exec(inboxId, uid); err != nil {
 		return 0, 0, errors.Wrap(err, "CreateUser")
 	}
 

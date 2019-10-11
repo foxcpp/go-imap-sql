@@ -232,7 +232,7 @@ func (u *User) RenameMailbox(existingName, newName string) error {
 		if err = tx.Stmt(u.parent.mboxId).QueryRow(u.id, "INBOX").Scan(&inboxId); err != nil {
 			return errors.Wrap(err, "CreateUser")
 		}
-		if _, err := tx.Stmt(u.parent.setInboxId).Exec(u.id, inboxId); err != nil {
+		if _, err := tx.Stmt(u.parent.setInboxId).Exec(inboxId, u.id); err != nil {
 			return errors.Wrapf(err, "RenameMailbox %s, %s", existingName, newName)
 		}
 	}

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/foxcpp/go-imap-backend-tests"
+	backendtests "github.com/foxcpp/go-imap-backend-tests"
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
@@ -29,20 +29,27 @@ func initTestBackend() backendtests.Backend {
 	randSrc := rand.NewSource(0)
 	prng := rand.New(randSrc)
 
+	tempDir, err := ioutil.TempDir("", "go-imap-sql-tests-")
+	if err != nil {
+		panic(err)
+	}
+
 	// This is meant for DB debugging.
 	if os.Getenv("PRESERVE_SQLITE3_DB") == "1" {
 		log.Println("Using sqlite3 DB in temporary directory.")
-		tempDir, err := ioutil.TempDir("", "go-imap-sql-tests-")
-		if err != nil {
-			panic(err)
-		}
 		driver = "sqlite3"
 		dsn = filepath.Join(tempDir, "test.db")
+	}
+
+	storeDir := filepath.Join(tempDir, "store")
+	if err := os.MkdirAll(storeDir, os.ModeDir|os.ModePerm); err != nil {
+		panic(err)
 	}
 
 	b, err := New(driver, dsn, Opts{
 		LazyUpdatesInit: true,
 		PRNG:            prng,
+		ExternalStore:   &Store{Root: storeDir},
 	})
 	if err != nil {
 		panic(err)
@@ -53,25 +60,38 @@ func initTestBackend() backendtests.Backend {
 func cleanBackend(bi backendtests.Backend) {
 	b := bi.(*Backend)
 	if os.Getenv("PRESERVE_DB") != "1" {
-		if _, err := b.db.Exec(`DROP TABLE flags`); err != nil {
+		// Remove things manually in the right order so we will not hit
+		// foreign key constraint when dropping tables.
+		if _, err := b.DB.Exec(`DELETE FROM msgs`); err != nil {
+			log.Println("DELETE FROM msgs", err)
+		}
+		if _, err := b.DB.Exec(`DELETE FROM extKeys`); err != nil {
+			log.Println("DELETE FROM extKeys", err)
+		}
+
+		if _, err := b.DB.Exec(`DROP TABLE flags`); err != nil {
 			log.Println("DROP TABLE flags", err)
 		}
-		if _, err := b.db.Exec(`DROP TABLE msgs`); err != nil {
+		if _, err := b.DB.Exec(`DROP TABLE msgs`); err != nil {
 			log.Println("DROP TABLE msgs", err)
 		}
-		if _, err := b.db.Exec(`DROP TABLE mboxes`); err != nil {
+		if _, err := b.DB.Exec(`DROP TABLE mboxes`); err != nil {
 			log.Println("DROP TABLE mboxes", err)
 		}
-		if _, err := b.db.Exec(`DROP TABLE users`); err != nil {
+		if _, err := b.DB.Exec(`DROP TABLE users`); err != nil {
 			log.Println("DROP TABLE users", err)
 		}
-		if _, err := b.db.Exec(`DROP TABLE extKeys`); err != nil {
+		if _, err := b.DB.Exec(`DROP TABLE extKeys`); err != nil {
 			log.Println("DROP TABLE extKeys", err)
+		}
+
+		if err := os.RemoveAll(b.Opts.ExternalStore.(*Store).Root); err != nil {
+			log.Println(err)
 		}
 	}
 	b.Close()
 }
 
-func TestBackend(t *testing.T) {
+func TestWithFSStore(t *testing.T) {
 	backendtests.RunTests(t, initTestBackend, cleanBackend)
 }

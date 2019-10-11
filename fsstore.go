@@ -1,4 +1,4 @@
-package fsstore
+package imapsql
 
 import (
 	"io"

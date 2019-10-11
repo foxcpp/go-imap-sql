@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	imap "github.com/emersion/go-imap"
+	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/backend"
 	"github.com/pkg/errors"
 )
@@ -262,6 +262,10 @@ func New(driver, dsn string, opts Opts) (*Backend, error) {
 		sqliteOptimizeLoopStop: make(chan struct{}),
 	}
 	var err error
+
+	if opts.ExternalStore == nil {
+		return nil, errors.New("ExternalStore is required")
+	}
 
 	b.Opts = opts
 	if !b.Opts.LazyUpdatesInit {

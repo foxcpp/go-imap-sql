@@ -7,7 +7,6 @@ import (
 	"os"
 
 	imapsql "github.com/foxcpp/go-imap-sql"
-	"github.com/foxcpp/go-imap-sql/fsstore"
 	"github.com/urfave/cli"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -22,6 +21,7 @@ func connectToDB(ctx *cli.Context) error {
 
 	driver := ctx.GlobalString("driver")
 	dsn := ctx.GlobalString("dsn")
+	fsstore := ctx.GlobalString("fsstore")
 
 	if (driver == "" || dsn == "") && ctx.GlobalIsSet("config") {
 		f, err := os.Open(ctx.GlobalString("config"))
@@ -48,12 +48,13 @@ func connectToDB(ctx *cli.Context) error {
 	if dsn == "" {
 		return errors.New("Error: dsn is required")
 	}
+	if fsstore == "" {
+		return errors.New("Error: fsstrore is required")
+	}
 
 	opts := imapsql.Opts{LazyUpdatesInit: true}
 	opts.NoWAL = ctx.GlobalIsSet("no-wal")
-	if store := ctx.GlobalString("fsstore"); store != "" {
-		opts.ExternalStore = &fsstore.Store{Root: store}
-	}
+	opts.ExternalStore = &imapsql.Store{Root: fsstore}
 
 	var err error
 	backend, err = imapsql.New(driver, dsn, opts)

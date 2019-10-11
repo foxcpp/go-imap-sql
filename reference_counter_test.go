@@ -1,4 +1,4 @@
-package fsstore
+package imapsql
 
 import (
 	"fmt"
@@ -8,26 +8,14 @@ import (
 	"time"
 
 	"github.com/emersion/go-imap"
-	imapsql "github.com/foxcpp/go-imap-sql"
 	"gotest.tools/assert"
 	is "gotest.tools/assert/cmp"
 )
 
-const (
-	testMsgHeader = "From: <foxcpp@foxcpp.dev>\r\n" +
-		"Subject: Hello!\r\n" +
-		"Content-Type: text/plain; charset=ascii\r\n" +
-		"Non-Cached-Header: 1\r\n" +
-		"\r\n"
-	testMsgBody = "Hello!\r\n"
-	testMsg     = testMsgHeader +
-		testMsgBody
-)
-
-func checkKeysCount(b *imapsql.Backend, expected int) is.Comparison {
+func checkKeysCount(b *Backend, expected int) is.Comparison {
 	return func() is.Result {
 		dirList, err := ioutil.ReadDir(b.Opts.ExternalStore.(*Store).Root)
-		if err != nil{
+		if err != nil {
 			return is.ResultFromError(err)
 		}
 		if len(dirList) != expected {
@@ -42,7 +30,7 @@ func checkKeysCount(b *imapsql.Backend, expected int) is.Comparison {
 }
 
 func TestKeyIsRemovedWithMsg(t *testing.T) {
-	b := initTestBackend().(*imapsql.Backend)
+	b := initTestBackend().(*Backend)
 	defer cleanBackend(b)
 	assert.NilError(t, b.CreateUser(t.Name(), ""))
 	usr, err := b.GetUser(t.Name())
@@ -50,7 +38,6 @@ func TestKeyIsRemovedWithMsg(t *testing.T) {
 	assert.NilError(t, usr.CreateMailbox(t.Name()))
 	mbox, err := usr.GetMailbox(t.Name())
 	assert.NilError(t, err)
-
 
 	// Message is created, there should be a key.
 	assert.NilError(t, mbox.CreateMessage([]string{imap.DeletedFlag}, time.Now(), strings.NewReader(testMsg)))
@@ -62,7 +49,7 @@ func TestKeyIsRemovedWithMsg(t *testing.T) {
 }
 
 func TestKeyIsRemovedWithMbox(t *testing.T) {
-	b := initTestBackend().(*imapsql.Backend)
+	b := initTestBackend().(*Backend)
 	defer cleanBackend(b)
 	assert.NilError(t, b.CreateUser(t.Name(), ""))
 	usr, err := b.GetUser(t.Name())
@@ -70,7 +57,6 @@ func TestKeyIsRemovedWithMbox(t *testing.T) {
 	assert.NilError(t, usr.CreateMailbox(t.Name()))
 	mbox, err := usr.GetMailbox(t.Name())
 	assert.NilError(t, err)
-
 
 	// Message is created, there should be a key.
 	assert.NilError(t, mbox.CreateMessage([]string{imap.DeletedFlag}, time.Now(), strings.NewReader(testMsg)))
@@ -82,20 +68,19 @@ func TestKeyIsRemovedWithMbox(t *testing.T) {
 }
 
 func TestKeyIsRemovedWithCopiedMsgs(t *testing.T) {
-	b := initTestBackend().(*imapsql.Backend)
+	b := initTestBackend().(*Backend)
 	defer cleanBackend(b)
 	assert.NilError(t, b.CreateUser(t.Name(), ""))
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)
 
 	assert.NilError(t, usr.CreateMailbox(t.Name()+"-1"))
-	mbox1, err := usr.GetMailbox(t.Name()+"-1")
+	mbox1, err := usr.GetMailbox(t.Name() + "-1")
 	assert.NilError(t, err)
 
 	assert.NilError(t, usr.CreateMailbox(t.Name()+"-2"))
-	mbox2, err := usr.GetMailbox(t.Name()+"-2")
+	mbox2, err := usr.GetMailbox(t.Name() + "-2")
 	assert.NilError(t, err)
-
 
 	// The message is created, there should be a key.
 	assert.NilError(t, mbox1.CreateMessage([]string{imap.DeletedFlag}, time.Now(), strings.NewReader(testMsg)))
@@ -115,7 +100,8 @@ func TestKeyIsRemovedWithCopiedMsgs(t *testing.T) {
 	assert.Assert(t, checkKeysCount(b, 0), "Key is not removed after message removal")
 }
 
-func TestKeyIsRemovedWithUser(t *testing.T) {	b := initTestBackend().(*imapsql.Backend)
+func TestKeyIsRemovedWithUser(t *testing.T) {
+	b := initTestBackend().(*Backend)
 	defer cleanBackend(b)
 	assert.NilError(t, b.CreateUser(t.Name(), ""))
 	usr, err := b.GetUser(t.Name())

@@ -86,22 +86,6 @@ time on initialization (in `New`).
 You can provide custom pre-seeded struct implementing `math/rand.Source` 
 in `Opts` struct (`PRNG` field).
 
-Internal/External BLOBs
--------------------------
-
-go-imap-sql can store message bodies in two ways: In database rows (works well
-with SQLite3) or in "external" key-value store (works better with any
-server-based RDBMS). By default former approach is used.
-
-To switch to "external store", set `Opts.ExternalStore` field before passing
-`Opts` object to `New`.
-
-If you switch already populated database to "external store", all new messages
-will be stored in the external store, but old ones will be still in DB.
-
-This repository provides simple filesystem-based key-value store
-implementation, see fsstore package.
-
 Maddy
 -------
 

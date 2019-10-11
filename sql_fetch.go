@@ -69,6 +69,7 @@ func (b *Backend) buildFetchStmt(uid bool, items []imap.FetchItem) (stmt, cacheK
 				colNames["cachedHeader"] = struct{}{}
 			case needHeader, needFullBody:
 				colNames["extBodyKey"] = struct{}{}
+				colNames["compressAlgo"] = struct{}{}
 			}
 		}
 	}

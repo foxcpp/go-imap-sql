@@ -264,7 +264,7 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox *Mailbox, bodyLen 
 		mbox.id, msgId, date.Unix(),
 		length,
 		bodyStruct, cachedHeader, extBodyKey,
-		0,
+		0, d.b.Opts.CompressAlgo,
 	)
 	if err != nil {
 		d.b.extStore.Delete([]string{extBodyKey})
@@ -317,25 +317,29 @@ func (d *Delivery) Commit() error {
 
 func (b *Backend) processParsedBody(headerInput []byte, header textproto.Header, bodyLiteral io.Reader) (bodyStruct, cachedHeader []byte, extBodyKey string, err error) {
 	bodyReader := bodyLiteral
-	if b.extStore != nil {
-		extBodyKey, err = randomKey()
-		if err != nil {
-			return nil, nil, "", err
-		}
-		extWriter, err := b.extStore.Create(extBodyKey)
-		if err != nil {
-			return nil, nil, "", err
-		}
-		defer extWriter.Close()
 
-		if _, err := extWriter.Write(headerInput); err != nil {
-			b.extStore.Delete([]string{extBodyKey})
-			return nil, nil, "", err
-		}
+	extBodyKey, err = randomKey()
+	if err != nil {
+		return nil, nil, "", err
+	}
+	extWriter, err := b.extStore.Create(extBodyKey)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	defer extWriter.Close()
 
-		bodyReader = io.TeeReader(bodyLiteral, extWriter)
+	if _, err := extWriter.Write(headerInput); err != nil {
+		b.extStore.Delete([]string{extBodyKey})
+		return nil, nil, "", err
 	}
 
+	compressW, err := b.compressAlgo.WrapCompress(extWriter, b.Opts.CompressAlgoParams)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	defer compressW.Close()
+
+	bodyReader = io.TeeReader(bodyLiteral, compressW)
 	bufferedBody := bufio.NewReader(bodyReader)
 	bodyStruct, cachedHeader, err = extractCachedData(header, bufferedBody)
 	if err != nil {

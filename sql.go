@@ -148,6 +148,8 @@ func (b *Backend) initSchema() error {
 
             seen INTEGER NOT NULL DEFAULT 0,
 
+			compressAlgo VARCHAR(255),
+
 			PRIMARY KEY(mboxId, msgId)
 		)`)
 	if err != nil {
@@ -384,8 +386,8 @@ func (b *Backend) prepareStmts() error {
 		return errors.Wrap(err, "mboxId prep")
 	}
 	b.addMsg, err = b.db.Prepare(`
-		INSERT INTO msgs(mboxId, msgId, date, bodyLen, bodyStructure, cachedHeader, extBodyKey, seen)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+		INSERT INTO msgs(mboxId, msgId, date, bodyLen, bodyStructure, cachedHeader, extBodyKey, seen, compressAlgo)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return errors.Wrap(err, "addMsg prep")
 	}
@@ -395,7 +397,7 @@ func (b *Backend) prepareStmts() error {
 			SELECT uidnext - 1
 			FROM mboxes
 			WHERE id = ?
-		) + row_number() OVER (ORDER BY msgId), date, bodyLen, 0 AS mark, bodyStructure, cachedHeader, extBodyKey, seen
+		) + row_number() OVER (ORDER BY msgId), date, bodyLen, 0 AS mark, bodyStructure, cachedHeader, extBodyKey, seen, compressAlgo
 		FROM msgs
 		WHERE mboxId = ? AND msgId BETWEEN ? AND ?`)
 	if err != nil {
@@ -425,9 +427,9 @@ func (b *Backend) prepareStmts() error {
 			SELECT uidnext - 1
 			FROM mboxes
 			WHERE id = ?
-		) + row_number() OVER (ORDER BY msgId), date, bodyLen, 0 AS mark, bodyStructure, cachedHeader, extBodyKey, seen
+		) + row_number() OVER (ORDER BY msgId), date, bodyLen, 0 AS mark, bodyStructure, cachedHeader, extBodyKey, seen, compressAlgo
 		FROM (
-			SELECT msgId, date, bodyLen, bodyStructure, cachedHeader, extBodyKey, seen
+			SELECT msgId, date, bodyLen, bodyStructure, cachedHeader, extBodyKey, compressAlgo, seen
 			FROM msgs
 			WHERE mboxId = ?
 			ORDER BY msgId
@@ -616,7 +618,7 @@ func (b *Backend) prepareStmts() error {
 	}
 
 	b.searchFetch, err = b.db.Prepare(`
-		SELECT seqnum, msgs.msgId, date, bodyLen, extBodyKey, ` + b.db.aggrValuesSet("flag", "{") + `
+		SELECT seqnum, msgs.msgId, date, bodyLen, extBodyKey, compressAlgo, ` + b.db.aggrValuesSet("flag", "{") + `
 		FROM msgs
 		INNER JOIN (
 			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
@@ -634,7 +636,7 @@ func (b *Backend) prepareStmts() error {
 	}
 
 	b.searchFetchNoSeq, err = b.db.Prepare(`
-		SELECT 0 AS seqnum, msgs.msgId, date,  bodyLen, extBodyKey, ` + b.db.aggrValuesSet("flag", "{") + `
+		SELECT 0 AS seqnum, msgs.msgId, date,  bodyLen, extBodyKey, compressAlgo, ` + b.db.aggrValuesSet("flag", "{") + `
 		FROM msgs
 		LEFT JOIN flags
 		ON flags.msgId = msgs.msgId AND msgs.mboxId = flags.mboxId

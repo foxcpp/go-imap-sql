@@ -9,10 +9,11 @@ require (
 	github.com/emersion/go-imap-specialuse v0.0.0-20161227184202-ba031ced6a62
 	github.com/emersion/go-message v0.10.4-0.20190609165112-592ace5bc1ca
 	github.com/foxcpp/go-imap-backend-tests v0.0.0-20190615132041-281c43ad777b
+	github.com/frankban/quicktest v1.5.0 // indirect
 	github.com/go-sql-driver/mysql v1.4.1
-	github.com/google/go-cmp v0.3.0 // indirect
 	github.com/lib/pq v1.1.1
 	github.com/mattn/go-sqlite3 v1.10.0
+	github.com/pierrec/lz4 v2.3.0+incompatible
 	github.com/pkg/errors v0.8.1
 	github.com/stretchr/testify v1.3.0 // indirect
 	github.com/urfave/cli v1.20.0

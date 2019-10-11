@@ -65,10 +65,11 @@ func (m *Mailbox) searchMatches(uid, needBody bool, rows *sql.Rows, criteria *im
 		dateUnix      int64
 		bodyLen       int
 		flagStr       string
-		extBodyKey    sql.NullString
+		extBodyKey    string
+		compressAlgo  string
 	)
 
-	if err := rows.Scan(&seqNum, &msgId, &dateUnix, &bodyLen, &extBodyKey, &flagStr); err != nil {
+	if err := rows.Scan(&seqNum, &msgId, &dateUnix, &bodyLen, &extBodyKey, &compressAlgo, &flagStr); err != nil {
 		return 0, err
 	}
 
@@ -80,7 +81,7 @@ func (m *Mailbox) searchMatches(uid, needBody bool, rows *sql.Rows, criteria *im
 	var ent *message.Entity
 	var err error
 	if needBody {
-		bufferedBody, err := m.openBody(true, extBodyKey)
+		bufferedBody, err := m.openBody(true, compressAlgo, extBodyKey)
 		if err != nil {
 			return 0, err
 		}

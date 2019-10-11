@@ -79,7 +79,8 @@ type scanData struct {
 	dateUnix      int64
 	bodyLen       uint32
 	flagStr       string
-	extBodyKey    sql.NullString
+	extBodyKey    string
+	compressAlgo  string
 
 	bodyReader    io.ReadCloser
 	bodyStructure *imap.BodyStructure
@@ -109,6 +110,8 @@ func makeScanArgs(data *scanData, rows *sql.Rows) ([]interface{}, error) {
 			scanOrder = append(scanOrder, &data.cachedHeaderBlob)
 		case "bodyStructure", "bodystructure":
 			scanOrder = append(scanOrder, &data.bodyStructureBlob)
+		case "compressAlgo", "compressalgo":
+			scanOrder = append(scanOrder, &data.compressAlgo)
 		case "extBodyKey", "extbodykey":
 			scanOrder = append(scanOrder, &data.extBodyKey)
 		case "flags":
@@ -200,7 +203,7 @@ func (m *Mailbox) extractBodyPart(item imap.FetchItem, data *scanData, msg *imap
 	case needHeader, needFullBody:
 		// We don't need to parse header once more if we already did, so we just skip it if we open body
 		// multiple times.
-		bufferedBody, err := m.openBody(data.parsedHeader == nil, data.extBodyKey)
+		bufferedBody, err := m.openBody(data.parsedHeader == nil, data.compressAlgo, data.extBodyKey)
 		if err != nil {
 			return err
 		}
@@ -228,28 +231,36 @@ type BufferedReadCloser struct {
 	io.Closer
 }
 
-type nopCloser struct{}
+type nopCloser struct{ io.Writer }
 
 func (n nopCloser) Close() error {
 	return nil
 }
 
-func (m *Mailbox) openBody(needHeader bool, extBodyKey sql.NullString) (BufferedReadCloser, error) {
-	if m.parent.extStore == nil {
-		return BufferedReadCloser{}, errors.New("DB entry references External Storage, but no Storage was configured")
-	}
-	rdr, err := m.parent.extStore.Open(extBodyKey.String)
+func (m *Mailbox) openBody(needHeader bool, compressAlgoColumn, extBodyKey string) (BufferedReadCloser, error) {
+	rdr, err := m.parent.extStore.Open(extBodyKey)
 	if err != nil {
-		return BufferedReadCloser{}, err
+		return BufferedReadCloser{}, errors.Wrap(err, "openBody")
 	}
 
-	bufR := bufio.NewReader(rdr)
+	// compressAlgoColumn is in 'name params' format.
+	compressAlgoInfo := strings.Split(compressAlgoColumn, " ")
+	algoImpl, ok := compressionAlgos[compressAlgoInfo[0]]
+	if !ok {
+		return BufferedReadCloser{}, errors.Errorf("openBody: unknown compression algorithm used for body: %s", compressAlgoInfo[0])
+	}
+	rdrDecomp, err := algoImpl.WrapDecompress(rdr)
+	if err != nil {
+		return BufferedReadCloser{}, errors.Wrap(err, "openBody")
+	}
+
+	bufR := bufio.NewReader(rdrDecomp)
 	if !needHeader {
 		for {
 			// Skip header if it is not needed.
 			line, err := bufR.ReadSlice('\n')
 			if err != nil {
-				return BufferedReadCloser{}, err
+				return BufferedReadCloser{}, errors.Wrap(err, "openBody")
 			}
 			// If line is empty (message uses LF delim) or contains only CR (messages uses CRLF delim)
 			if len(line) == 0 || (len(line) == 1 || line[0] == '\r') {

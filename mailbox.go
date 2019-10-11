@@ -271,7 +271,13 @@ func (b *Backend) processBody(literal imap.Literal) (bodyStruct, cachedHeader []
 	}
 	defer extWriter.Close()
 
-	bodyReader = io.TeeReader(literal, extWriter)
+	compressW, err := b.compressAlgo.WrapCompress(extWriter, b.Opts.CompressAlgoParams)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	defer compressW.Close()
+
+	bodyReader = io.TeeReader(literal, compressW)
 	bufferedBody := bufio.NewReader(bodyReader)
 	hdr, err := textproto.ReadHeader(bufferedBody)
 	if err != nil {
@@ -364,7 +370,7 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		m.id, msgId, date.Unix(),
 		bodyLen,
 		bodyStruct, cachedHdr, extBodyKey,
-		haveSeen,
+		haveSeen, m.parent.Opts.CompressAlgo,
 	)
 	if err != nil {
 		m.parent.extStore.Delete([]string{extBodyKey})

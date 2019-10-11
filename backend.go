@@ -96,6 +96,14 @@ type Opts struct {
 	// It is safe to change it, existing records will not be affected.
 	BcryptCost int
 
+	// Compression algorithm to use for new messages. Empty string means no compression.
+	//
+	// Algorithms should be registered before using RegisterCompressionAlgo.
+	CompressAlgo string
+
+	// CompressAlgoParams is passed directly to compression algorithm without changes.
+	CompressAlgoParams string
+
 	Log Logger
 }
 
@@ -109,7 +117,9 @@ type Backend struct {
 	// requests.
 	// Options that should NOT be changed while backend is processing commands:
 	// - PRNG
+	// - CompressAlgoParams
 	// Changes for the following options have no effect after backend initialization:
+	// - CompressAlgo
 	// - ExclusiveLock
 	// - CacheSize
 	// - NoWAL
@@ -124,6 +134,7 @@ type Backend struct {
 
 	prng           Rand
 	hashAlgorithms map[string]hashAlgorithm
+	compressAlgo   CompressionAlgo
 
 	updates chan backend.Update
 	// updates channel is lazily initalized, so we need to ensure thread-safety.
@@ -258,6 +269,17 @@ func New(driver, dsn string, extStore ExternalStore, opts Opts) (*Backend, error
 		Opts:     opts,
 	}
 	var err error
+
+	if b.Opts.CompressAlgo != "" {
+		impl, ok := compressionAlgos[b.Opts.CompressAlgo]
+		if !ok {
+			return nil, errors.Errorf("New: unknown compression algorithm: %s", b.Opts.CompressAlgo)
+		}
+
+		b.compressAlgo = impl
+	} else {
+		b.compressAlgo = nullCompression{}
+	}
 
 	b.Opts = opts
 	if !b.Opts.LazyUpdatesInit {

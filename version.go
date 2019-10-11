@@ -4,7 +4,7 @@ package imapsql
 //
 // Meant for debug logs, you may want to know which go-imap-sql version users
 // have.
-const VersionStr = "0.3.1"
+const VersionStr = "0.4.0"
 
 // SchemaVersion is incremented each time DB schema changes.
 const SchemaVersion = 5

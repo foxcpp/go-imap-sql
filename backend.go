@@ -83,9 +83,6 @@ type Opts struct {
 	// of Close.
 	MinimizeOnClose bool
 
-	// External storage to use to store message bodies.
-	ExternalStore ExternalStore
-
 	// Hash algorithm to use for authentication passwords when no algorithm is
 	// explicitly specified.
 	// "sha3-512" and "bcrypt" are supported out of the box. "bcrypt" is used
@@ -103,14 +100,14 @@ type Opts struct {
 }
 
 type Backend struct {
-	db db
+	db       db
+	extStore ExternalStore
 
 	// Opts structure used to construct this Backend object.
 	//
 	// For most cases it is safe to change options while backend is serving
 	// requests.
 	// Options that should NOT be changed while backend is processing commands:
-	// - ExternalStore
 	// - PRNG
 	// Changes for the following options have no effect after backend initialization:
 	// - ExclusiveLock
@@ -247,7 +244,7 @@ var defaultPassHashAlgo = "bcrypt"
 // Note that it is not safe to create multiple Backend instances working with
 // the single database as they need to keep some state synchronized and there
 // is no measures for this implemented in go-imap-sql.
-func New(driver, dsn string, opts Opts) (*Backend, error) {
+func New(driver, dsn string, extStore ExternalStore, opts Opts) (*Backend, error) {
 	b := &Backend{
 		fetchStmtsCache:       make(map[string]*sql.Stmt),
 		flagsSearchStmtsCache: make(map[string]*sql.Stmt),
@@ -256,12 +253,11 @@ func New(driver, dsn string, opts Opts) (*Backend, error) {
 		hashAlgorithms:        make(map[string]hashAlgorithm),
 
 		sqliteOptimizeLoopStop: make(chan struct{}),
+
+		extStore: extStore,
+		Opts:     opts,
 	}
 	var err error
-
-	if opts.ExternalStore == nil {
-		return nil, errors.New("ExternalStore is required")
-	}
 
 	b.Opts = opts
 	if !b.Opts.LazyUpdatesInit {
@@ -564,7 +560,7 @@ func (b *Backend) DeleteUser(username string) error {
 		return ErrUserDoesntExists
 	}
 
-	if err := b.Opts.ExternalStore.Delete(keys); err != nil {
+	if err := b.extStore.Delete(keys); err != nil {
 		return errors.Wrap(err, "DeleteUser")
 	}
 

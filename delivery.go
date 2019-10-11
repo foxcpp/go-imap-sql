@@ -236,7 +236,7 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox *Mailbox, bodyLen 
 	}
 
 	if _, err = d.tx.Stmt(d.b.addExtKey).Exec(extBodyKey, mbox.uid, 1); err != nil {
-		d.b.Opts.ExternalStore.Delete([]string{extBodyKey})
+		d.b.extStore.Delete([]string{extBodyKey})
 		return errors.Wrap(err, "Body (addExtKey)")
 	}
 
@@ -247,13 +247,13 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox *Mailbox, bodyLen 
 	// --- operations that involve mboxes table ---
 	msgId, err := mbox.incrementMsgCounters(d.tx)
 	if err != nil {
-		d.b.Opts.ExternalStore.Delete([]string{extBodyKey})
+		d.b.extStore.Delete([]string{extBodyKey})
 		return errors.Wrap(err, "Body (incrementMsgCounters)")
 	}
 
 	upd, err := mbox.statusUpdate(d.tx)
 	if err != nil {
-		d.b.Opts.ExternalStore.Delete([]string{extBodyKey})
+		d.b.extStore.Delete([]string{extBodyKey})
 		return errors.Wrap(err, "Body (statusUpdate)")
 	}
 	d.updates = append(d.updates, upd)
@@ -267,7 +267,7 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox *Mailbox, bodyLen 
 		0,
 	)
 	if err != nil {
-		d.b.Opts.ExternalStore.Delete([]string{extBodyKey})
+		d.b.extStore.Delete([]string{extBodyKey})
 		return errors.Wrap(err, "Body (addMsg)")
 	}
 	// --- end of operations that involve msgs table ---
@@ -275,7 +275,7 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox *Mailbox, bodyLen 
 	// --- operations that involve flags table ---
 	params := mbox.makeFlagsAddStmtArgs(true, []string{imap.RecentFlag}, imap.Seq{Start: msgId, Stop: msgId})
 	if _, err := d.tx.Stmt(flagsStmt).Exec(params...); err != nil {
-		d.b.Opts.ExternalStore.Delete([]string{extBodyKey})
+		d.b.extStore.Delete([]string{extBodyKey})
 		return errors.Wrap(err, "Body (flagsStmt)")
 	}
 	// --- end operations that involve flags table ---
@@ -290,7 +290,7 @@ func (d *Delivery) Abort() error {
 		}
 	}
 	if d.extKey != "" {
-		if err := d.b.Opts.ExternalStore.Delete([]string{d.extKey}); err != nil {
+		if err := d.b.extStore.Delete([]string{d.extKey}); err != nil {
 			return err
 		}
 	}
@@ -317,19 +317,19 @@ func (d *Delivery) Commit() error {
 
 func (b *Backend) processParsedBody(headerInput []byte, header textproto.Header, bodyLiteral io.Reader) (bodyStruct, cachedHeader []byte, extBodyKey string, err error) {
 	bodyReader := bodyLiteral
-	if b.Opts.ExternalStore != nil {
+	if b.extStore != nil {
 		extBodyKey, err = randomKey()
 		if err != nil {
 			return nil, nil, "", err
 		}
-		extWriter, err := b.Opts.ExternalStore.Create(extBodyKey)
+		extWriter, err := b.extStore.Create(extBodyKey)
 		if err != nil {
 			return nil, nil, "", err
 		}
 		defer extWriter.Close()
 
 		if _, err := extWriter.Write(headerInput); err != nil {
-			b.Opts.ExternalStore.Delete([]string{extBodyKey})
+			b.extStore.Delete([]string{extBodyKey})
 			return nil, nil, "", err
 		}
 
@@ -339,7 +339,7 @@ func (b *Backend) processParsedBody(headerInput []byte, header textproto.Header,
 	bufferedBody := bufio.NewReader(bodyReader)
 	bodyStruct, cachedHeader, err = extractCachedData(header, bufferedBody)
 	if err != nil {
-		b.Opts.ExternalStore.Delete([]string{extBodyKey})
+		b.extStore.Delete([]string{extBodyKey})
 		return nil, nil, "", err
 	}
 
@@ -347,7 +347,7 @@ func (b *Backend) processParsedBody(headerInput []byte, header textproto.Header,
 	// copy everything to extWriter.
 	_, err = io.Copy(ioutil.Discard, bufferedBody)
 	if err != nil {
-		b.Opts.ExternalStore.Delete([]string{extBodyKey})
+		b.extStore.Delete([]string{extBodyKey})
 		return nil, nil, "", err
 	}
 

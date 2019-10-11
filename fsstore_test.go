@@ -46,10 +46,9 @@ func initTestBackend() backendtests.Backend {
 		panic(err)
 	}
 
-	b, err := New(driver, dsn, Opts{
+	b, err := New(driver, dsn, &Store{Root: storeDir}, Opts{
 		LazyUpdatesInit: true,
 		PRNG:            prng,
-		ExternalStore:   &Store{Root: storeDir},
 	})
 	if err != nil {
 		panic(err)
@@ -85,7 +84,7 @@ func cleanBackend(bi backendtests.Backend) {
 			log.Println("DROP TABLE extKeys", err)
 		}
 
-		if err := os.RemoveAll(b.Opts.ExternalStore.(*Store).Root); err != nil {
+		if err := os.RemoveAll(b.extStore.(*Store).Root); err != nil {
 			log.Println(err)
 		}
 	}

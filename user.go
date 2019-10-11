@@ -173,7 +173,7 @@ func (u *User) DeleteMailbox(name string) error {
 
 	}
 
-	if err := u.parent.Opts.ExternalStore.Delete(keys); err != nil {
+	if err := u.parent.extStore.Delete(keys); err != nil {
 		return errors.Wrapf(err, "DeleteMailbox %s", name)
 	}
 

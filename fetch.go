@@ -235,10 +235,10 @@ func (n nopCloser) Close() error {
 }
 
 func (m *Mailbox) openBody(needHeader bool, extBodyKey sql.NullString) (BufferedReadCloser, error) {
-	if m.parent.Opts.ExternalStore == nil {
+	if m.parent.extStore == nil {
 		return BufferedReadCloser{}, errors.New("DB entry references External Storage, but no Storage was configured")
 	}
-	rdr, err := m.parent.Opts.ExternalStore.Open(extBodyKey.String)
+	rdr, err := m.parent.extStore.Open(extBodyKey.String)
 	if err != nil {
 		return BufferedReadCloser{}, err
 	}

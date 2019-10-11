@@ -45,7 +45,7 @@ func (b *Backend) configureEngine() error {
 			b.db.DB.SetMaxOpenConns(1)
 		}
 
-		if b.Opts.ExternalStore == nil {
+		if b.extStore == nil {
 			if _, err := b.db.Exec(`PRAGMA page_size=16384`); err != nil {
 				return err
 			}

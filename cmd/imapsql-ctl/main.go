@@ -54,10 +54,9 @@ func connectToDB(ctx *cli.Context) error {
 
 	opts := imapsql.Opts{LazyUpdatesInit: true}
 	opts.NoWAL = ctx.GlobalIsSet("no-wal")
-	opts.ExternalStore = &imapsql.Store{Root: fsstore}
 
 	var err error
-	backend, err = imapsql.New(driver, dsn, opts)
+	backend, err = imapsql.New(driver, dsn, &imapsql.Store{Root: fsstore}, opts)
 	if err != nil {
 		return err
 	}

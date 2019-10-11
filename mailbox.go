@@ -265,7 +265,7 @@ func (b *Backend) processBody(literal imap.Literal) (bodyStruct, cachedHeader []
 	if err != nil {
 		return nil, nil, "", err
 	}
-	extWriter, err := b.Opts.ExternalStore.Create(extBodyKey)
+	extWriter, err := b.extStore.Create(extBodyKey)
 	if err != nil {
 		return nil, nil, "", err
 	}
@@ -275,13 +275,13 @@ func (b *Backend) processBody(literal imap.Literal) (bodyStruct, cachedHeader []
 	bufferedBody := bufio.NewReader(bodyReader)
 	hdr, err := textproto.ReadHeader(bufferedBody)
 	if err != nil {
-		b.Opts.ExternalStore.Delete([]string{extBodyKey})
+		b.extStore.Delete([]string{extBodyKey})
 		return nil, nil, "", errors.Wrap(err, "CreateMessage (readHeader)")
 	}
 
 	bodyStruct, cachedHeader, err = extractCachedData(hdr, bufferedBody)
 	if err != nil {
-		b.Opts.ExternalStore.Delete([]string{extBodyKey})
+		b.extStore.Delete([]string{extBodyKey})
 		return nil, nil, "", errors.Wrap(err, "CreateMessage (extractCachedData)")
 	}
 
@@ -289,7 +289,7 @@ func (b *Backend) processBody(literal imap.Literal) (bodyStruct, cachedHeader []
 	// copy everything to extWriter.
 	_, err = io.Copy(ioutil.Discard, bufferedBody)
 	if err != nil {
-		b.Opts.ExternalStore.Delete([]string{extBodyKey})
+		b.extStore.Delete([]string{extBodyKey})
 		return nil, nil, "", errors.Wrap(err, "CreateMessage (ReadAll consume)")
 	}
 
@@ -356,7 +356,7 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 	}
 
 	if _, err = tx.Stmt(m.parent.addExtKey).Exec(extBodyKey, m.uid, 1); err != nil {
-		m.parent.Opts.ExternalStore.Delete([]string{extBodyKey})
+		m.parent.extStore.Delete([]string{extBodyKey})
 		return errors.Wrap(err, "CreateMessage (addExtKey)")
 	}
 
@@ -367,24 +367,24 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		haveSeen,
 	)
 	if err != nil {
-		m.parent.Opts.ExternalStore.Delete([]string{extBodyKey})
+		m.parent.extStore.Delete([]string{extBodyKey})
 		return errors.Wrap(err, "CreateMessage (addMsg)")
 	}
 
 	params := m.makeFlagsAddStmtArgs(true, flags, imap.Seq{msgId, msgId})
 	if _, err = tx.Stmt(stmt).Exec(params...); err != nil {
-		m.parent.Opts.ExternalStore.Delete([]string{extBodyKey})
+		m.parent.extStore.Delete([]string{extBodyKey})
 		return errors.Wrap(err, "CreateMessage (flags)")
 	}
 
 	upd, err := m.statusUpdate(tx)
 	if err != nil {
-		m.parent.Opts.ExternalStore.Delete([]string{extBodyKey})
+		m.parent.extStore.Delete([]string{extBodyKey})
 		return errors.Wrap(err, "CreateMessage (status query)")
 	}
 
 	if err = tx.Commit(); err != nil {
-		m.parent.Opts.ExternalStore.Delete([]string{extBodyKey})
+		m.parent.extStore.Delete([]string{extBodyKey})
 		return errors.Wrap(err, "CreateMessage (tx commit)")
 	}
 
@@ -541,7 +541,7 @@ func (m *Mailbox) delMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, updsBuf
 		return err
 	}
 
-	if err := m.parent.Opts.ExternalStore.Delete(deletedExtKeys); err != nil {
+	if err := m.parent.extStore.Delete(deletedExtKeys); err != nil {
 		return err
 	}
 
@@ -696,7 +696,7 @@ func (m *Mailbox) expungeExternal(tx *sql.Tx) error {
 
 	}
 
-	if err := m.parent.Opts.ExternalStore.Delete(keys); err != nil {
+	if err := m.parent.extStore.Delete(keys); err != nil {
 		return errors.Wrap(err, "Expunge (external)")
 	}
 

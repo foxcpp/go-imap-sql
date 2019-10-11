@@ -230,16 +230,14 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox *Mailbox, bodyLen 
 		return err
 	}
 
-	headerBlobField, bodyBlob, bodyStruct, cachedHeader, extBodyKey, err := d.b.processParsedBody(headerBlob.Bytes(), header, bodyReader)
+	bodyStruct, cachedHeader, extBodyKey, err := d.b.processParsedBody(headerBlob.Bytes(), header, bodyReader)
 	if err != nil {
 		return err
 	}
 
-	if extBodyKey.Valid {
-		if _, err = d.tx.Stmt(d.b.addExtKey).Exec(extBodyKey, mbox.uid, 1); err != nil {
-			d.b.Opts.ExternalStore.Delete([]string{extBodyKey.String})
-			return errors.Wrap(err, "Body (addExtKey)")
-		}
+	if _, err = d.tx.Stmt(d.b.addExtKey).Exec(extBodyKey, mbox.uid, 1); err != nil {
+		d.b.Opts.ExternalStore.Delete([]string{extBodyKey})
+		return errors.Wrap(err, "Body (addExtKey)")
 	}
 
 	// Note that we are extremely careful here with ordering to
@@ -249,17 +247,13 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox *Mailbox, bodyLen 
 	// --- operations that involve mboxes table ---
 	msgId, err := mbox.incrementMsgCounters(d.tx)
 	if err != nil {
-		if extBodyKey.Valid {
-			d.b.Opts.ExternalStore.Delete([]string{extBodyKey.String})
-		}
+		d.b.Opts.ExternalStore.Delete([]string{extBodyKey})
 		return errors.Wrap(err, "Body (incrementMsgCounters)")
 	}
 
 	upd, err := mbox.statusUpdate(d.tx)
 	if err != nil {
-		if extBodyKey.Valid {
-			d.b.Opts.ExternalStore.Delete([]string{extBodyKey.String})
-		}
+		d.b.Opts.ExternalStore.Delete([]string{extBodyKey})
 		return errors.Wrap(err, "Body (statusUpdate)")
 	}
 	d.updates = append(d.updates, upd)
@@ -268,14 +262,12 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox *Mailbox, bodyLen 
 	// --- operations that involve msgs table ---
 	_, err = d.tx.Stmt(d.b.addMsg).Exec(
 		mbox.id, msgId, date.Unix(),
-		length, bodyBlob, headerBlobField,
+		length,
 		bodyStruct, cachedHeader, extBodyKey,
 		0,
 	)
 	if err != nil {
-		if extBodyKey.Valid {
-			d.b.Opts.ExternalStore.Delete([]string{extBodyKey.String})
-		}
+		d.b.Opts.ExternalStore.Delete([]string{extBodyKey})
 		return errors.Wrap(err, "Body (addMsg)")
 	}
 	// --- end of operations that involve msgs table ---
@@ -283,9 +275,7 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox *Mailbox, bodyLen 
 	// --- operations that involve flags table ---
 	params := mbox.makeFlagsAddStmtArgs(true, []string{imap.RecentFlag}, imap.Seq{Start: msgId, Stop: msgId})
 	if _, err := d.tx.Stmt(flagsStmt).Exec(params...); err != nil {
-		if extBodyKey.Valid {
-			d.b.Opts.ExternalStore.Delete([]string{extBodyKey.String})
-		}
+		d.b.Opts.ExternalStore.Delete([]string{extBodyKey})
 		return errors.Wrap(err, "Body (flagsStmt)")
 	}
 	// --- end operations that involve flags table ---
@@ -325,56 +315,40 @@ func (d *Delivery) Commit() error {
 	return nil
 }
 
-func (b *Backend) processParsedBody(headerInput []byte, header textproto.Header, bodyLiteral io.Reader) (headerBlob, bodyBlob, bodyStruct, cachedHeader []byte, extBodyKey sql.NullString, err error) {
+func (b *Backend) processParsedBody(headerInput []byte, header textproto.Header, bodyLiteral io.Reader) (bodyStruct, cachedHeader []byte, extBodyKey string, err error) {
 	bodyReader := bodyLiteral
 	if b.Opts.ExternalStore != nil {
-		extBodyKey.String, err = randomKey()
+		extBodyKey, err = randomKey()
 		if err != nil {
-			return nil, nil, nil, nil, sql.NullString{}, err
+			return nil, nil, "", err
 		}
-		extBodyKey.Valid = true
-		extWriter, err := b.Opts.ExternalStore.Create(extBodyKey.String)
+		extWriter, err := b.Opts.ExternalStore.Create(extBodyKey)
 		if err != nil {
-			return nil, nil, nil, nil, sql.NullString{}, err
+			return nil, nil, "", err
 		}
 		defer extWriter.Close()
 
 		if _, err := extWriter.Write(headerInput); err != nil {
-			b.Opts.ExternalStore.Delete([]string{extBodyKey.String})
-			return nil, nil, nil, nil, sql.NullString{}, err
+			b.Opts.ExternalStore.Delete([]string{extBodyKey})
+			return nil, nil, "", err
 		}
 
 		bodyReader = io.TeeReader(bodyLiteral, extWriter)
-
-		headerBlob = nil
-		bodyBlob = nil
-	} else {
-		bodyBuf, err := bufferBody(bodyLiteral)
-		if err != nil {
-			return nil, nil, nil, nil, sql.NullString{}, err
-		}
-		headerBlob = headerInput
-		bodyBlob = bodyBuf
-		bodyReader = bytes.NewReader(bodyBuf)
 	}
 
 	bufferedBody := bufio.NewReader(bodyReader)
 	bodyStruct, cachedHeader, err = extractCachedData(header, bufferedBody)
 	if err != nil {
-		if extBodyKey.Valid {
-			b.Opts.ExternalStore.Delete([]string{extBodyKey.String})
-		}
-		return nil, nil, nil, nil, sql.NullString{}, err
+		b.Opts.ExternalStore.Delete([]string{extBodyKey})
+		return nil, nil, "", err
 	}
 
 	// Consume all remaining body so io.TeeReader used with external store will
 	// copy everything to extWriter.
 	_, err = io.Copy(ioutil.Discard, bufferedBody)
 	if err != nil {
-		if extBodyKey.Valid {
-			b.Opts.ExternalStore.Delete([]string{extBodyKey.String})
-		}
-		return nil, nil, nil, nil, sql.NullString{}, err
+		b.Opts.ExternalStore.Delete([]string{extBodyKey})
+		return nil, nil, "", err
 	}
 
 	return

@@ -173,10 +173,8 @@ func (u *User) DeleteMailbox(name string) error {
 
 	}
 
-	if u.parent.Opts.ExternalStore != nil {
-		if err := u.parent.Opts.ExternalStore.Delete(keys); err != nil {
-			return errors.Wrapf(err, "DeleteMailbox %s", name)
-		}
+	if err := u.parent.Opts.ExternalStore.Delete(keys); err != nil {
+		return errors.Wrapf(err, "DeleteMailbox %s", name)
 	}
 
 	// TODO: Grab mboxId along the way on PostgreSQL?

@@ -83,9 +83,7 @@ type Opts struct {
 	// of Close.
 	MinimizeOnClose bool
 
-	// External storage to use to store message bodies. If specified - all new messages
-	// will be saved to it. However, already existing messages stored in DB
-	// directly will not be moved.
+	// External storage to use to store message bodies.
 	ExternalStore ExternalStore
 
 	// Hash algorithm to use for authentication passwords when no algorithm is
@@ -202,10 +200,8 @@ type Backend struct {
 	setMboxMsgSizeLimit *sql.Stmt
 	mboxMsgSizeLimit    *sql.Stmt
 
-	searchFetchNoBody      *sql.Stmt
-	searchFetch            *sql.Stmt
-	searchFetchNoBodyNoSeq *sql.Stmt
-	searchFetchNoSeq       *sql.Stmt
+	searchFetch      *sql.Stmt
+	searchFetchNoSeq *sql.Stmt
 
 	flagsSearchStmtsLck   sync.RWMutex
 	flagsSearchStmtsCache map[string]*sql.Stmt
@@ -568,10 +564,8 @@ func (b *Backend) DeleteUser(username string) error {
 		return ErrUserDoesntExists
 	}
 
-	if b.Opts.ExternalStore != nil {
-		if err := b.Opts.ExternalStore.Delete(keys); err != nil {
-			return errors.Wrap(err, "DeleteUser")
-		}
+	if err := b.Opts.ExternalStore.Delete(keys); err != nil {
+		return errors.Wrap(err, "DeleteUser")
 	}
 
 	if _, err := tx.Stmt(b.deleteUserRef).Exec(username); err != nil {

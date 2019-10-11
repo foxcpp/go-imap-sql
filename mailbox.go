@@ -259,58 +259,38 @@ func extractCachedData(hdr textproto.Header, bufferedBody *bufio.Reader) (bodySt
 	return
 }
 
-func (b *Backend) processBody(literal imap.Literal) (headerBlob, bodyBlob, bodyStruct, cachedHeader []byte, extBodyKey sql.NullString, err error) {
+func (b *Backend) processBody(literal imap.Literal) (bodyStruct, cachedHeader []byte, extBodyKey string, err error) {
 	var bodyReader io.Reader = literal
-	if b.Opts.ExternalStore != nil {
-		extBodyKey.String, err = randomKey()
-		if err != nil {
-			return nil, nil, nil, nil, sql.NullString{}, err
-		}
-		extBodyKey.Valid = true
-		extWriter, err := b.Opts.ExternalStore.Create(extBodyKey.String)
-		if err != nil {
-			return nil, nil, nil, nil, sql.NullString{}, err
-		}
-		defer extWriter.Close()
-
-		bodyReader = io.TeeReader(literal, extWriter)
-
-		headerBlob = nil
-		bodyBlob = nil
-	} else {
-		bodyBuf, err := ioutil.ReadAll(literal)
-		if err != nil {
-			return nil, nil, nil, nil, sql.NullString{}, errors.Wrap(err, "CreateMessage (ReadAll body)")
-		}
-		headerBlob, bodyBlob = splitHeader(bodyBuf)
-		bodyReader = bytes.NewReader(bodyBuf)
+	extBodyKey, err = randomKey()
+	if err != nil {
+		return nil, nil, "", err
 	}
+	extWriter, err := b.Opts.ExternalStore.Create(extBodyKey)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	defer extWriter.Close()
 
+	bodyReader = io.TeeReader(literal, extWriter)
 	bufferedBody := bufio.NewReader(bodyReader)
 	hdr, err := textproto.ReadHeader(bufferedBody)
 	if err != nil {
-		if extBodyKey.Valid {
-			b.Opts.ExternalStore.Delete([]string{extBodyKey.String})
-		}
-		return nil, nil, nil, nil, sql.NullString{}, errors.Wrap(err, "CreateMessage (readHeader)")
+		b.Opts.ExternalStore.Delete([]string{extBodyKey})
+		return nil, nil, "", errors.Wrap(err, "CreateMessage (readHeader)")
 	}
 
 	bodyStruct, cachedHeader, err = extractCachedData(hdr, bufferedBody)
 	if err != nil {
-		if extBodyKey.Valid {
-			b.Opts.ExternalStore.Delete([]string{extBodyKey.String})
-		}
-		return nil, nil, nil, nil, sql.NullString{}, errors.Wrap(err, "CreateMessage (extractCachedData)")
+		b.Opts.ExternalStore.Delete([]string{extBodyKey})
+		return nil, nil, "", errors.Wrap(err, "CreateMessage (extractCachedData)")
 	}
 
 	// Consume all remaining body so io.TeeReader used with external store will
 	// copy everything to extWriter.
 	_, err = io.Copy(ioutil.Discard, bufferedBody)
 	if err != nil {
-		if extBodyKey.Valid {
-			b.Opts.ExternalStore.Delete([]string{extBodyKey.String})
-		}
-		return nil, nil, nil, nil, sql.NullString{}, errors.Wrap(err, "CreateMessage (ReadAll consume)")
+		b.Opts.ExternalStore.Delete([]string{extBodyKey})
+		return nil, nil, "", errors.Wrap(err, "CreateMessage (ReadAll consume)")
 	}
 
 	return
@@ -370,51 +350,41 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 	}
 
 	bodyLen := fullBody.Len()
-	hdr, body, bodyStruct, cachedHdr, extBodyKey, err := m.parent.processBody(fullBody)
+	bodyStruct, cachedHdr, extBodyKey, err := m.parent.processBody(fullBody)
 	if err != nil {
 		return err
 	}
 
-	if extBodyKey.Valid {
-		if _, err = tx.Stmt(m.parent.addExtKey).Exec(extBodyKey, m.uid, 1); err != nil {
-			m.parent.Opts.ExternalStore.Delete([]string{extBodyKey.String})
-			return errors.Wrap(err, "CreateMessage (addExtKey)")
-		}
+	if _, err = tx.Stmt(m.parent.addExtKey).Exec(extBodyKey, m.uid, 1); err != nil {
+		m.parent.Opts.ExternalStore.Delete([]string{extBodyKey})
+		return errors.Wrap(err, "CreateMessage (addExtKey)")
 	}
 
 	_, err = tx.Stmt(m.parent.addMsg).Exec(
 		m.id, msgId, date.Unix(),
-		bodyLen, body, hdr,
+		bodyLen,
 		bodyStruct, cachedHdr, extBodyKey,
 		haveSeen,
 	)
 	if err != nil {
-		if extBodyKey.Valid {
-			m.parent.Opts.ExternalStore.Delete([]string{extBodyKey.String})
-		}
+		m.parent.Opts.ExternalStore.Delete([]string{extBodyKey})
 		return errors.Wrap(err, "CreateMessage (addMsg)")
 	}
 
 	params := m.makeFlagsAddStmtArgs(true, flags, imap.Seq{msgId, msgId})
 	if _, err = tx.Stmt(stmt).Exec(params...); err != nil {
-		if extBodyKey.Valid {
-			m.parent.Opts.ExternalStore.Delete([]string{extBodyKey.String})
-		}
+		m.parent.Opts.ExternalStore.Delete([]string{extBodyKey})
 		return errors.Wrap(err, "CreateMessage (flags)")
 	}
 
 	upd, err := m.statusUpdate(tx)
 	if err != nil {
-		if extBodyKey.Valid {
-			m.parent.Opts.ExternalStore.Delete([]string{extBodyKey.String})
-		}
+		m.parent.Opts.ExternalStore.Delete([]string{extBodyKey})
 		return errors.Wrap(err, "CreateMessage (status query)")
 	}
 
 	if err = tx.Commit(); err != nil {
-		if extBodyKey.Valid {
-			m.parent.Opts.ExternalStore.Delete([]string{extBodyKey.String})
-		}
+		m.parent.Opts.ExternalStore.Delete([]string{extBodyKey})
 		return errors.Wrap(err, "CreateMessage (tx commit)")
 	}
 
@@ -571,10 +541,8 @@ func (m *Mailbox) delMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, updsBuf
 		return err
 	}
 
-	if m.parent.Opts.ExternalStore != nil {
-		if err := m.parent.Opts.ExternalStore.Delete(deletedExtKeys); err != nil {
-			return err
-		}
+	if err := m.parent.Opts.ExternalStore.Delete(deletedExtKeys); err != nil {
+		return err
 	}
 
 	if _, err := tx.Stmt(m.parent.delMarked).Exec(); err != nil {
@@ -629,15 +597,13 @@ func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest s
 			return err
 		}
 
-		if m.parent.Opts.ExternalStore != nil {
-			if uid {
-				if _, err := tx.Stmt(m.parent.incrementRefUid).Exec(m.uid, srcId, start, stop); err != nil {
-					return err
-				}
-			} else {
-				if _, err := tx.Stmt(m.parent.incrementRefSeq).Exec(m.uid, srcId, srcId, start, stop); err != nil {
-					return err
-				}
+		if uid {
+			if _, err := tx.Stmt(m.parent.incrementRefUid).Exec(m.uid, srcId, start, stop); err != nil {
+				return err
+			}
+		} else {
+			if _, err := tx.Stmt(m.parent.incrementRefSeq).Exec(m.uid, srcId, srcId, start, stop); err != nil {
+				return err
 			}
 		}
 
@@ -730,10 +696,8 @@ func (m *Mailbox) expungeExternal(tx *sql.Tx) error {
 
 	}
 
-	if m.parent.Opts.ExternalStore != nil {
-		if err := m.parent.Opts.ExternalStore.Delete(keys); err != nil {
-			return errors.Wrap(err, "Expunge (external)")
-		}
+	if err := m.parent.Opts.ExternalStore.Delete(keys); err != nil {
+		return errors.Wrap(err, "Expunge (external)")
 	}
 
 	return nil

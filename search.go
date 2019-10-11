@@ -32,9 +32,9 @@ func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uin
 		}
 	} else {
 		if noSeqNum && uid {
-			rows, err = m.parent.searchFetchNoBodyNoSeq.Query(m.id)
+			rows, err = m.parent.searchFetchNoSeq.Query(m.id)
 		} else {
-			rows, err = m.parent.searchFetchNoBody.Query(m.id, m.id)
+			rows, err = m.parent.searchFetch.Query(m.id, m.id)
 		}
 	}
 	if err != nil {
@@ -60,20 +60,15 @@ func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uin
 }
 
 func (m *Mailbox) searchMatches(uid, needBody bool, rows *sql.Rows, criteria *imap.SearchCriteria) (uint32, error) {
-	var seqNum, msgId uint32
-	var dateUnix int64
-	var bodyLen int
-	var headerBlob, bodyBlob []byte
-	var flagStr string
-	var extBodyKey sql.NullString
+	var (
+		seqNum, msgId uint32
+		dateUnix      int64
+		bodyLen       int
+		flagStr       string
+		extBodyKey    sql.NullString
+	)
 
-	var err error
-	if needBody {
-		err = rows.Scan(&seqNum, &msgId, &dateUnix, &headerBlob, &bodyLen, &extBodyKey, &bodyBlob, &flagStr)
-	} else {
-		err = rows.Scan(&seqNum, &msgId, &dateUnix, &bodyLen, &flagStr)
-	}
-	if err != nil {
+	if err := rows.Scan(&seqNum, &msgId, &dateUnix, &bodyLen, &extBodyKey, &flagStr); err != nil {
 		return 0, err
 	}
 
@@ -82,24 +77,27 @@ func (m *Mailbox) searchMatches(uid, needBody bool, rows *sql.Rows, criteria *im
 		flags = nil
 	}
 
-	var hdr textproto.Header
-	var bufferedBody BufferedReadCloser
+	var ent *message.Entity
+	var err error
 	if needBody {
-		bufferedBody, err = m.openBody(true, extBodyKey, headerBlob, bodyBlob)
+		bufferedBody, err := m.openBody(true, extBodyKey)
 		if err != nil {
 			return 0, err
 		}
 		defer bufferedBody.Close()
 
-		hdr, err = textproto.ReadHeader(bufferedBody.Reader)
+		hdr, err := textproto.ReadHeader(bufferedBody.Reader)
 		if err != nil {
 			return 0, err
 		}
-	}
 
-	ent, err := message.New(message.Header{Header: hdr}, bufferedBody.Reader)
-	if err != nil {
-		return 0, err
+		ent, err = message.New(message.Header{Header: hdr}, bufferedBody.Reader)
+		if err != nil {
+			return 0, err
+		}
+	} else {
+		// XXX: This assumes backendutil.Match will not touch body unless it is needed for criteria.
+		ent, _ = message.New(message.Header{}, nil)
 	}
 
 	matched, err := backendutil.Match(ent, seqNum, msgId, time.Unix(dateUnix, 0), flags, criteria)

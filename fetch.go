@@ -73,7 +73,7 @@ func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.Fetch
 }
 
 type scanData struct {
-	cachedHeaderBlob, bodyStructureBlob, headerBlob, bodyBlob []byte
+	cachedHeaderBlob, bodyStructureBlob []byte
 
 	seqNum, msgId uint32
 	dateUnix      int64
@@ -109,10 +109,6 @@ func makeScanArgs(data *scanData, rows *sql.Rows) ([]interface{}, error) {
 			scanOrder = append(scanOrder, &data.cachedHeaderBlob)
 		case "bodyStructure", "bodystructure":
 			scanOrder = append(scanOrder, &data.bodyStructureBlob)
-		case "header":
-			scanOrder = append(scanOrder, &data.headerBlob)
-		case "body":
-			scanOrder = append(scanOrder, &data.bodyBlob)
 		case "extBodyKey", "extbodykey":
 			scanOrder = append(scanOrder, &data.extBodyKey)
 		case "flags":
@@ -204,7 +200,7 @@ func (m *Mailbox) extractBodyPart(item imap.FetchItem, data *scanData, msg *imap
 	case needHeader, needFullBody:
 		// We don't need to parse header once more if we already did, so we just skip it if we open body
 		// multiple times.
-		bufferedBody, err := m.openBody(data.parsedHeader == nil, data.extBodyKey, data.headerBlob, data.bodyBlob)
+		bufferedBody, err := m.openBody(data.parsedHeader == nil, data.extBodyKey)
 		if err != nil {
 			return err
 		}
@@ -238,44 +234,31 @@ func (n nopCloser) Close() error {
 	return nil
 }
 
-func (m *Mailbox) openBody(needHeader bool, extBodyKey sql.NullString, headerBlob, bodyBlob []byte) (BufferedReadCloser, error) {
-	if extBodyKey.Valid {
-		if m.parent.Opts.ExternalStore == nil {
-			return BufferedReadCloser{}, errors.New("DB entry references External Storage, but no Storage was configured")
-		}
-		rdr, err := m.parent.Opts.ExternalStore.Open(extBodyKey.String)
-		if err != nil {
-			return BufferedReadCloser{}, err
-		}
+func (m *Mailbox) openBody(needHeader bool, extBodyKey sql.NullString) (BufferedReadCloser, error) {
+	if m.parent.Opts.ExternalStore == nil {
+		return BufferedReadCloser{}, errors.New("DB entry references External Storage, but no Storage was configured")
+	}
+	rdr, err := m.parent.Opts.ExternalStore.Open(extBodyKey.String)
+	if err != nil {
+		return BufferedReadCloser{}, err
+	}
 
-		bufR := bufio.NewReader(rdr)
-		if !needHeader {
-			for {
-				// Skip header if it is not needed.
-				line, err := bufR.ReadSlice('\n')
-				if err != nil {
-					return BufferedReadCloser{}, err
-				}
-				// If line is empty (message uses LF delim) or contains only CR (messages uses CRLF delim)
-				if len(line) == 0 || (len(line) == 1 || line[0] == '\r') {
-					break
-				}
+	bufR := bufio.NewReader(rdr)
+	if !needHeader {
+		for {
+			// Skip header if it is not needed.
+			line, err := bufR.ReadSlice('\n')
+			if err != nil {
+				return BufferedReadCloser{}, err
+			}
+			// If line is empty (message uses LF delim) or contains only CR (messages uses CRLF delim)
+			if len(line) == 0 || (len(line) == 1 || line[0] == '\r') {
+				break
 			}
 		}
+	}
 
-		return BufferedReadCloser{Reader: bufR, Closer: rdr}, nil
-	}
-	if needHeader {
-		return BufferedReadCloser{
-			Reader: bufio.NewReader(io.MultiReader(bytes.NewReader(headerBlob), bytes.NewReader(bodyBlob))),
-			Closer: nopCloser{},
-		}, nil
-	} else {
-		return BufferedReadCloser{
-			Reader: bufio.NewReader(bytes.NewReader(bodyBlob)),
-			Closer: nopCloser{},
-		}, nil
-	}
+	return BufferedReadCloser{Reader: bufR, Closer: rdr}, nil
 }
 
 func headerSubsetFromCached(sect *imap.BodySectionName, cachedHeader map[string][]string) (imap.Literal, error) {

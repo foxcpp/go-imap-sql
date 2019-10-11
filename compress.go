@@ -28,7 +28,8 @@ type CompressionAlgo interface {
 }
 
 var compressionAlgos = map[string]CompressionAlgo{
-	"lz4": lz4Compression{},
+	"":     nullCompression{},
+	"lz4":  lz4Compression{},
 	"zstd": zstdCompression{},
 }
 

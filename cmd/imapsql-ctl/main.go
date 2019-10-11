@@ -23,25 +23,6 @@ func connectToDB(ctx *cli.Context) error {
 	dsn := ctx.GlobalString("dsn")
 	fsstore := ctx.GlobalString("fsstore")
 
-	if (driver == "" || dsn == "") && ctx.GlobalIsSet("config") {
-		f, err := os.Open(ctx.GlobalString("config"))
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		scnr := bufio.NewScanner(f)
-
-		if !scnr.Scan() {
-			return scnr.Err()
-		}
-		driver = scnr.Text()
-
-		if !scnr.Scan() {
-			return scnr.Err()
-		}
-		dsn = scnr.Text()
-	}
-
 	if driver == "" {
 		return errors.New("Error: driver is required")
 	}
@@ -85,17 +66,14 @@ func main() {
 
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
-			Name:  "driver",
-			Usage: "SQL driver to use for communication with DB",
+			Name:   "driver",
+			Usage:  "SQL driver to use for communication with DB",
+			EnvVar: "IMASPSQL_DRIVER",
 		},
 		cli.StringFlag{
-			Name:  "dsn",
-			Usage: "Data Source Name to use\n\t\tWARNING: Provided only for debugging convenience. Don't leave your passwords in shell history!",
-		},
-		cli.StringFlag{
-			Name:   "config,c",
-			Usage:  "Read driver and DSN values from file",
-			EnvVar: "SQLMAIL_CREDS",
+			Name:   "dsn",
+			Usage:  "Data Source Name to use\n\t\tWARNING: Provided only for debugging convenience. Don't leave your passwords in shell history!",
+			EnvVar: "IMAPSQL_DSN",
 		},
 		cli.BoolFlag{
 			Name:  "quiet,q",
@@ -116,7 +94,7 @@ func main() {
 		cli.StringFlag{
 			Name:   "fsstore",
 			Usage:  "Use fsstore with specified directory",
-			EnvVar: "SQLMAIL_FSSTORE",
+			EnvVar: "IMAPSQL_FSSTORE",
 		},
 	}
 

@@ -59,50 +59,9 @@ func (b *Backend) upgradeSchema(currentVer int) error {
 	//	}
 	//	currentVer = 2
 	//}
-	if currentVer == 2 {
-		if err := b.schemaUpgrade2To3(tx); err != nil {
-			return errors.Wrap(err, "2->3 upgrade")
-		}
-		currentVer = 3
-	}
-	if currentVer == 3 {
-		_, err := tx.Exec(b.db.rewriteSQL(`ALTER TABLE mboxes ADD COLUMN specialuse VARCHAR(255) DEFAULT NULL`))
-		if err != nil {
-			return errors.Wrap(err, "3->4 upgrade")
-		}
-		currentVer = 4
-	}
-	if currentVer == 4 {
-		_, err := tx.Exec(b.db.rewriteSQL(`ALTER TABLE msgs ADD COLUMN seen INTEGER NOT NULL DEFAULT 0`))
-		if err != nil {
-			return errors.Wrap(err, "4->5 upgrade")
-		}
-		_, err = tx.Exec(b.db.rewriteSQL(`ALTER TABLE mboxes ADD COLUMN msgsCount BIGINT NOT NULL DEFAULT 0`))
-		if err != nil {
-			return errors.Wrap(err, "4->5 upgrade")
-		}
-		_, err = tx.Exec(b.db.rewriteSQL(`UPDATE mboxes SET msgsCount = (SELECT count(*) FROM msgs WHERE mboxId = mboxes.id)`))
-		if err != nil {
-			return errors.Wrap(err, "4->5 upgrade")
-		}
-		_, err = tx.Exec(b.db.rewriteSQL(`ALTER TABLE users ADD COLUMN inboxId BIGINT NOT NULL DEFAULT 0`))
-		if err != nil {
-			return errors.Wrap(err, "4->5 upgrade")
-		}
-		_, err = tx.Exec(b.db.rewriteSQL(`UPDATE users SET inboxId = (SELECT id FROM mboxes WHERE id = mboxes.uid AND name = 'INBOX')`))
-		if err != nil {
-			return errors.Wrap(err, "4->5 upgrade")
-		}
-		currentVer = 5
-	}
 
 	if currentVer != SchemaVersion {
 		return errors.New("database schema version is too old and can't be upgraded using this go-imap-sql version")
 	}
 	return tx.Commit()
-}
-
-func (b *Backend) schemaUpgrade2To3(tx *sql.Tx) error {
-	_, err := tx.Exec(b.db.rewriteSQL(`UPDATE users SET password = 'sha3-512:' || password`))
-	return err
 }

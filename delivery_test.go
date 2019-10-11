@@ -16,6 +16,8 @@ import (
 var testMsgFetchItems = []imap.FetchItem{imap.FetchEnvelope, imap.FetchFlags, imap.FetchBodyStructure, imap.FetchRFC822Size /*"BODY.PEEK[]",*/, "BODY.PEEK[HEADER]", "BODY.PEEK[TEXT]"}
 
 func checkTestMsg(t *testing.T, msg *imap.Message) {
+	t.Helper()
+
 	for _, item := range msg.Items {
 		switch item {
 		case imap.FetchEnvelope:

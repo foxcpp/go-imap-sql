@@ -202,6 +202,8 @@ func (m *Mailbox) extractBodyPart(item imap.FetchItem, data *scanData, msg *imap
 			return err
 		}
 	case needHeader, needFullBody:
+		// We don't need to parse header once more if we already did, so we just skip it if we open body
+		// multiple times.
 		bufferedBody, err := m.openBody(data.parsedHeader == nil, data.extBodyKey, data.headerBlob, data.bodyBlob)
 		if err != nil {
 			return err
@@ -245,7 +247,23 @@ func (m *Mailbox) openBody(needHeader bool, extBodyKey sql.NullString, headerBlo
 		if err != nil {
 			return BufferedReadCloser{}, err
 		}
-		return BufferedReadCloser{Reader: bufio.NewReader(rdr), Closer: rdr}, nil
+
+		bufR := bufio.NewReader(rdr)
+		if !needHeader {
+			for {
+				// Skip header if it is not needed.
+				line, err := bufR.ReadSlice('\n')
+				if err != nil {
+					return BufferedReadCloser{}, err
+				}
+				// If line is empty (message uses LF delim) or contains only CR (messages uses CRLF delim)
+				if len(line) == 0 || (len(line) == 1 || line[0] == '\r') {
+					break
+				}
+			}
+		}
+
+		return BufferedReadCloser{Reader: bufR, Closer: rdr}, nil
 	}
 	if needHeader {
 		return BufferedReadCloser{

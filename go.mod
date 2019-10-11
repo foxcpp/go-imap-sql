@@ -1,5 +1,7 @@
 module github.com/foxcpp/go-imap-sql
 
+go 1.12
+
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/emersion/go-imap v1.0.0-rc.1.0.20190609205151-1bdc3f86477c

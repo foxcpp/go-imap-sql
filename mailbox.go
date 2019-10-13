@@ -24,8 +24,7 @@ const flagsSep = "{"
 // Message UIDs are assigned sequentelly, starting at 1.
 
 type Mailbox struct {
-	user   *User
-	uid    uint64
+	user   User
 	name   string
 	parent *Backend
 	id     uint64
@@ -41,7 +40,7 @@ func (m *Mailbox) Info() (*imap.MailboxInfo, error) {
 		Delimiter:  MailboxPathSep,
 		Name:       m.name,
 	}
-	row := m.parent.getMboxAttrs.QueryRow(m.uid, m.name)
+	row := m.parent.getMboxAttrs.QueryRow(m.user.id, m.name)
 	var mark int
 	var specialUse sql.NullString
 	if err := row.Scan(&mark, &specialUse); err != nil {
@@ -55,7 +54,7 @@ func (m *Mailbox) Info() (*imap.MailboxInfo, error) {
 	}
 
 	if m.parent.childrenExt {
-		row = m.parent.hasChildren.QueryRow(m.name+MailboxPathSep+"%", m.uid)
+		row = m.parent.hasChildren.QueryRow(m.name+MailboxPathSep+"%", m.user.id)
 		childrenCount := 0
 		if err := row.Scan(&childrenCount); err != nil {
 			return nil, errors.Wrapf(err, "Info %s", m.name)
@@ -367,7 +366,7 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		return err
 	}
 
-	if _, err = tx.Stmt(m.parent.addExtKey).Exec(extBodyKey, m.uid, 1); err != nil {
+	if _, err = tx.Stmt(m.parent.addExtKey).Exec(extBodyKey, m.user.id, 1); err != nil {
 		m.parent.extStore.Delete([]string{extBodyKey})
 		return errors.Wrap(err, "CreateMessage (addExtKey)")
 	}
@@ -567,7 +566,7 @@ func (m *Mailbox) delMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, updsBuf
 
 func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest string, updsBuffer *[]backend.Update) error {
 	destID := uint64(0)
-	row := tx.Stmt(m.parent.mboxId).QueryRow(m.uid, dest)
+	row := tx.Stmt(m.parent.mboxId).QueryRow(m.user.id, dest)
 	if err := row.Scan(&destID); err != nil {
 		if err == sql.ErrNoRows {
 			return backend.ErrNoSuchMailbox
@@ -610,11 +609,11 @@ func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest s
 		}
 
 		if uid {
-			if _, err := tx.Stmt(m.parent.incrementRefUid).Exec(m.uid, srcId, start, stop); err != nil {
+			if _, err := tx.Stmt(m.parent.incrementRefUid).Exec(m.user.id, srcId, start, stop); err != nil {
 				return err
 			}
 		} else {
-			if _, err := tx.Stmt(m.parent.incrementRefSeq).Exec(m.uid, srcId, srcId, start, stop); err != nil {
+			if _, err := tx.Stmt(m.parent.incrementRefSeq).Exec(m.user.id, srcId, srcId, start, stop); err != nil {
 				return err
 			}
 		}
@@ -667,7 +666,7 @@ func (m *Mailbox) Expunge() error {
 		return errors.Wrap(err, "Expunge")
 	}
 
-	if _, err := tx.Stmt(m.parent.deleteZeroRef).Exec(m.uid); err != nil {
+	if _, err := tx.Stmt(m.parent.deleteZeroRef).Exec(m.user.id); err != nil {
 		return errors.Wrap(err, "Expunge")
 	}
 
@@ -688,11 +687,11 @@ func (m *Mailbox) Expunge() error {
 }
 
 func (m *Mailbox) expungeExternal(tx *sql.Tx) error {
-	if _, err := tx.Stmt(m.parent.decreaseRefForDeleted).Exec(m.uid, m.id); err != nil {
+	if _, err := tx.Stmt(m.parent.decreaseRefForDeleted).Exec(m.user.id, m.id); err != nil {
 		return errors.Wrap(err, "Expunge (external)")
 	}
 
-	rows, err := tx.Stmt(m.parent.zeroRef).Query(m.uid, m.id)
+	rows, err := tx.Stmt(m.parent.zeroRef).Query(m.user.id, m.id)
 	if err != nil {
 		return errors.Wrap(err, "Expunge (external)")
 	}

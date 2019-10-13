@@ -68,13 +68,18 @@ type Delivery struct {
 // *only* for that recipient. Use this to add Received and Delivered-To
 // fields with recipient-specific information (e.g. its address).
 func (d *Delivery) AddRcpt(username string, userHeader textproto.Header) error {
-	u, err := d.b.GetUser(username)
+	username = strings.ToLower(username)
+
+	uid, inboxId, _, _, _, err := d.b.getUserCreds(nil, username)
 	if err != nil {
+		if err == sql.ErrNoRows {
+			return ErrUserDoesntExists
+		}
 		return err
 	}
-	d.users = append(d.users, *u.(*User))
+	d.users = append(d.users, User{id: uid, username: username, parent: d.b, inboxId: inboxId})
 
-	d.perRcptHeader[strings.ToLower(username)] = userHeader
+	d.perRcptHeader[username] = userHeader
 
 	return nil
 }
@@ -89,13 +94,6 @@ func (d *Delivery) AddRcpt(username string, userHeader textproto.Header) error {
 func (d *Delivery) Mailbox(name string) error {
 	if cap(d.mboxes) < len(d.users) {
 		d.mboxes = make([]Mailbox, 0, len(d.users))
-	}
-
-	if strings.EqualFold(name, "INBOX") {
-		for _, u := range d.users {
-			d.mboxes = append(d.mboxes, Mailbox{user: &u, uid: u.id, id: u.inboxId, name: name, parent: d.b})
-		}
-		return nil
 	}
 
 	for _, u := range d.users {
@@ -159,7 +157,7 @@ func (d *Delivery) SpecialMailbox(attribute, fallbackName string) error {
 			continue
 		}
 
-		d.mboxes = append(d.mboxes, Mailbox{user: &u, uid: u.id, id: mboxId, name: mboxName, parent: d.b})
+		d.mboxes = append(d.mboxes, Mailbox{user: u, id: mboxId, name: mboxName, parent: d.b})
 	}
 	return nil
 }
@@ -251,7 +249,7 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox Mailbox, bodyLen i
 		return err
 	}
 
-	if _, err = d.tx.Stmt(d.b.addExtKey).Exec(extBodyKey, mbox.uid, 1); err != nil {
+	if _, err = d.tx.Stmt(d.b.addExtKey).Exec(extBodyKey, mbox.user.id, 1); err != nil {
 		d.b.extStore.Delete([]string{extBodyKey})
 		return errors.Wrap(err, "Body (addExtKey)")
 	}

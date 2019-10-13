@@ -46,14 +46,14 @@ func (u *User) ListMailboxes(subscribed bool) ([]backend.Mailbox, error) {
 			return nil, errors.Wrap(err, "ListMailboxes")
 		}
 
-		res = append(res, &Mailbox{user: u, uid: u.id, id: id, name: name, parent: u.parent})
+		res = append(res, &Mailbox{user: *u, id: id, name: name, parent: u.parent})
 	}
 	return res, errors.Wrap(rows.Err(), "ListMailboxes")
 }
 
 func (u *User) GetMailbox(name string) (backend.Mailbox, error) {
 	if strings.EqualFold(name, "INBOX") {
-		return &Mailbox{user: u, uid: u.id, id: u.inboxId, name: name, parent: u.parent}, nil
+		return &Mailbox{user: *u, id: u.inboxId, name: name, parent: u.parent}, nil
 	}
 
 	row := u.parent.mboxId.QueryRow(u.id, name)
@@ -65,7 +65,7 @@ func (u *User) GetMailbox(name string) (backend.Mailbox, error) {
 		return nil, errors.Wrapf(err, "GetMailbox %s", name)
 	}
 
-	return &Mailbox{user: u, uid: u.id, id: id, name: name, parent: u.parent}, nil
+	return &Mailbox{user: *u, id: id, name: name, parent: u.parent}, nil
 }
 
 func (u *User) CreateMessageLimit() *uint32 {

@@ -426,15 +426,6 @@ func (b *Backend) Updates() <-chan backend.Update {
 	return b.updates
 }
 
-// UserCreds returns internal identifier and credentials for user named
-// username.
-//
-// It is exported for use by extensions and is not considered part of the
-// public API. Hence it can be changed between minor releases.
-func (b *Backend) UserCreds(username string) (id uint64, inboxId uint64, hashAlgo string, passHash []byte, passSalt []byte, err error) {
-	return b.getUserCreds(nil, strings.ToLower(username))
-}
-
 func (b *Backend) getUserCreds(tx *sql.Tx, username string) (id uint64, inboxId uint64, hashAlgo string, passHash []byte, passSalt []byte, err error) {
 	var row *sql.Row
 	if tx != nil {
@@ -677,7 +668,7 @@ func (b *Backend) ListUsers() ([]string, error) {
 func (b *Backend) GetUser(username string) (backend.User, error) {
 	username = strings.ToLower(username)
 
-	uid, inboxId, _, _, _, err := b.UserCreds(username)
+	uid, inboxId, _, _, _, err := b.getUserCreds(nil, username)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrUserDoesntExists

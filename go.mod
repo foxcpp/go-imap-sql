@@ -13,6 +13,7 @@ require (
 	github.com/go-sql-driver/mysql v1.4.1
 	github.com/klauspost/compress v1.8.6
 	github.com/lib/pq v1.1.1
+	github.com/mailru/easyjson v0.7.0
 	github.com/mattn/go-sqlite3 v1.10.0
 	github.com/pierrec/lz4 v2.3.0+incompatible
 	github.com/pkg/errors v0.8.1

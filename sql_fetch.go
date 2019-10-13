@@ -2,6 +2,7 @@ package imapsql
 
 import (
 	"database/sql"
+	nettextproto "net/textproto"
 	"sort"
 	"strings"
 
@@ -14,30 +15,30 @@ const flagsMidBlock = `
 
 var cachedHeaderFields = map[string]struct{}{
 	// Common header fields (requested by Thunderbird)
-	"from":         struct{}{},
-	"to":           struct{}{},
-	"cc":           struct{}{},
-	"bcc":          struct{}{},
-	"subject":      struct{}{},
-	"date":         struct{}{},
-	"message-id":   struct{}{},
-	"priority":     struct{}{},
-	"x-priority":   struct{}{},
-	"references":   struct{}{},
-	"newsgroups":   struct{}{},
-	"in-reply-to":  struct{}{},
-	"content-type": struct{}{},
-	"reply-to":     struct{}{},
-	"importance":   struct{}{},
-	"list-post":    struct{}{},
+	"From":         struct{}{},
+	"To":           struct{}{},
+	"Cc":           struct{}{},
+	"Bcc":          struct{}{},
+	"Subject":      struct{}{},
+	"Date":         struct{}{},
+	"Message-Id":   struct{}{},
+	"Priority":     struct{}{},
+	"x-Priority":   struct{}{},
+	"References":   struct{}{},
+	"Newsgroups":   struct{}{},
+	"In-Reply-To":  struct{}{},
+	"Content-Type": struct{}{},
+	"Reply-To":     struct{}{},
+	"Importance":   struct{}{},
+	"List-Post":    struct{}{},
 
 	// Requested by Apple Mail
-	"x-uniform-type-identifier":       struct{}{},
-	"x-universally-unique-identifier": struct{}{},
+	"X-Uniform-Type-Identifier":       struct{}{},
+	"X-Universally-Unique-Identifier": struct{}{},
 
 	// Misc fields I think clients could be interested in.
-	"return-path":  struct{}{},
-	"delivered-to": struct{}{},
+	"Return-Path":  struct{}{},
+	"Delivered-To": struct{}{},
 }
 
 func (b *Backend) buildFetchStmt(uid bool, items []imap.FetchItem) (stmt, cacheKey string, err error) {
@@ -152,7 +153,8 @@ func getNeededPart(item imap.FetchItem) (*imap.BodySectionName, neededPart, erro
 		if sect.Fields != nil && !sect.NotFields && onlyHeader {
 			onlyCached = true
 			for _, field := range sect.Fields {
-				if _, ok := cachedHeaderFields[strings.ToLower(field)]; !ok {
+				cKey := nettextproto.CanonicalMIMEHeaderKey(field)
+				if _, ok := cachedHeaderFields[cKey]; !ok {
 					onlyCached = false
 				}
 			}

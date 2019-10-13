@@ -4,18 +4,18 @@ import (
 	"bufio"
 	"bytes"
 	"database/sql"
-	"encoding/json"
 	"io"
 	"io/ioutil"
-	"strings"
+	nettextproto "net/textproto"
 	"time"
 
 	"github.com/emersion/go-imap"
-	appendlimit "github.com/emersion/go-imap-appendlimit"
+	"github.com/emersion/go-imap-appendlimit"
 	"github.com/emersion/go-imap/backend"
 	"github.com/emersion/go-imap/backend/backendutil"
 	"github.com/emersion/go-message/textproto"
 	"github.com/foxcpp/go-imap-sql/children"
+	"github.com/mailru/easyjson/jwriter"
 	"github.com/pkg/errors"
 )
 
@@ -240,10 +240,11 @@ func splitHeader(blob []byte) (header, body []byte) {
 func extractCachedData(hdr textproto.Header, bufferedBody *bufio.Reader) (bodyStructBlob, cachedHeadersBlob []byte, err error) {
 	hdrs := make(map[string][]string, len(cachedHeaderFields))
 	for field := hdr.Fields(); field.Next(); {
-		if _, ok := cachedHeaderFields[strings.ToLower(field.Key())]; !ok {
+		cKey := nettextproto.CanonicalMIMEHeaderKey(field.Key())
+		if _, ok := cachedHeaderFields[cKey]; !ok {
 			continue
 		}
-		hdrs[strings.ToLower(field.Key())] = append(hdrs[strings.ToLower(field.Key())], field.Value())
+		hdrs[cKey] = append(hdrs[cKey], field.Value())
 	}
 
 	bodyStruct, err := backendutil.FetchBodyStructure(hdr, bufferedBody, true)
@@ -251,11 +252,16 @@ func extractCachedData(hdr textproto.Header, bufferedBody *bufio.Reader) (bodySt
 		return nil, nil, err
 	}
 
-	bodyStructBlob, err = json.Marshal(bodyStruct)
-	if err != nil {
-		return
-	}
-	cachedHeadersBlob, err = json.Marshal(hdrs)
+	jw := jwriter.Writer{}
+	buf := bytes.NewBuffer(make([]byte, 0, 2048))
+	easyjsonMarshalBodyStruct(&jw, *bodyStruct)
+	jw.DumpTo(buf)
+	bodyStructBlob = buf.Bytes()
+
+	buf = bytes.NewBuffer(make([]byte, 0, 2048))
+	easyjsonMarshalCachedHeader(&jw, hdrs)
+	jw.DumpTo(buf)
+	cachedHeadersBlob = buf.Bytes()
 	return
 }
 

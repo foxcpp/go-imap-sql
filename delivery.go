@@ -17,7 +17,7 @@ import (
 
 var ErrDeliveryInterrupted = errors.New("sql: delivery transaction interrupted, try again later")
 
-// StartDelivery starts an atomic message delivery session.
+// NewDelivery creates a new state object for atomic delivery session.
 //
 // Messages added to the storage using that interface are added either to
 // all recipients mailboxes or none or them.
@@ -30,15 +30,25 @@ var ErrDeliveryInterrupted = errors.New("sql: delivery transaction interrupted, 
 // This means that the recipient mailbox can be deleted between AddRcpt and Body* calls.
 // In that case, either Body* or Commit will return ErrDeliveryInterrupt.
 // Sender should retry delivery after a short delay.
-func (b *Backend) StartDelivery() (*Delivery, error) {
-	return &Delivery{b: b, perRcptHeader: map[string]textproto.Header{}}, nil
+func (b *Backend) NewDelivery() Delivery {
+	return Delivery{b: b, perRcptHeader: map[string]textproto.Header{}}
+}
+
+func (d *Delivery) clean() {
+	d.users = d.users[0:0]
+	d.mboxes = d.mboxes[0:0]
+	d.updates = d.updates[0:0]
+	d.extKey = ""
+	for k := range d.perRcptHeader {
+		delete(d.perRcptHeader, k)
+	}
 }
 
 type Delivery struct {
 	b             *Backend
 	tx            *sql.Tx
-	users         []*User
-	mboxes        []*Mailbox
+	users         []User
+	mboxes        []Mailbox
 	extKey        string
 	updates       []backend.Update
 	perRcptHeader map[string]textproto.Header
@@ -62,7 +72,7 @@ func (d *Delivery) AddRcpt(username string, userHeader textproto.Header) error {
 	if err != nil {
 		return err
 	}
-	d.users = append(d.users, u.(*User))
+	d.users = append(d.users, *u.(*User))
 
 	d.perRcptHeader[strings.ToLower(username)] = userHeader
 
@@ -77,11 +87,13 @@ func (d *Delivery) AddRcpt(username string, userHeader textproto.Header) error {
 // If it is not called, it defaults to INBOX. If mailbox doesn't
 // exist for some users - it will created.
 func (d *Delivery) Mailbox(name string) error {
-	d.mboxes = make([]*Mailbox, 0, len(d.users))
+	if cap(d.mboxes) < len(d.users) {
+		d.mboxes = make([]Mailbox, 0, len(d.users))
+	}
 
 	if strings.EqualFold(name, "INBOX") {
 		for _, u := range d.users {
-			d.mboxes = append(d.mboxes, &Mailbox{user: u, uid: u.id, id: u.inboxId, name: name, parent: d.b})
+			d.mboxes = append(d.mboxes, Mailbox{user: &u, uid: u.id, id: u.inboxId, name: name, parent: d.b})
 		}
 		return nil
 	}
@@ -106,7 +118,7 @@ func (d *Delivery) Mailbox(name string) error {
 			}
 		}
 
-		d.mboxes = append(d.mboxes, mbox.(*Mailbox))
+		d.mboxes = append(d.mboxes, *mbox.(*Mailbox))
 	}
 	return nil
 }
@@ -120,7 +132,9 @@ func (d *Delivery) Mailbox(name string) error {
 // The main use-case of this function is to reroute messages into Junk directory
 // during multi-recipient delivery.
 func (d *Delivery) SpecialMailbox(attribute, fallbackName string) error {
-	d.mboxes = make([]*Mailbox, 0, len(d.users))
+	if cap(d.mboxes) < len(d.users) {
+		d.mboxes = make([]Mailbox, 0, len(d.users))
+	}
 	for _, u := range d.users {
 		var mboxId uint64
 		var mboxName string
@@ -141,11 +155,11 @@ func (d *Delivery) SpecialMailbox(attribute, fallbackName string) error {
 				d.mboxes = nil
 				return err
 			}
-			d.mboxes = append(d.mboxes, mbox.(*Mailbox))
+			d.mboxes = append(d.mboxes, *mbox.(*Mailbox))
 			continue
 		}
 
-		d.mboxes = append(d.mboxes, &Mailbox{user: u, uid: u.id, id: mboxId, name: mboxName, parent: d.b})
+		d.mboxes = append(d.mboxes, Mailbox{user: &u, uid: u.id, id: mboxId, name: mboxName, parent: d.b})
 	}
 	return nil
 }
@@ -183,13 +197,15 @@ type Buffer interface {
 }
 
 func (d *Delivery) BodyParsed(header textproto.Header, bodyLen int, body Buffer) error {
-	if d.mboxes == nil {
+	if len(d.mboxes) == 0 {
 		if err := d.Mailbox("INBOX"); err != nil {
 			return err
 		}
 	}
 
-	d.updates = make([]backend.Update, 0, len(d.mboxes))
+	if cap(d.updates) < len(d.mboxes) {
+		d.updates = make([]backend.Update, 0, len(d.mboxes))
+	}
 	flagsStmt, err := d.b.getFlagsAddStmt(true, []string{imap.RecentFlag})
 	if err != nil {
 		return errors.Wrap(err, "Body")
@@ -212,7 +228,7 @@ func (d *Delivery) BodyParsed(header textproto.Header, bodyLen int, body Buffer)
 	return nil
 }
 
-func (d *Delivery) mboxDelivery(header textproto.Header, mbox *Mailbox, bodyLen int, body Buffer, date time.Time, flagsStmt *sql.Stmt) (err error) {
+func (d *Delivery) mboxDelivery(header textproto.Header, mbox Mailbox, bodyLen int, body Buffer, date time.Time, flagsStmt *sql.Stmt) (err error) {
 	header = header.Copy()
 	userHeader := d.perRcptHeader[mbox.user.username]
 	for fields := userHeader.Fields(); fields.Next(); {
@@ -294,6 +310,8 @@ func (d *Delivery) Abort() error {
 			return err
 		}
 	}
+
+	d.clean()
 	return nil
 }
 
@@ -301,6 +319,9 @@ func (d *Delivery) Abort() error {
 //
 // If this function returns no error - the message is successfully added to the mailbox
 // of *all* recipients.
+//
+// After Commit or Abort is called, Delivery object can be reused as if it was
+// just created.
 func (d *Delivery) Commit() error {
 	if d.tx != nil {
 		if err := d.tx.Commit(); err != nil {
@@ -312,6 +333,8 @@ func (d *Delivery) Commit() error {
 			d.b.updates <- update
 		}
 	}
+
+	d.clean()
 	return nil
 }
 

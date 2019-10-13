@@ -24,7 +24,7 @@ type rawEnvelope struct {
 
 func envelopeFromHeader(hdr map[string][]string) rawEnvelope {
 	enve := rawEnvelope{}
-	date := hdr["date"]
+	date := hdr["Date"]
 	if date != nil {
 		t, err := time.Parse("Mon, 2 Jan 2006 15:04:05 -0700", date[0])
 		if err == nil {
@@ -32,7 +32,7 @@ func envelopeFromHeader(hdr map[string][]string) rawEnvelope {
 		}
 	}
 
-	addrFields := [...]string{"from", "sender", "reply-to", "to", "cc", "bcc", "in-reply-to"}
+	addrFields := [...]string{"From", "Sender", "Reply-To", "To", "Cc", "Bcc", "In-Reply-To"}
 	for i, fieldVar := range [...]*string{
 		&enve.From, &enve.Sender, &enve.ReplyTo,
 		&enve.To, &enve.CC, &enve.BCC, &enve.InReplyTo,
@@ -45,7 +45,7 @@ func envelopeFromHeader(hdr map[string][]string) rawEnvelope {
 		*fieldVar = strings.Join(val, ", ")
 	}
 
-	fields := [...]string{"subject", "message-id"}
+	fields := [...]string{"Subject", "Message-Id"}
 	for i, fieldVar := range [...]*string{
 		&enve.Subject, &enve.MessageID,
 	} {

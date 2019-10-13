@@ -62,8 +62,7 @@ func TestDelivery(t *testing.T) {
 	assert.NilError(t, b.CreateUser(t.Name()+"-1", ""), "CreateUser 1")
 	assert.NilError(t, b.CreateUser(t.Name()+"-2", ""), "CreateUser 2")
 
-	delivery, err := b.StartDelivery()
-	assert.NilError(t, err, "StartDelivery")
+	delivery := b.NewDelivery()
 
 	assert.NilError(t, delivery.AddRcpt(t.Name()+"-1", textproto.Header{}), "AddRcpt 1")
 	assert.NilError(t, delivery.AddRcpt(t.Name()+"-2", textproto.Header{}), "AddRcpt 2")
@@ -117,8 +116,7 @@ func TestDelivery_Abort(t *testing.T) {
 	defer cleanBackend(b)
 	assert.NilError(t, b.CreateUser(t.Name(), ""), "CreateUser")
 
-	delivery, err := b.StartDelivery()
-	assert.NilError(t, err, "StartDelivery")
+	delivery := b.NewDelivery()
 	assert.NilError(t, delivery.AddRcpt(t.Name(), textproto.Header{}), "AddRcpt")
 	assert.NilError(t, delivery.BodyRaw(strings.NewReader(testMsg)), "BodyRaw")
 	assert.NilError(t, delivery.Abort(), "Abort")
@@ -137,11 +135,10 @@ func TestDelivery_AddRcpt_NonExistent(t *testing.T) {
 	defer cleanBackend(b)
 	assert.NilError(t, b.CreateUser(t.Name(), ""), "CreateUser")
 
-	delivery, err := b.StartDelivery()
-	assert.NilError(t, err, "StartDelivery")
+	delivery := b.NewDelivery()
 	assert.NilError(t, delivery.AddRcpt(t.Name(), textproto.Header{}))
 
-	err = delivery.AddRcpt("NON-EXISTENT", textproto.Header{})
+	err := delivery.AddRcpt("NON-EXISTENT", textproto.Header{})
 	assert.Assert(t, err != nil, "AddRcpt NON-EXISTENT INBOX")
 
 	// Then, however, delivery should continue as if nothing happened.
@@ -190,8 +187,7 @@ func TestDelivery_Mailbox(t *testing.T) {
 			assert.NilError(t, u.CreateMailbox("Box"))
 		}
 
-		delivery, err := b.StartDelivery()
-		assert.NilError(t, err, "StartDelivery")
+		delivery := b.NewDelivery()
 
 		assert.NilError(t, delivery.AddRcpt(t.Name(), textproto.Header{}), "AddRcpt")
 
@@ -229,8 +225,7 @@ func TestDelivery_SpecialMailbox(t *testing.T) {
 			assert.NilError(t, u.(*User).CreateMailboxSpecial("Box", specialUse))
 		}
 
-		delivery, err := b.StartDelivery()
-		assert.NilError(t, err, "StartDelivery")
+		delivery := b.NewDelivery()
 
 		assert.NilError(t, delivery.AddRcpt(t.Name(), textproto.Header{}), "AddRcpt")
 
@@ -273,8 +268,7 @@ func TestDelivery_BodyParsed(t *testing.T) {
 	defer cleanBackend(b)
 	assert.NilError(t, b.CreateUser(t.Name(), ""), "CreateUser")
 
-	delivery, err := b.StartDelivery()
-	assert.NilError(t, err, "StartDelivery")
+	delivery := b.NewDelivery()
 
 	assert.NilError(t, delivery.AddRcpt(t.Name(), textproto.Header{}), "AddRcpt")
 
@@ -304,8 +298,7 @@ func TestDelivery_UserHeader(t *testing.T) {
 	assert.NilError(t, b.CreateUser(t.Name()+"-1", ""), "CreateUser 1")
 	assert.NilError(t, b.CreateUser(t.Name()+"-2", ""), "CreateUser 2")
 
-	delivery, err := b.StartDelivery()
-	assert.NilError(t, err, "StartDelivery")
+	delivery := b.NewDelivery()
 
 	hdr1 := textproto.Header{}
 	hdr1.Set("Test-Header", "1")

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"io"
+	nettextproto "net/textproto"
 	"strings"
 	"time"
 
@@ -277,7 +278,7 @@ func headerSubsetFromCached(sect *imap.BodySectionName, cachedHeader map[string]
 	for i := len(sect.Fields) - 1; i >= 0; i-- {
 		field := sect.Fields[i]
 
-		value := cachedHeader[strings.ToLower(field)]
+		value := cachedHeader[nettextproto.CanonicalMIMEHeaderKey(field)]
 		for i := len(value) - 1; i >= 0; i-- {
 			subval := value[i]
 			hdr.Add(field, subval)

@@ -3,8 +3,6 @@ package imapsql
 import (
 	"database/sql"
 	"encoding/hex"
-	"io/ioutil"
-	"log"
 	mathrand "math/rand"
 	"strings"
 	"sync"
@@ -27,6 +25,8 @@ type Rand interface {
 type Logger interface {
 	Printf(format string, v ...interface{})
 	Println(v ...interface{})
+	Debugf(format string, v ...interface{})
+	Debugln(v ...interface{})
 }
 
 // Opts structure specifies additional settings that may be set
@@ -290,7 +290,7 @@ func New(driver, dsn string, extStore ExternalStore, opts Opts) (*Backend, error
 	}
 
 	if b.Opts.Log == nil {
-		b.Opts.Log = log.New(ioutil.Discard, "", log.LstdFlags)
+		b.Opts.Log = globalLogger{}
 	}
 
 	b.enableDefaultHashAlgs()
@@ -390,9 +390,9 @@ func (b *Backend) sqliteOptimizeLoop() {
 	for {
 		select {
 		case <-t.C:
-			b.Opts.Log.Println("running SQLite query planer optimization...")
+			b.Opts.Log.Debugln("running SQLite query planer optimization...")
 			b.db.Exec(`PRAGMA optimize`)
-			b.Opts.Log.Println("completed SQLite query planer optimization")
+			b.Opts.Log.Debugln("completed SQLite query planer optimization")
 		case <-b.sqliteOptimizeLoopStop:
 			return
 		}
@@ -697,6 +697,7 @@ func (b *Backend) GetOrCreateUser(username string) (backend.User, error) {
 	uid, inboxId, _, _, _, err := b.getUserCreds(tx, username)
 	if err != nil {
 		if err == sql.ErrNoRows {
+			b.Opts.Log.Println("auto-creating storage account", username)
 			if uid, inboxId, err = b.createUser(tx, username, b.Opts.DefaultHashAlgo, nil); err != nil {
 				return nil, err
 			}
@@ -718,6 +719,8 @@ func (b *Backend) Login(_ *imap.ConnInfo, username, password string) (backend.Us
 	if err != nil {
 		return nil, err
 	}
+
+	b.Opts.Log.Debugln(username, "logged in")
 
 	return &User{id: uid, username: username, parent: b, inboxId: inboxId}, nil
 }

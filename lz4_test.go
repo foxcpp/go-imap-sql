@@ -47,6 +47,7 @@ func initTestBackendLZ4() backendtests.Backend {
 		LazyUpdatesInit: true,
 		CompressAlgo:    "lz4",
 		PRNG:            prng,
+		Log:             DummyLogger{},
 	})
 	if err != nil {
 		panic(err)

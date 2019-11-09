@@ -25,6 +25,7 @@ func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.Fetch
 	if setSeen {
 		addSeenStmt, err = m.parent.getFlagsAddStmt(uid, []string{imap.SeenFlag})
 		if err != nil {
+			m.parent.logMboxErr(m, err, "ListMessages (getFlagsAddStmt)", uid, seqset, items)
 			return err
 		}
 
@@ -34,12 +35,14 @@ func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.Fetch
 
 	stmt, err := m.parent.getFetchStmt(uid, items)
 	if err != nil {
+		m.parent.logMboxErr(m, err, "ListMessages (getFetchStmt)", uid, seqset, items)
 		return err
 	}
 
 	// don't close statement, it is owned by cache
 	tx, err := m.parent.db.BeginLevel(sql.LevelReadCommitted, !setSeen)
 	if err != nil {
+		m.parent.logMboxErr(m, err, "ListMessages (tx start)", uid, seqset, items)
 		return err
 	}
 	defer tx.Rollback()
@@ -50,6 +53,7 @@ func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.Fetch
 		if setSeen {
 			params := m.makeFlagsAddStmtArgs(uid, []string{imap.SeenFlag}, seq)
 			if _, err := tx.Stmt(addSeenStmt).Exec(params...); err != nil {
+				m.parent.logMboxErr(m, err, "ListMessages (add seen)", uid, seqset, items)
 				return err
 			}
 
@@ -59,13 +63,19 @@ func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.Fetch
 			} else {
 				_, err = tx.Stmt(m.parent.setSeenFlagSeq).Exec(1, m.id, m.id, start, stop)
 			}
+			if err != nil {
+				m.parent.logMboxErr(m, err, "ListMessages (setSeenFlag)", uid, seqset, items)
+				return err
+			}
 		}
 
 		rows, err := tx.Stmt(stmt).Query(m.id, m.id, begin, end)
 		if err != nil {
+			m.parent.logMboxErr(m, err, "ListMessages", uid, seqset, items)
 			return err
 		}
 		if err := m.scanMessages(rows, items, ch); err != nil {
+			m.parent.logMboxErr(m, err, "ListMessages (scan)", uid, seqset, items)
 			return err
 		}
 	}

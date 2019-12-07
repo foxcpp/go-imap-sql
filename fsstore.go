@@ -1,7 +1,6 @@
 package imapsql
 
 import (
-	"io"
 	"os"
 	"path/filepath"
 )
@@ -14,11 +13,11 @@ type FSStore struct {
 	Root string
 }
 
-func (s *FSStore) Open(key string) (io.ReadCloser, error) {
+func (s *FSStore) Open(key string) (ExtStoreObj, error) {
 	return os.Open(filepath.Join(s.Root, key))
 }
 
-func (s *FSStore) Create(key string) (io.WriteCloser, error) {
+func (s *FSStore) Create(key string) (ExtStoreObj, error) {
 	return os.Create(filepath.Join(s.Root, key))
 }
 

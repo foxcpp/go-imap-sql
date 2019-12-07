@@ -6,13 +6,20 @@ import (
 	"io"
 )
 
+type ExtStoreObj interface {
+	Sync() error
+	io.Reader
+	io.Writer
+	io.Closer
+}
+
 /*
 ExternalStore is an interface used by go-imap-sql to store message bodies
 outside of main database.
 */
 type ExternalStore interface {
-	Create(key string) (io.WriteCloser, error)
-	Open(key string) (io.ReadCloser, error)
+	Create(key string) (ExtStoreObj, error)
+	Open(key string) (ExtStoreObj, error)
 	Delete(keys []string) error
 }
 

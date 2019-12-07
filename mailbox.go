@@ -315,6 +315,10 @@ func (b *Backend) processBody(literal imap.Literal) (bodyStruct, cachedHeader []
 		return nil, nil, "", errors.Wrap(err, "CreateMessage (ReadAll consume)")
 	}
 
+	if err := extWriter.Sync(); err != nil {
+		return nil, nil, "", errors.Wrap(err, "CreateMessage (Sync)")
+	}
+
 	return
 }
 

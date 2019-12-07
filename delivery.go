@@ -376,5 +376,9 @@ func (b *Backend) processParsedBody(headerInput []byte, header textproto.Header,
 		return nil, nil, "", err
 	}
 
+	if err := extWriter.Sync(); err != nil {
+		return nil, nil, "", err
+	}
+
 	return
 }

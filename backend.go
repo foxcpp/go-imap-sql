@@ -411,6 +411,10 @@ func (b *Backend) Close() error {
 		b.db.Exec(`PRAGMA optimize`)
 	}
 
+	if b.updates != nil {
+		close(b.updates)
+	}
+
 	return b.db.Close()
 }
 

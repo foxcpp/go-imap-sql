@@ -458,8 +458,6 @@ func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	updatesBuffer := make([]backend.Update, 0, 16)
-
 	// If that's a sequence number-based operations, we need to mark each
 	// message and then perform the operation as a whole since each
 	// sub-operaion can effect numbering.
@@ -481,30 +479,6 @@ func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error
 		}
 	}
 
-	// Collect sequence numbers for EXPUNGE updates before they change.
-	// len(seqset.Set) is a vague approximation if each element is a single
-	// number.
-	// TODO: Collect affected columns from marking step.
-	updsBuffer := make([]backend.Update, 0, len(seqset.Set))
-	rows, err := tx.Stmt(m.parent.markedSeqnums).Query(m.id)
-	if err != nil {
-		m.parent.logMboxErr(m, err, "MoveMessages (marked seqnums)", uid, seqset, dest)
-		return errors.Wrap(err, "MoveMessages (marked seqnums)")
-	}
-	for rows.Next() {
-		var seqnum uint32
-		var extKey sql.NullString
-		if err := rows.Scan(&seqnum, &extKey); err != nil {
-			m.parent.logMboxErr(m, err, "MoveMessages (marked seqnums scan)", uid, seqset, dest)
-			return errors.Wrap(err, "MoveMessages (marked seqnums scan)")
-		}
-
-		updsBuffer = append(updsBuffer, &backend.ExpungeUpdate{
-			Update: backend.NewUpdate(m.user.username, m.name),
-			SeqNum: seqnum,
-		})
-	}
-
 	// There is no way we can reassign UIDs properly in UPDATE statment so we
 	// have to use INSERT + DELETE. This is still better than complete message
 	// copy and removal logic, though.
@@ -517,6 +491,7 @@ func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error
 		m.parent.logMboxErr(m, err, "MoveMessages (target lookup)", uid, seqset, dest)
 		return errors.Wrap(err, "MoveMessages (target lookup)")
 	}
+	destMbox := Mailbox{user: m.user, id: destID, name: dest, parent: m.parent}
 
 	// Copy messages and flags...
 	copiedCount := int64(0)
@@ -553,6 +528,29 @@ func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error
 		copiedCount += affected
 	}
 
+	// Collect sequence numbers for EXPUNGE updates before they change.
+	// markedSeqnums returns them in reversed order so we are fine sending them
+	// as is.
+	updsBuffer := make([]backend.Update, 0, copiedCount)
+	rows, err := tx.Stmt(m.parent.markedSeqnums).Query(m.id)
+	if err != nil {
+		m.parent.logMboxErr(m, err, "MoveMessages (marked seqnums)", uid, seqset, dest)
+		return errors.Wrap(err, "MoveMessages (marked seqnums)")
+	}
+	for rows.Next() {
+		var seqnum uint32
+		var extKey sql.NullString
+		if err := rows.Scan(&seqnum, &extKey); err != nil {
+			m.parent.logMboxErr(m, err, "MoveMessages (marked seqnums scan)", uid, seqset, dest)
+			return errors.Wrap(err, "MoveMessages (marked seqnums scan)")
+		}
+
+		updsBuffer = append(updsBuffer, &backend.ExpungeUpdate{
+			Update: backend.NewUpdate(m.user.username, m.name),
+			SeqNum: seqnum,
+		})
+	}
+
 	// Delete marked messages (copies in the source mailbox)
 	if _, err := tx.Stmt(m.parent.delMarked).Exec(); err != nil {
 		m.parent.logMboxErr(m, err, "MoveMessages (decrease counters)", uid, seqset, dest)
@@ -572,15 +570,23 @@ func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error
 		return errors.Wrap(err, "MoveMessages (increase counters)")
 	}
 
+	// Emit status update for the target mailbox.
+	statusUpd, err := destMbox.statusUpdate(tx)
+	if err != nil {
+		m.parent.logMboxErr(m, err, "MoveMessages (status update)", uid, seqset, dest)
+		return errors.Wrap(err, "MoveMessages (status update)")
+	}
+
 	if err := tx.Commit(); err != nil {
 		m.parent.logMboxErr(m, err, "MoveMessages (tx commit)", uid, seqset, dest)
 		return errors.Wrap(err, "MoveMessages (tx commit)")
 	}
 
 	if m.parent.updates != nil {
-		for _, upd := range updatesBuffer {
+		for _, upd := range updsBuffer {
 			m.parent.updates <- upd
 		}
+		m.parent.updates <- statusUpd
 	}
 	return nil
 }

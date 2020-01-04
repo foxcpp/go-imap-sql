@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/emersion/go-imap"
-	"github.com/emersion/go-imap-appendlimit"
+	appendlimit "github.com/emersion/go-imap-appendlimit"
 	"github.com/emersion/go-imap/backend"
 	"github.com/emersion/go-imap/backend/backendutil"
 	"github.com/emersion/go-message/textproto"
@@ -453,27 +453,128 @@ func (m *Mailbox) statusUpdate(tx *sql.Tx) (backend.Update, error) {
 func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error {
 	tx, err := m.parent.db.Begin(false)
 	if err != nil {
+		m.parent.logMboxErr(m, err, "MoveMessages (tx start)", uid, seqset, dest)
 		return errors.Wrap(err, "MoveMessages (tx start)")
 	}
 	defer tx.Rollback() //nolint:errcheck
 
 	updatesBuffer := make([]backend.Update, 0, 16)
 
-	if err := m.copyMessages(tx, uid, seqset, dest, &updatesBuffer); err != nil {
-		if err == backend.ErrNoSuchMailbox {
-			return err
+	// If that's a sequence number-based operations, we need to mark each
+	// message and then perform the operation as a whole since each
+	// sub-operaion can effect numbering.
+	//
+	// Additionally, we need to know moved sequence numbers to emit EXPUNGE
+	// updates so we have to mark it even for UID operations.
+	for _, seq := range seqset.Set {
+		start, stop := sqlRange(seq)
+
+		var err error
+		if uid {
+			_, err = tx.Stmt(m.parent.markUid).Exec(m.id, start, stop)
+		} else {
+			_, err = tx.Stmt(m.parent.markSeq).Exec(m.id, m.id, start, stop)
 		}
-		m.parent.logMboxErr(m, err, "MoveMessages (copyMessages)", uid, seqset, dest)
-		return errors.Wrap(err, "MoveMessages")
+		if err != nil {
+			m.parent.logMboxErr(m, err, "MoveMessages (mark)", uid, seqset, dest)
+			return errors.Wrap(err, "MoveMessages (mark)")
+		}
 	}
-	if err := m.delMessages(tx, uid, seqset, &updatesBuffer); err != nil {
-		m.parent.logMboxErr(m, err, "MoveMessages (delMessages)", uid, seqset, dest)
-		return errors.Wrap(err, "MoveMessages")
+
+	// Collect sequence numbers for EXPUNGE updates before they change.
+	// len(seqset.Set) is a vague approximation if each element is a single
+	// number.
+	// TODO: Collect affected columns from marking step.
+	updsBuffer := make([]backend.Update, 0, len(seqset.Set))
+	rows, err := tx.Stmt(m.parent.markedSeqnums).Query(m.id)
+	if err != nil {
+		m.parent.logMboxErr(m, err, "MoveMessages (marked seqnums)", uid, seqset, dest)
+		return errors.Wrap(err, "MoveMessages (marked seqnums)")
+	}
+	for rows.Next() {
+		var seqnum uint32
+		var extKey sql.NullString
+		if err := rows.Scan(&seqnum, &extKey); err != nil {
+			m.parent.logMboxErr(m, err, "MoveMessages (marked seqnums scan)", uid, seqset, dest)
+			return errors.Wrap(err, "MoveMessages (marked seqnums scan)")
+		}
+
+		updsBuffer = append(updsBuffer, &backend.ExpungeUpdate{
+			Update: backend.NewUpdate(m.user.username, m.name),
+			SeqNum: seqnum,
+		})
+	}
+
+	// There is no way we can reassign UIDs properly in UPDATE statment so we
+	// have to use INSERT + DELETE. This is still better than complete message
+	// copy and removal logic, though.
+
+	var destID uint64
+	if err := tx.Stmt(m.parent.mboxId).QueryRow(m.user.id, dest).Scan(&destID); err != nil {
+		if err == sql.ErrNoRows {
+			return backend.ErrNoSuchMailbox
+		}
+		m.parent.logMboxErr(m, err, "MoveMessages (target lookup)", uid, seqset, dest)
+		return errors.Wrap(err, "MoveMessages (target lookup)")
+	}
+
+	// Copy messages and flags...
+	copiedCount := int64(0)
+	for _, seq := range seqset.Set {
+		start, stop := sqlRange(seq)
+
+		var stats sql.Result
+		if uid {
+			stats, err = tx.Stmt(m.parent.copyMsgsUid).Exec(destID, destID, copiedCount, m.id, start, stop)
+			if err != nil {
+				m.parent.logMboxErr(m, err, "MoveMessages (copy msgs)", uid, seqset, dest)
+				return errors.Wrap(err, "MoveMessages (copy msgs)")
+			}
+			if _, err := tx.Stmt(m.parent.copyMsgFlagsUid).Exec(destID, destID, copiedCount, m.id, start, stop); err != nil {
+				m.parent.logMboxErr(m, err, "MoveMessages (copy msg flags)", uid, seqset, dest)
+				return errors.Wrap(err, "MoveMessages (copy msg flags)")
+			}
+		} else {
+			stats, err = tx.Stmt(m.parent.copyMsgsSeq).Exec(destID, destID, copiedCount, m.id, stop-start+1, start-1)
+			if err != nil {
+				m.parent.logMboxErr(m, err, "MoveMessages (copy msgs)", uid, seqset, dest)
+				return errors.Wrap(err, "MoveMessages (copy msgs)")
+			}
+			if _, err := tx.Stmt(m.parent.copyMsgFlagsSeq).Exec(destID, destID, copiedCount, m.id, stop-start+1, start-1); err != nil {
+				m.parent.logMboxErr(m, err, "MoveMessages (copy msgs flags)", uid, seqset, dest)
+				return errors.Wrap(err, "MoveMessages (copy msg flags)")
+			}
+		}
+		affected, err := stats.RowsAffected()
+		if err != nil {
+			m.parent.logMboxErr(m, err, "MoveMessages (rows affected)", uid, seqset, dest)
+			return errors.Wrap(err, "MoveMessages (rows affected)")
+		}
+		copiedCount += affected
+	}
+
+	// Delete marked messages (copies in the source mailbox)
+	if _, err := tx.Stmt(m.parent.delMarked).Exec(); err != nil {
+		m.parent.logMboxErr(m, err, "MoveMessages (decrease counters)", uid, seqset, dest)
+		return errors.Wrap(err, "MoveMessages (decrease counters)")
+	}
+
+	// Decrease MESSAGES for the source mailbox.
+	_, err = tx.Stmt(m.parent.decreaseMsgCount).Exec(copiedCount, m.id)
+	if err != nil {
+		m.parent.logMboxErr(m, err, "MoveMessages (decrease counters)", uid, seqset, dest)
+		return errors.Wrap(err, "MoveMessages (decrease counters)")
+	}
+
+	// Increase UIDNEXT and MESAGES for the target mailbox.
+	if _, err := tx.Stmt(m.parent.increaseMsgCount).Exec(copiedCount, copiedCount, destID); err != nil {
+		m.parent.logMboxErr(m, err, "MoveMessages (increase counters)", uid, seqset, dest)
+		return errors.Wrap(err, "MoveMessages (increase counters)")
 	}
 
 	if err := tx.Commit(); err != nil {
 		m.parent.logMboxErr(m, err, "MoveMessages (tx commit)", uid, seqset, dest)
-		return errors.Wrap(err, "MoveMessages")
+		return errors.Wrap(err, "MoveMessages (tx commit)")
 	}
 
 	if m.parent.updates != nil {
@@ -610,25 +711,26 @@ func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest s
 
 	srcId := m.id
 
+	totalCopied := int64(0)
 	for _, seq := range seqset.Set {
 		start, stop := sqlRange(seq)
 
 		var stats sql.Result
 		var err error
 		if uid {
-			stats, err = tx.Stmt(m.parent.copyMsgsUid).Exec(destID, destID, srcId, start, stop)
+			stats, err = tx.Stmt(m.parent.copyMsgsUid).Exec(destID, destID, totalCopied, srcId, start, stop)
 			if err != nil {
 				return err
 			}
-			if _, err := tx.Stmt(m.parent.copyMsgFlagsUid).Exec(destID, destID, srcId, start, stop); err != nil {
+			if _, err := tx.Stmt(m.parent.copyMsgFlagsUid).Exec(destID, destID, totalCopied, srcId, start, stop); err != nil {
 				return err
 			}
 		} else {
-			stats, err = tx.Stmt(m.parent.copyMsgsSeq).Exec(destID, destID, srcId, stop-start+1, start-1)
+			stats, err = tx.Stmt(m.parent.copyMsgsSeq).Exec(destID, destID, totalCopied, srcId, stop-start+1, start-1)
 			if err != nil {
 				return err
 			}
-			if _, err := tx.Stmt(m.parent.copyMsgFlagsSeq).Exec(destID, destID, srcId, stop-start+1, start-1); err != nil {
+			if _, err := tx.Stmt(m.parent.copyMsgFlagsSeq).Exec(destID, destID, totalCopied, srcId, stop-start+1, start-1); err != nil {
 				return err
 			}
 		}
@@ -636,10 +738,7 @@ func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest s
 		if err != nil {
 			return err
 		}
-
-		if _, err := tx.Stmt(m.parent.addRecentToLast).Exec(destID, destID, affected); err != nil {
-			return err
-		}
+		totalCopied += affected
 
 		if uid {
 			if _, err := tx.Stmt(m.parent.incrementRefUid).Exec(m.user.id, srcId, start, stop); err != nil {
@@ -651,9 +750,13 @@ func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest s
 			}
 		}
 
-		if _, err := tx.Stmt(m.parent.increaseMsgCount).Exec(affected, affected, destID); err != nil {
-			return err
-		}
+	}
+
+	if _, err := tx.Stmt(m.parent.addRecentToLast).Exec(destID, destID, totalCopied); err != nil {
+		return err
+	}
+	if _, err := tx.Stmt(m.parent.increaseMsgCount).Exec(totalCopied, totalCopied, destID); err != nil {
+		return err
 	}
 
 	upd, err := destMbox.statusUpdate(tx)

@@ -397,7 +397,7 @@ func (b *Backend) prepareStmts() error {
 			SELECT uidnext - 1
 			FROM mboxes
 			WHERE id = ?
-		) + row_number() OVER (ORDER BY msgId), date, bodyLen, 0 AS mark, bodyStructure, cachedHeader, extBodyKey, seen, compressAlgo
+		) + row_number() OVER (ORDER BY msgId) + ?, date, bodyLen, 0 AS mark, bodyStructure, cachedHeader, extBodyKey, seen, compressAlgo
 		FROM msgs
 		WHERE mboxId = ? AND msgId BETWEEN ? AND ?`)
 	if err != nil {
@@ -412,7 +412,7 @@ func (b *Backend) prepareStmts() error {
 				SELECT uidnext - 1
 				FROM mboxes
 				WHERE id = ?
-			) + row_number() OVER (ORDER BY msgId) AS new_msgId, msgId, mboxId
+			) + row_number() OVER (ORDER BY msgId) + ? AS new_msgId, msgId, mboxId
 			FROM msgs
 			WHERE mboxId = ?
 			AND msgId BETWEEN ? AND ?
@@ -427,7 +427,7 @@ func (b *Backend) prepareStmts() error {
 			SELECT uidnext - 1
 			FROM mboxes
 			WHERE id = ?
-		) + row_number() OVER (ORDER BY msgId), date, bodyLen, 0 AS mark, bodyStructure, cachedHeader, extBodyKey, seen, compressAlgo
+		) + row_number() OVER (ORDER BY msgId) + ?, date, bodyLen, 0 AS mark, bodyStructure, cachedHeader, extBodyKey, seen, compressAlgo
 		FROM (
 			SELECT msgId, date, bodyLen, bodyStructure, cachedHeader, extBodyKey, compressAlgo, seen
 			FROM msgs
@@ -447,7 +447,7 @@ func (b *Backend) prepareStmts() error {
 				SELECT uidnext - 1
 				FROM mboxes
 				WHERE id = ?
-			) + row_number() OVER (ORDER BY msgId) AS new_msgId, msgId, mboxId
+			) + row_number() OVER (ORDER BY msgId) + ? AS new_msgId, msgId, mboxId
 			FROM (
 				SELECT msgId, mboxId
 				FROM msgs
@@ -792,6 +792,7 @@ func (b *Backend) prepareStmts() error {
 	if err != nil {
 		return errors.Wrap(err, "setSeenFlagSeq prep")
 	}
+
 	b.setInboxId, err = b.db.Prepare(`
         UPDATE users
         SET inboxId = ?

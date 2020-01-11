@@ -5,8 +5,9 @@ import (
 	"strings"
 	"time"
 
+	"errors"
+
 	imap "github.com/emersion/go-imap"
-	"github.com/pkg/errors"
 )
 
 type rawEnvelope struct {

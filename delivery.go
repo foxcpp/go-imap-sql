@@ -9,10 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"errors"
+
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/backend"
 	"github.com/emersion/go-message/textproto"
-	"github.com/pkg/errors"
 )
 
 var ErrDeliveryInterrupted = errors.New("sql: delivery transaction interrupted, try again later")
@@ -206,14 +207,14 @@ func (d *Delivery) BodyParsed(header textproto.Header, bodyLen int, body Buffer)
 	}
 	flagsStmt, err := d.b.getFlagsAddStmt(true, []string{imap.RecentFlag})
 	if err != nil {
-		return errors.Wrap(err, "Body")
+		return wrapErr(err, "Body")
 	}
 
 	date := time.Now()
 
 	d.tx, err = d.b.db.BeginLevel(sql.LevelReadCommitted, false)
 	if err != nil {
-		return errors.Wrap(err, "Body")
+		return wrapErr(err, "Body")
 	}
 
 	for _, mbox := range d.mboxes {
@@ -235,7 +236,7 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox Mailbox, bodyLen i
 
 	headerBlob := bytes.Buffer{}
 	if err := textproto.WriteHeader(&headerBlob, header); err != nil {
-		return errors.Wrap(err, "Body (WriteHeader)")
+		return wrapErr(err, "Body (WriteHeader)")
 	}
 
 	length := headerBlob.Len() + bodyLen
@@ -251,7 +252,7 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox Mailbox, bodyLen i
 
 	if _, err = d.tx.Stmt(d.b.addExtKey).Exec(extBodyKey, mbox.user.id, 1); err != nil {
 		d.b.extStore.Delete([]string{extBodyKey})
-		return errors.Wrap(err, "Body (addExtKey)")
+		return wrapErr(err, "Body (addExtKey)")
 	}
 
 	// Note that we are extremely careful here with ordering to
@@ -262,13 +263,13 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox Mailbox, bodyLen i
 	msgId, err := mbox.incrementMsgCounters(d.tx)
 	if err != nil {
 		d.b.extStore.Delete([]string{extBodyKey})
-		return errors.Wrap(err, "Body (incrementMsgCounters)")
+		return wrapErr(err, "Body (incrementMsgCounters)")
 	}
 
 	upd, err := mbox.statusUpdate(d.tx)
 	if err != nil {
 		d.b.extStore.Delete([]string{extBodyKey})
-		return errors.Wrap(err, "Body (statusUpdate)")
+		return wrapErr(err, "Body (statusUpdate)")
 	}
 	d.updates = append(d.updates, upd)
 	// --- end of operations that involve mboxes table ---
@@ -282,7 +283,7 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox Mailbox, bodyLen i
 	)
 	if err != nil {
 		d.b.extStore.Delete([]string{extBodyKey})
-		return errors.Wrap(err, "Body (addMsg)")
+		return wrapErr(err, "Body (addMsg)")
 	}
 	// --- end of operations that involve msgs table ---
 
@@ -290,7 +291,7 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox Mailbox, bodyLen i
 	params := mbox.makeFlagsAddStmtArgs(true, []string{imap.RecentFlag}, imap.Seq{Start: msgId, Stop: msgId})
 	if _, err := d.tx.Stmt(flagsStmt).Exec(params...); err != nil {
 		d.b.extStore.Delete([]string{extBodyKey})
-		return errors.Wrap(err, "Body (flagsStmt)")
+		return wrapErr(err, "Body (flagsStmt)")
 	}
 	// --- end operations that involve flags table ---
 

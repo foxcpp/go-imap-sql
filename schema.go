@@ -3,7 +3,7 @@ package imapsql
 import (
 	"database/sql"
 
-	"github.com/pkg/errors"
+	"errors"
 )
 
 func (b *Backend) schemaVersion() (int, error) {
@@ -55,7 +55,7 @@ func (b *Backend) upgradeSchema(currentVer int) error {
 	// Functions for schema upgrade go here. Example:
 	//if currentVer == 1 {
 	//	if err := b.schemaUpgrade1To2(tx); err != nil {
-	//		return errors.Wrap(err, "1->2 upgrade")
+	//		return wrapErr(err, "1->2 upgrade")
 	//	}
 	//	currentVer = 2
 	//}

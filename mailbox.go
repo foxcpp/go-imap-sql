@@ -9,6 +9,8 @@ import (
 	nettextproto "net/textproto"
 	"time"
 
+	"errors"
+
 	"github.com/emersion/go-imap"
 	appendlimit "github.com/emersion/go-imap-appendlimit"
 	"github.com/emersion/go-imap/backend"
@@ -16,7 +18,6 @@ import (
 	"github.com/emersion/go-message/textproto"
 	"github.com/foxcpp/go-imap-sql/children"
 	"github.com/mailru/easyjson/jwriter"
-	"github.com/pkg/errors"
 )
 
 const flagsSep = "{"
@@ -45,7 +46,7 @@ func (m *Mailbox) Info() (*imap.MailboxInfo, error) {
 	var specialUse sql.NullString
 	if err := row.Scan(&mark, &specialUse); err != nil {
 		m.parent.logMboxErr(m, err, "MboxInfo (mbox attrs)")
-		return nil, errors.Wrapf(err, "Info %s", m.name)
+		return nil, wrapErrf(err, "Info %s", m.name)
 	}
 	if mark == 1 {
 		res.Attributes = []string{imap.MarkedAttr}
@@ -59,7 +60,7 @@ func (m *Mailbox) Info() (*imap.MailboxInfo, error) {
 		childrenCount := 0
 		if err := row.Scan(&childrenCount); err != nil {
 			m.parent.logMboxErr(m, err, "MboxInfo (children count)")
-			return nil, errors.Wrapf(err, "Info %s", m.name)
+			return nil, wrapErrf(err, "Info %s", m.name)
 		}
 		if childrenCount != 0 {
 			res.Attributes = append(res.Attributes, children.HasChildrenAttr)
@@ -75,7 +76,7 @@ func (m *Mailbox) Status(items []imap.StatusItem) (*imap.MailboxStatus, error) {
 	tx, err := m.parent.db.Begin(true)
 	if err != nil {
 		m.parent.logMboxErr(m, err, "MboxStatus (tx start)", items)
-		return nil, errors.Wrapf(err, "Status %s", m.name)
+		return nil, wrapErrf(err, "Status %s", m.name)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
@@ -93,13 +94,13 @@ func (m *Mailbox) Status(items []imap.StatusItem) (*imap.MailboxStatus, error) {
 	rows, err := tx.Stmt(m.parent.usedFlags).Query(m.id)
 	if err != nil {
 		m.parent.logMboxErr(m, err, "Status (used flags)", items)
-		return nil, errors.Wrapf(err, "Status (usedFlags) %s", m.name)
+		return nil, wrapErrf(err, "Status (usedFlags) %s", m.name)
 	}
 	for rows.Next() {
 		var flag string
 		if err := rows.Scan(&flag); err != nil {
 			m.parent.logMboxErr(m, err, "Status (used flags)", items)
-			return nil, errors.Wrapf(err, "Status (usedFlags) %s", m.name)
+			return nil, wrapErrf(err, "Status (usedFlags) %s", m.name)
 		}
 		res.Flags = append(res.Flags, flag)
 		res.PermanentFlags = append(res.PermanentFlags, flag)
@@ -109,7 +110,7 @@ func (m *Mailbox) Status(items []imap.StatusItem) (*imap.MailboxStatus, error) {
 	if err := row.Scan(&res.UnseenSeqNum); err != nil {
 		if err != sql.ErrNoRows {
 			m.parent.logMboxErr(m, err, "Status (unseen seqnum)", items)
-			return nil, errors.Wrapf(err, "Status %s", m.name)
+			return nil, wrapErrf(err, "Status %s", m.name)
 		}
 
 		// Don't return it if there is no unseen messages.
@@ -129,7 +130,7 @@ func (m *Mailbox) Status(items []imap.StatusItem) (*imap.MailboxStatus, error) {
 			row := tx.Stmt(m.parent.msgsCount).QueryRow(m.id)
 			if err := row.Scan(&res.Messages); err != nil {
 				m.parent.logMboxErr(m, err, "Status (messages count)", items)
-				return nil, errors.Wrapf(err, "Status (messages) %s", m.name)
+				return nil, wrapErrf(err, "Status (messages) %s", m.name)
 			}
 		case imap.StatusRecent:
 			if res.Messages != 0 {
@@ -138,18 +139,18 @@ func (m *Mailbox) Status(items []imap.StatusItem) (*imap.MailboxStatus, error) {
 			}
 			if err := tx.Stmt(m.parent.msgsCount).QueryRow(m.id).Scan(&res.Recent); err != nil {
 				m.parent.logMboxErr(m, err, "Status (recent)", items)
-				return nil, errors.Wrapf(err, "Status (recent) %s", m.name)
+				return nil, wrapErrf(err, "Status (recent) %s", m.name)
 			}
 		case imap.StatusUidNext:
 			if err := tx.Stmt(m.parent.uidNext).QueryRow(m.id).Scan(&res.UidNext); err != nil {
 				m.parent.logMboxErr(m, err, "Status (uidnext)", items)
-				return nil, errors.Wrapf(err, "Status (uidnext) %s", m.name)
+				return nil, wrapErrf(err, "Status (uidnext) %s", m.name)
 			}
 		case imap.StatusUidValidity:
 			row := tx.Stmt(m.parent.uidValidity).QueryRow(m.id)
 			if err := row.Scan(&res.UidValidity); err != nil {
 				m.parent.logMboxErr(m, err, "Status (uidValidity)", items)
-				return nil, errors.Wrapf(err, "Status (uidvalidity) %s", m.name)
+				return nil, wrapErrf(err, "Status (uidvalidity) %s", m.name)
 			}
 		case appendlimit.StatusAppendLimit:
 			val := m.createMessageLimit(tx)
@@ -197,7 +198,7 @@ func (m *Mailbox) SetSubscribed(subscribed bool) error {
 	}
 	_, err := m.parent.setSubbed.Exec(subbed, m.id)
 	m.parent.logMboxErr(m, err, "SetSubscribed", subscribed)
-	return errors.Wrap(err, "SetSubscribed")
+	return wrapErr(err, "SetSubscribed")
 }
 
 func (m *Mailbox) Check() error {
@@ -298,13 +299,13 @@ func (b *Backend) processBody(literal imap.Literal) (bodyStruct, cachedHeader []
 	hdr, err := textproto.ReadHeader(bufferedBody)
 	if err != nil {
 		b.extStore.Delete([]string{extBodyKey})
-		return nil, nil, "", errors.Wrap(err, "CreateMessage (readHeader)")
+		return nil, nil, "", wrapErr(err, "CreateMessage (readHeader)")
 	}
 
 	bodyStruct, cachedHeader, err = extractCachedData(hdr, bufferedBody)
 	if err != nil {
 		b.extStore.Delete([]string{extBodyKey})
-		return nil, nil, "", errors.Wrap(err, "CreateMessage (extractCachedData)")
+		return nil, nil, "", wrapErr(err, "CreateMessage (extractCachedData)")
 	}
 
 	// Consume all remaining body so io.TeeReader used with external store will
@@ -312,11 +313,11 @@ func (b *Backend) processBody(literal imap.Literal) (bodyStruct, cachedHeader []
 	_, err = io.Copy(ioutil.Discard, bufferedBody)
 	if err != nil {
 		b.extStore.Delete([]string{extBodyKey})
-		return nil, nil, "", errors.Wrap(err, "CreateMessage (ReadAll consume)")
+		return nil, nil, "", wrapErr(err, "CreateMessage (ReadAll consume)")
 	}
 
 	if err := extWriter.Sync(); err != nil {
-		return nil, nil, "", errors.Wrap(err, "CreateMessage (Sync)")
+		return nil, nil, "", wrapErr(err, "CreateMessage (Sync)")
 	}
 
 	return
@@ -363,20 +364,20 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 	stmt, err := m.parent.getFlagsAddStmt(true, flags)
 	if err != nil {
 		m.parent.logMboxErr(m, err, "CreateMessage (getFlagsAddStmt)")
-		return errors.Wrap(err, "CreateMessage")
+		return wrapErr(err, "CreateMessage")
 	}
 
 	tx, err := m.parent.db.BeginLevel(sql.LevelReadCommitted, false)
 	if err != nil {
 		m.parent.logMboxErr(m, err, "CreateMessage (tx start)")
-		return errors.Wrap(err, "CreateMessage (tx begin)")
+		return wrapErr(err, "CreateMessage (tx begin)")
 	}
 	defer tx.Rollback() //nolint:errcheck
 
 	msgId, err := m.incrementMsgCounters(tx)
 	if err != nil {
 		m.parent.logMboxErr(m, err, "CreateMessage (uidNext)")
-		return errors.Wrap(err, "CreateMessage (uidNext)")
+		return wrapErr(err, "CreateMessage (uidNext)")
 	}
 
 	bodyLen := fullBody.Len()
@@ -388,7 +389,7 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 	if _, err = tx.Stmt(m.parent.addExtKey).Exec(extBodyKey, m.user.id, 1); err != nil {
 		m.parent.extStore.Delete([]string{extBodyKey})
 		m.parent.logMboxErr(m, err, "CreateMessage (addExtKey)")
-		return errors.Wrap(err, "CreateMessage (addExtKey)")
+		return wrapErr(err, "CreateMessage (addExtKey)")
 	}
 
 	_, err = tx.Stmt(m.parent.addMsg).Exec(
@@ -400,27 +401,27 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 	if err != nil {
 		m.parent.extStore.Delete([]string{extBodyKey})
 		m.parent.logMboxErr(m, err, "CreateMessage (addMsg)")
-		return errors.Wrap(err, "CreateMessage (addMsg)")
+		return wrapErr(err, "CreateMessage (addMsg)")
 	}
 
 	params := m.makeFlagsAddStmtArgs(true, flags, imap.Seq{Start: msgId, Stop: msgId})
 	if _, err = tx.Stmt(stmt).Exec(params...); err != nil {
 		m.parent.extStore.Delete([]string{extBodyKey})
 		m.parent.logMboxErr(m, err, "CreateMessage (flags)")
-		return errors.Wrap(err, "CreateMessage (flags)")
+		return wrapErr(err, "CreateMessage (flags)")
 	}
 
 	upd, err := m.statusUpdate(tx)
 	if err != nil {
 		m.parent.extStore.Delete([]string{extBodyKey})
 		m.parent.logMboxErr(m, err, "CreateMessage (status query)")
-		return errors.Wrap(err, "CreateMessage (status query)")
+		return wrapErr(err, "CreateMessage (status query)")
 	}
 
 	if err = tx.Commit(); err != nil {
 		m.parent.extStore.Delete([]string{extBodyKey})
 		m.parent.logMboxErr(m, err, "CreateMessage (tx commit)")
-		return errors.Wrap(err, "CreateMessage (tx commit)")
+		return wrapErr(err, "CreateMessage (tx commit)")
 	}
 
 	// Send update after commiting transaction,
@@ -440,7 +441,7 @@ func (m *Mailbox) statusUpdate(tx *sql.Tx) (backend.Update, error) {
 	row := tx.Stmt(m.parent.msgsCount).QueryRow(m.id)
 	newCount := uint32(0)
 	if err := row.Scan(&newCount); err != nil {
-		return nil, errors.Wrap(err, "CreateMessage (exists read)")
+		return nil, wrapErr(err, "CreateMessage (exists read)")
 	}
 
 	upd.MailboxStatus.Flags = nil
@@ -454,7 +455,7 @@ func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error
 	tx, err := m.parent.db.Begin(false)
 	if err != nil {
 		m.parent.logMboxErr(m, err, "MoveMessages (tx start)", uid, seqset, dest)
-		return errors.Wrap(err, "MoveMessages (tx start)")
+		return wrapErr(err, "MoveMessages (tx start)")
 	}
 	defer tx.Rollback() //nolint:errcheck
 
@@ -475,7 +476,7 @@ func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error
 		}
 		if err != nil {
 			m.parent.logMboxErr(m, err, "MoveMessages (mark)", uid, seqset, dest)
-			return errors.Wrap(err, "MoveMessages (mark)")
+			return wrapErr(err, "MoveMessages (mark)")
 		}
 	}
 
@@ -489,7 +490,7 @@ func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error
 			return backend.ErrNoSuchMailbox
 		}
 		m.parent.logMboxErr(m, err, "MoveMessages (target lookup)", uid, seqset, dest)
-		return errors.Wrap(err, "MoveMessages (target lookup)")
+		return wrapErr(err, "MoveMessages (target lookup)")
 	}
 	destMbox := Mailbox{user: m.user, id: destID, name: dest, parent: m.parent}
 
@@ -503,27 +504,27 @@ func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error
 			stats, err = tx.Stmt(m.parent.copyMsgsUid).Exec(destID, destID, copiedCount, m.id, start, stop)
 			if err != nil {
 				m.parent.logMboxErr(m, err, "MoveMessages (copy msgs)", uid, seqset, dest)
-				return errors.Wrap(err, "MoveMessages (copy msgs)")
+				return wrapErr(err, "MoveMessages (copy msgs)")
 			}
 			if _, err := tx.Stmt(m.parent.copyMsgFlagsUid).Exec(destID, destID, copiedCount, m.id, start, stop); err != nil {
 				m.parent.logMboxErr(m, err, "MoveMessages (copy msg flags)", uid, seqset, dest)
-				return errors.Wrap(err, "MoveMessages (copy msg flags)")
+				return wrapErr(err, "MoveMessages (copy msg flags)")
 			}
 		} else {
 			stats, err = tx.Stmt(m.parent.copyMsgsSeq).Exec(destID, destID, copiedCount, m.id, stop-start+1, start-1)
 			if err != nil {
 				m.parent.logMboxErr(m, err, "MoveMessages (copy msgs)", uid, seqset, dest)
-				return errors.Wrap(err, "MoveMessages (copy msgs)")
+				return wrapErr(err, "MoveMessages (copy msgs)")
 			}
 			if _, err := tx.Stmt(m.parent.copyMsgFlagsSeq).Exec(destID, destID, copiedCount, m.id, stop-start+1, start-1); err != nil {
 				m.parent.logMboxErr(m, err, "MoveMessages (copy msgs flags)", uid, seqset, dest)
-				return errors.Wrap(err, "MoveMessages (copy msg flags)")
+				return wrapErr(err, "MoveMessages (copy msg flags)")
 			}
 		}
 		affected, err := stats.RowsAffected()
 		if err != nil {
 			m.parent.logMboxErr(m, err, "MoveMessages (rows affected)", uid, seqset, dest)
-			return errors.Wrap(err, "MoveMessages (rows affected)")
+			return wrapErr(err, "MoveMessages (rows affected)")
 		}
 		copiedCount += affected
 	}
@@ -535,14 +536,14 @@ func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error
 	rows, err := tx.Stmt(m.parent.markedSeqnums).Query(m.id)
 	if err != nil {
 		m.parent.logMboxErr(m, err, "MoveMessages (marked seqnums)", uid, seqset, dest)
-		return errors.Wrap(err, "MoveMessages (marked seqnums)")
+		return wrapErr(err, "MoveMessages (marked seqnums)")
 	}
 	for rows.Next() {
 		var seqnum uint32
 		var extKey sql.NullString
 		if err := rows.Scan(&seqnum, &extKey); err != nil {
 			m.parent.logMboxErr(m, err, "MoveMessages (marked seqnums scan)", uid, seqset, dest)
-			return errors.Wrap(err, "MoveMessages (marked seqnums scan)")
+			return wrapErr(err, "MoveMessages (marked seqnums scan)")
 		}
 
 		updsBuffer = append(updsBuffer, &backend.ExpungeUpdate{
@@ -554,32 +555,32 @@ func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error
 	// Delete marked messages (copies in the source mailbox)
 	if _, err := tx.Stmt(m.parent.delMarked).Exec(); err != nil {
 		m.parent.logMboxErr(m, err, "MoveMessages (decrease counters)", uid, seqset, dest)
-		return errors.Wrap(err, "MoveMessages (decrease counters)")
+		return wrapErr(err, "MoveMessages (decrease counters)")
 	}
 
 	// Decrease MESSAGES for the source mailbox.
 	_, err = tx.Stmt(m.parent.decreaseMsgCount).Exec(copiedCount, m.id)
 	if err != nil {
 		m.parent.logMboxErr(m, err, "MoveMessages (decrease counters)", uid, seqset, dest)
-		return errors.Wrap(err, "MoveMessages (decrease counters)")
+		return wrapErr(err, "MoveMessages (decrease counters)")
 	}
 
 	// Increase UIDNEXT and MESAGES for the target mailbox.
 	if _, err := tx.Stmt(m.parent.increaseMsgCount).Exec(copiedCount, copiedCount, destID); err != nil {
 		m.parent.logMboxErr(m, err, "MoveMessages (increase counters)", uid, seqset, dest)
-		return errors.Wrap(err, "MoveMessages (increase counters)")
+		return wrapErr(err, "MoveMessages (increase counters)")
 	}
 
 	// Emit status update for the target mailbox.
 	statusUpd, err := destMbox.statusUpdate(tx)
 	if err != nil {
 		m.parent.logMboxErr(m, err, "MoveMessages (status update)", uid, seqset, dest)
-		return errors.Wrap(err, "MoveMessages (status update)")
+		return wrapErr(err, "MoveMessages (status update)")
 	}
 
 	if err := tx.Commit(); err != nil {
 		m.parent.logMboxErr(m, err, "MoveMessages (tx commit)", uid, seqset, dest)
-		return errors.Wrap(err, "MoveMessages (tx commit)")
+		return wrapErr(err, "MoveMessages (tx commit)")
 	}
 
 	if m.parent.updates != nil {
@@ -595,7 +596,7 @@ func (m *Mailbox) CopyMessages(uid bool, seqset *imap.SeqSet, dest string) error
 	tx, err := m.parent.db.BeginLevel(sql.LevelRepeatableRead, false)
 	if err != nil {
 		m.parent.logMboxErr(m, err, "CopyMessages (tx start)", uid, seqset, dest)
-		return errors.Wrap(err, "CopyMessages")
+		return wrapErr(err, "CopyMessages")
 	}
 	defer tx.Rollback() //nolint:errcheck
 
@@ -606,12 +607,12 @@ func (m *Mailbox) CopyMessages(uid bool, seqset *imap.SeqSet, dest string) error
 			return err
 		}
 		m.parent.logMboxErr(m, err, "CopyMessages", uid, seqset, dest)
-		return errors.Wrap(err, "CopyMessages")
+		return wrapErr(err, "CopyMessages")
 	}
 
 	if err := tx.Commit(); err != nil {
 		m.parent.logMboxErr(m, err, "CopyMessages (tx commit)", uid, seqset, dest)
-		return errors.Wrap(err, "CopyMessages")
+		return wrapErr(err, "CopyMessages")
 	}
 
 	if m.parent.updates != nil {
@@ -626,7 +627,7 @@ func (m *Mailbox) DelMessages(uid bool, seqset *imap.SeqSet) error {
 	tx, err := m.parent.db.BeginLevel(sql.LevelRepeatableRead, false)
 	if err != nil {
 		m.parent.logMboxErr(m, err, "DelMessages (tx start)", uid, seqset)
-		return errors.Wrap(err, "DelMessages")
+		return wrapErr(err, "DelMessages")
 	}
 	defer tx.Rollback() //nolint:errcheck
 
@@ -636,12 +637,12 @@ func (m *Mailbox) DelMessages(uid bool, seqset *imap.SeqSet) error {
 			return err
 		}
 		m.parent.logMboxErr(m, err, "DelMessages", uid, seqset)
-		return errors.Wrap(err, "DelMessages")
+		return wrapErr(err, "DelMessages")
 	}
 
 	if err := tx.Commit(); err != nil {
 		m.parent.logMboxErr(m, err, "DelMessages (tx commit)", uid, seqset)
-		return errors.Wrap(err, "DelMessages")
+		return wrapErr(err, "DelMessages")
 	}
 
 	if m.parent.updates != nil {
@@ -778,7 +779,7 @@ func (m *Mailbox) Expunge() error {
 	tx, err := m.parent.db.Begin(false)
 	if err != nil {
 		m.parent.logMboxErr(m, err, "Expunge (tx start)")
-		return errors.Wrap(err, "Expunge")
+		return wrapErr(err, "Expunge")
 	}
 	defer tx.Rollback() //nolint:errcheck
 
@@ -787,20 +788,20 @@ func (m *Mailbox) Expunge() error {
 	rows, err := tx.Stmt(m.parent.deletedSeqnums).Query(m.id, m.id)
 	if err != nil {
 		m.parent.logMboxErr(m, err, "Expunge (deletedSeqnums)")
-		return errors.Wrap(err, "Expunge")
+		return wrapErr(err, "Expunge")
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var seqnum uint32
 		if err := rows.Scan(&seqnum); err != nil {
 			m.parent.logMboxErr(m, err, "Expunge (deletedSeqnums)")
-			return errors.Wrap(err, "Expunge")
+			return wrapErr(err, "Expunge")
 		}
 		seqnums = append(seqnums, seqnum)
 	}
 	if err := rows.Err(); err != nil {
 		m.parent.logMboxErr(m, err, "Expunge (deletedSeqnums)")
-		return errors.Wrap(err, "Expunge")
+		return wrapErr(err, "Expunge")
 	}
 
 	if err := m.expungeExternal(tx); err != nil {
@@ -811,17 +812,17 @@ func (m *Mailbox) Expunge() error {
 	_, err = tx.Stmt(m.parent.expungeMbox).Exec(m.id, m.id)
 	if err != nil {
 		m.parent.logMboxErr(m, err, "Expunge (externalMbox)")
-		return errors.Wrap(err, "Expunge")
+		return wrapErr(err, "Expunge")
 	}
 
 	if _, err := tx.Stmt(m.parent.deleteZeroRef).Exec(m.user.id); err != nil {
 		m.parent.logMboxErr(m, err, "Expunge (deleteZeroRef)")
-		return errors.Wrap(err, "Expunge")
+		return wrapErr(err, "Expunge")
 	}
 
 	if err := tx.Commit(); err != nil {
 		m.parent.logMboxErr(m, err, "Expunge (tx commit)")
-		return errors.Wrap(err, "Expunge")
+		return wrapErr(err, "Expunge")
 	}
 
 	if m.parent.updates != nil {
@@ -838,12 +839,12 @@ func (m *Mailbox) Expunge() error {
 
 func (m *Mailbox) expungeExternal(tx *sql.Tx) error {
 	if _, err := tx.Stmt(m.parent.decreaseRefForDeleted).Exec(m.user.id, m.id); err != nil {
-		return errors.Wrap(err, "Expunge (external)")
+		return wrapErr(err, "Expunge (external)")
 	}
 
 	rows, err := tx.Stmt(m.parent.zeroRef).Query(m.user.id, m.id)
 	if err != nil {
-		return errors.Wrap(err, "Expunge (external)")
+		return wrapErr(err, "Expunge (external)")
 	}
 	defer rows.Close()
 
@@ -851,14 +852,14 @@ func (m *Mailbox) expungeExternal(tx *sql.Tx) error {
 	for rows.Next() {
 		var extKey string
 		if err := rows.Scan(&extKey); err != nil {
-			return errors.Wrap(err, "Expunge (external)")
+			return wrapErr(err, "Expunge (external)")
 		}
 		keys = append(keys, extKey)
 
 	}
 
 	if err := m.parent.extStore.Delete(keys); err != nil {
-		return errors.Wrap(err, "Expunge (external)")
+		return wrapErr(err, "Expunge (external)")
 	}
 
 	return nil

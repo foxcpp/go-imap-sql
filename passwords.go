@@ -6,8 +6,9 @@ import (
 	"database/sql"
 	"encoding/hex"
 
+	"errors"
+
 	"github.com/emersion/go-imap/backend"
-	"github.com/pkg/errors"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/sha3"
 )
@@ -81,7 +82,7 @@ func (b *Backend) checkUser(username, password string) (uid uint64, inboxId uint
 func (b *Backend) hashCredentials(algo, password string) (digest, salt string, err error) {
 	saltBytes := make([]byte, 16)
 	if n, err := rand.Read(saltBytes); err != nil {
-		return "", "", errors.WithStack(err)
+		return "", "", err
 	} else if n != 16 {
 		return "", "", errors.New("failed to read enough entropy for salt from CSPRNG")
 	}

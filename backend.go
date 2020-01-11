@@ -3,14 +3,16 @@ package imapsql
 import (
 	"database/sql"
 	"encoding/hex"
+	"fmt"
 	mathrand "math/rand"
 	"strings"
 	"sync"
 	"time"
 
+	"errors"
+
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/backend"
-	"github.com/pkg/errors"
 )
 
 var (
@@ -273,7 +275,7 @@ func New(driver, dsn string, extStore ExternalStore, opts Opts) (*Backend, error
 	if b.Opts.CompressAlgo != "" {
 		impl, ok := compressionAlgos[b.Opts.CompressAlgo]
 		if !ok {
-			return nil, errors.Errorf("New: unknown compression algorithm: %s", b.Opts.CompressAlgo)
+			return nil, fmt.Errorf("New: unknown compression algorithm: %s", b.Opts.CompressAlgo)
 		}
 
 		b.compressAlgo = impl
@@ -316,37 +318,37 @@ func New(driver, dsn string, extStore ExternalStore, opts Opts) (*Backend, error
 
 	b.db.DB, err = sql.Open(driver, dsn)
 	if err != nil {
-		return nil, errors.Wrap(err, "NewBackend (open)")
+		return nil, wrapErr(err, "NewBackend (open)")
 	}
 	b.DB = b.db.DB
 
 	ver, err := b.schemaVersion()
 	if err != nil {
-		return nil, errors.Wrap(err, "NewBackend (schemaVersion)")
+		return nil, wrapErr(err, "NewBackend (schemaVersion)")
 	}
 	// Zero version indicates "empty database".
 	if ver > SchemaVersion {
-		return nil, errors.Errorf("incompatible database schema, too new (%d > %d)", ver, SchemaVersion)
+		return nil, fmt.Errorf("incompatible database schema, too new (%d > %d)", ver, SchemaVersion)
 	}
 	if ver < SchemaVersion && ver != 0 {
 		b.Opts.Log.Printf("Upgrading database schema (from %d to %d)", ver, SchemaVersion)
 		if err := b.upgradeSchema(ver); err != nil {
-			return nil, errors.Wrap(err, "NewBackend (schemaUpgrade)")
+			return nil, wrapErr(err, "NewBackend (schemaUpgrade)")
 		}
 	}
 	if err := b.setSchemaVersion(SchemaVersion); err != nil {
-		return nil, errors.Wrap(err, "NewBackend (setSchemaVersion)")
+		return nil, wrapErr(err, "NewBackend (setSchemaVersion)")
 	}
 
 	if err := b.configureEngine(); err != nil {
-		return nil, errors.Wrap(err, "NewBackend (configureEngine)")
+		return nil, wrapErr(err, "NewBackend (configureEngine)")
 	}
 
 	if err := b.initSchema(); err != nil {
-		return nil, errors.Wrap(err, "NewBackend (initSchema)")
+		return nil, wrapErr(err, "NewBackend (initSchema)")
 	}
 	if err := b.prepareStmts(); err != nil {
-		return nil, errors.Wrap(err, "NewBackend (prepareStmts)")
+		return nil, wrapErr(err, "NewBackend (prepareStmts)")
 	}
 
 	for _, item := range [...]imap.FetchItem{
@@ -354,10 +356,10 @@ func New(driver, dsn string, extStore ExternalStore, opts Opts) (*Backend, error
 		imap.FetchBodyStructure, "BODY[]", "BODY[HEADER.FIELDS (From To)]"} {
 
 		if _, err := b.getFetchStmt(true, []imap.FetchItem{item}); err != nil {
-			return nil, errors.Wrapf(err, "fetchStmt prime (%s, uid=true)", item)
+			return nil, wrapErrf(err, "fetchStmt prime (%s, uid=true)", item)
 		}
 		if _, err := b.getFetchStmt(false, []imap.FetchItem{item}); err != nil {
-			return nil, errors.Wrapf(err, "fetchStmt prime (%s, uid=false)", item)
+			return nil, wrapErrf(err, "fetchStmt prime (%s, uid=false)", item)
 		}
 	}
 
@@ -448,7 +450,7 @@ func (b *Backend) getUserCreds(tx *sql.Tx, username string) (id uint64, inboxId 
 
 	hashHexParts := strings.Split(passHashHex.String, ":")
 	if len(hashHexParts) != 2 {
-		return id, 0, "", nil, nil, errors.Errorf("malformed database column value for password, need algo:hexhash, got %s", passHashHex.String)
+		return id, 0, "", nil, nil, fmt.Errorf("malformed database column value for password, need algo:hexhash, got %s", passHashHex.String)
 	}
 
 	hashAlgo = hashHexParts[0]
@@ -492,7 +494,7 @@ func (b *Backend) createUser(tx *sql.Tx, username string, passHashAlgo string, p
 		passSalt.Valid = true
 		passHash.String, passSalt.String, err = b.hashCredentials(passHashAlgo, *password)
 		if err != nil {
-			return 0, 0, errors.Wrap(err, "CreateUser")
+			return 0, 0, wrapErr(err, "CreateUser")
 		}
 	}
 
@@ -501,7 +503,7 @@ func (b *Backend) createUser(tx *sql.Tx, username string, passHashAlgo string, p
 		var err error
 		tx, err = b.db.Begin(false)
 		if err != nil {
-			return 0, 0, errors.Wrap(err, "CreateUser")
+			return 0, 0, wrapErr(err, "CreateUser")
 		}
 		defer tx.Rollback()
 		shouldCommit = true
@@ -515,20 +517,20 @@ func (b *Backend) createUser(tx *sql.Tx, username string, passHashAlgo string, p
 	// TODO: Cut additional query here by using RETURNING on PostgreSQL.
 	uid, _, _, _, _, err = b.getUserCreds(tx, username)
 	if err != nil {
-		return 0, 0, errors.Wrap(err, "CreateUser")
+		return 0, 0, wrapErr(err, "CreateUser")
 	}
 
 	// Every new user needs to have at least one mailbox (INBOX).
 	if _, err := tx.Stmt(b.createMbox).Exec(uid, "INBOX", b.prng.Uint32(), nil); err != nil {
-		return 0, 0, errors.Wrap(err, "CreateUser")
+		return 0, 0, wrapErr(err, "CreateUser")
 	}
 
 	// Cut another query here by using RETURNING on PostgreSQL.
 	if err = tx.Stmt(b.mboxId).QueryRow(uid, "INBOX").Scan(&inboxId); err != nil {
-		return 0, 0, errors.Wrap(err, "CreateUser")
+		return 0, 0, wrapErr(err, "CreateUser")
 	}
 	if _, err = tx.Stmt(b.setInboxId).Exec(inboxId, uid); err != nil {
-		return 0, 0, errors.Wrap(err, "CreateUser")
+		return 0, 0, wrapErr(err, "CreateUser")
 	}
 
 	if shouldCommit {
@@ -546,7 +548,7 @@ func (b *Backend) DeleteUser(username string) error {
 
 	tx, err := b.db.BeginLevel(sql.LevelReadCommitted, false)
 	if err != nil {
-		return errors.Wrap(err, "DeleteUser")
+		return wrapErr(err, "DeleteUser")
 	}
 	defer tx.Rollback()
 
@@ -554,35 +556,35 @@ func (b *Backend) DeleteUser(username string) error {
 	var keys []string
 	rows, err := tx.Stmt(b.refUser).Query(username)
 	if err != nil {
-		return errors.Wrap(err, "DeleteUser")
+		return wrapErr(err, "DeleteUser")
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var key string
 		if err := rows.Scan(&key); err != nil {
-			return errors.Wrap(err, "DeleteUser")
+			return wrapErr(err, "DeleteUser")
 		}
 		keys = append(keys, key)
 	}
 
 	stats, err := tx.Stmt(b.delUser).Exec(username)
 	if err != nil {
-		return errors.Wrap(err, "DeleteUser")
+		return wrapErr(err, "DeleteUser")
 	}
 	affected, err := stats.RowsAffected()
 	if err != nil {
-		return errors.Wrap(err, "DeleteUser")
+		return wrapErr(err, "DeleteUser")
 	}
 	if affected == 0 {
 		return ErrUserDoesntExists
 	}
 
 	if err := b.extStore.Delete(keys); err != nil {
-		return errors.Wrap(err, "DeleteUser")
+		return wrapErr(err, "DeleteUser")
 	}
 
 	if _, err := tx.Stmt(b.deleteUserRef).Exec(username); err != nil {
-		return errors.Wrap(err, "DeleteUser")
+		return wrapErr(err, "DeleteUser")
 	}
 
 	return tx.Commit()
@@ -595,11 +597,11 @@ func (b *Backend) ResetPassword(username string) error {
 
 	stats, err := b.setUserPass.Exec(nil, nil, username)
 	if err != nil {
-		return errors.Wrap(err, "ResetPassword")
+		return wrapErr(err, "ResetPassword")
 	}
 	affected, err := stats.RowsAffected()
 	if err != nil {
-		return errors.Wrap(err, "ResetPassword")
+		return wrapErr(err, "ResetPassword")
 	}
 	if affected == 0 {
 		return ErrUserDoesntExists
@@ -631,11 +633,11 @@ func (b *Backend) SetUserPasswordWithHash(hashAlgo, username, newPassword string
 
 	stats, err := b.setUserPass.Exec(digest, salt, username)
 	if err != nil {
-		return errors.Wrap(err, "SetUserPassword")
+		return wrapErr(err, "SetUserPassword")
 	}
 	affected, err := stats.RowsAffected()
 	if err != nil {
-		return errors.Wrap(err, "SetUserPassword")
+		return wrapErr(err, "SetUserPassword")
 	}
 	if affected == 0 {
 		return ErrUserDoesntExists
@@ -650,18 +652,18 @@ func (b *Backend) ListUsers() ([]string, error) {
 	var res []string
 	rows, err := b.listUsers.Query()
 	if err != nil {
-		return res, errors.Wrap(err, "ListUsers")
+		return res, wrapErr(err, "ListUsers")
 	}
 	for rows.Next() {
 		var id uint64
 		var name string
 		if err := rows.Scan(&id, &name); err != nil {
-			return res, errors.Wrap(err, "ListUsers")
+			return res, wrapErr(err, "ListUsers")
 		}
 		res = append(res, name)
 	}
 	if err := rows.Err(); err != nil {
-		return res, errors.Wrap(err, "ListUsers")
+		return res, wrapErr(err, "ListUsers")
 	}
 	return res, nil
 }

@@ -4,9 +4,10 @@ import (
 	"database/sql"
 	"strings"
 
-	"github.com/emersion/go-imap-specialuse"
+	"errors"
+
+	specialuse "github.com/emersion/go-imap-specialuse"
 	"github.com/emersion/go-imap/backend"
-	"github.com/pkg/errors"
 )
 
 const MailboxPathSep = "."
@@ -36,7 +37,7 @@ func (u *User) ListMailboxes(subscribed bool) ([]backend.Mailbox, error) {
 	}
 	if err != nil {
 		u.parent.logUserErr(u, err, "ListMailboxes", subscribed)
-		return nil, errors.Wrap(err, "ListMailboxes")
+		return nil, wrapErr(err, "ListMailboxes")
 	}
 	defer rows.Close()
 
@@ -45,14 +46,14 @@ func (u *User) ListMailboxes(subscribed bool) ([]backend.Mailbox, error) {
 		id, name := uint64(0), ""
 		if err := rows.Scan(&id, &name); err != nil {
 			u.parent.logUserErr(u, err, "ListMailboxes", subscribed)
-			return nil, errors.Wrap(err, "ListMailboxes")
+			return nil, wrapErr(err, "ListMailboxes")
 		}
 
 		res = append(res, &Mailbox{user: *u, id: id, name: name, parent: u.parent})
 	}
 	if err := rows.Err(); err != nil {
 		u.parent.logUserErr(u, err, "ListMailboxes", subscribed)
-		return res, errors.Wrap(rows.Err(), "ListMailboxes")
+		return res, wrapErr(rows.Err(), "ListMailboxes")
 	}
 	return res, nil
 }
@@ -69,7 +70,7 @@ func (u *User) GetMailbox(name string) (backend.Mailbox, error) {
 			return nil, backend.ErrNoSuchMailbox
 		}
 		u.parent.logUserErr(u, err, "GetMailbox", name)
-		return nil, errors.Wrapf(err, "GetMailbox %s", name)
+		return nil, wrapErrf(err, "GetMailbox %s", name)
 	}
 
 	return &Mailbox{user: *u, id: id, name: name, parent: u.parent}, nil
@@ -100,13 +101,13 @@ func (u *User) CreateMailbox(name string) error {
 	tx, err := u.parent.db.Begin(false)
 	if err != nil {
 		u.parent.logUserErr(u, err, "CreateMailbox (tx start)", name)
-		return errors.Wrapf(err, "CreateMailbox %s", name)
+		return wrapErrf(err, "CreateMailbox %s", name)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
 	if err := u.createParentDirs(tx, name); err != nil {
 		u.parent.logUserErr(u, err, "CreateMailbox (parents)", name)
-		return errors.Wrapf(err, "CreateMailbox (parents) %s", name)
+		return wrapErrf(err, "CreateMailbox (parents) %s", name)
 	}
 
 	if _, err := tx.Stmt(u.parent.createMbox).Exec(u.id, name, u.parent.prng.Uint32(), nil); err != nil {
@@ -114,12 +115,12 @@ func (u *User) CreateMailbox(name string) error {
 			return backend.ErrMailboxAlreadyExists
 		}
 		u.parent.logUserErr(u, err, "CreateMailbox", name)
-		return errors.Wrapf(err, "CreateMailbox %s", name)
+		return wrapErrf(err, "CreateMailbox %s", name)
 	}
 
 	err = tx.Commit()
 	u.parent.logUserErr(u, err, "CreateMailbox (tx commit)", name)
-	return errors.Wrapf(err, "CreateMailbox (tx commit) %s", name)
+	return wrapErrf(err, "CreateMailbox (tx commit) %s", name)
 }
 
 var ErrUnsupportedSpecialAttr = errors.New("imap: special attribute is not supported")
@@ -136,22 +137,22 @@ func (u *User) CreateMailboxSpecial(name, specialUseAttr string) error {
 
 	tx, err := u.parent.db.Begin(false)
 	if err != nil {
-		return errors.Wrapf(err, "CreateMailboxSpecial %s", name)
+		return wrapErrf(err, "CreateMailboxSpecial %s", name)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
 	if err := u.createParentDirs(tx, name); err != nil {
-		return errors.Wrapf(err, "CreateMailboxSpecial (parents) %s", name)
+		return wrapErrf(err, "CreateMailboxSpecial (parents) %s", name)
 	}
 
 	if _, err := tx.Stmt(u.parent.createMbox).Exec(u.id, name, u.parent.prng.Uint32(), specialUseAttr); err != nil {
 		if isForeignKeyErr(err) {
 			return backend.ErrMailboxAlreadyExists
 		}
-		return errors.Wrapf(err, "CreateMailboxSpecial %s", name)
+		return wrapErrf(err, "CreateMailboxSpecial %s", name)
 	}
 
-	return errors.Wrapf(tx.Commit(), "CreateMailbox (tx commit) %s", name)
+	return wrapErrf(tx.Commit(), "CreateMailbox (tx commit) %s", name)
 }
 
 func (u *User) DeleteMailbox(name string) error {
@@ -162,19 +163,19 @@ func (u *User) DeleteMailbox(name string) error {
 	tx, err := u.parent.db.BeginLevel(sql.LevelRepeatableRead, false)
 	if err != nil {
 		u.parent.logUserErr(u, err, "DeleteMailbox (tx start)", name)
-		return errors.Wrapf(err, "DeleteMailbox %s", name)
+		return wrapErrf(err, "DeleteMailbox %s", name)
 	}
 	defer tx.Rollback()
 
 	if _, err := tx.Stmt(u.parent.decreaseRefForMbox).Exec(u.id, name); err != nil {
 		u.parent.logUserErr(u, err, "DeleteMailbox (decrease ref)", name)
-		return errors.Wrapf(err, "DeleteMailbox %s", name)
+		return wrapErrf(err, "DeleteMailbox %s", name)
 	}
 
 	rows, err := tx.Stmt(u.parent.zeroRefUser).Query(u.id)
 	if err != nil {
 		u.parent.logUserErr(u, err, "DeleteMailbox (zero ref user)", name)
-		return errors.Wrapf(err, "DeleteMailbox %s", name)
+		return wrapErrf(err, "DeleteMailbox %s", name)
 	}
 	defer rows.Close()
 
@@ -183,7 +184,7 @@ func (u *User) DeleteMailbox(name string) error {
 		var extKey string
 		if err := rows.Scan(&extKey); err != nil {
 			u.parent.logUserErr(u, err, "DeleteMailbox (extkeys scan)", name)
-			return errors.Wrapf(err, "DeleteMailbox %s", name)
+			return wrapErrf(err, "DeleteMailbox %s", name)
 		}
 		keys = append(keys, extKey)
 
@@ -191,19 +192,19 @@ func (u *User) DeleteMailbox(name string) error {
 
 	if err := u.parent.extStore.Delete(keys); err != nil {
 		u.parent.logUserErr(u, err, "DeleteMailbox (extstore delete)", name)
-		return errors.Wrapf(err, "DeleteMailbox %s", name)
+		return wrapErrf(err, "DeleteMailbox %s", name)
 	}
 
 	// TODO: Grab mboxId along the way on PostgreSQL?
 	stats, err := tx.Stmt(u.parent.deleteMbox).Exec(u.id, name)
 	if err != nil {
 		u.parent.logUserErr(u, err, "DeleteMailbox (delete mbox)", name)
-		return errors.Wrapf(err, "DeleteMailbox %s", name)
+		return wrapErrf(err, "DeleteMailbox %s", name)
 	}
 	affected, err := stats.RowsAffected()
 	if err != nil {
 		u.parent.logUserErr(u, err, "DeleteMailbox (stats)", name)
-		return errors.Wrapf(err, "DeleteMailbox %s", name)
+		return wrapErrf(err, "DeleteMailbox %s", name)
 	}
 	if affected == 0 {
 		return backend.ErrNoSuchMailbox
@@ -211,7 +212,7 @@ func (u *User) DeleteMailbox(name string) error {
 
 	if _, err := tx.Stmt(u.parent.deleteZeroRef).Exec(u.id); err != nil {
 		u.parent.logUserErr(u, err, "DeleteMailbox (delete zero ref)", name)
-		return errors.Wrapf(err, "DeleteMailbox %s", name)
+		return wrapErrf(err, "DeleteMailbox %s", name)
 	}
 
 	err = tx.Commit()
@@ -223,18 +224,18 @@ func (u *User) RenameMailbox(existingName, newName string) error {
 	tx, err := u.parent.db.Begin(false)
 	if err != nil {
 		u.parent.logUserErr(u, err, "RenameMailbox (tx start)", existingName, newName)
-		return errors.Wrapf(err, "RenameMailbox %s, %s", existingName, newName)
+		return wrapErrf(err, "RenameMailbox %s, %s", existingName, newName)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
 	if err := u.createParentDirs(tx, newName); err != nil {
 		u.parent.logUserErr(u, err, "RenameMailbox (create parents)", existingName, newName)
-		return errors.Wrapf(err, "RenameMailbox %s, %s", existingName, newName)
+		return wrapErrf(err, "RenameMailbox %s, %s", existingName, newName)
 	}
 
 	if _, err := tx.Stmt(u.parent.renameMbox).Exec(newName, u.id, existingName); err != nil {
 		u.parent.logUserErr(u, err, "RenameMailbox", existingName, newName)
-		return errors.Wrapf(err, "RenameMailbox %s, %s", existingName, newName)
+		return wrapErrf(err, "RenameMailbox %s, %s", existingName, newName)
 	}
 
 	// TODO: Check if it possible to merge these queries.
@@ -243,30 +244,30 @@ func (u *User) RenameMailbox(existingName, newName string) error {
 	existingPrefixLen := len(existingName + MailboxPathSep)
 	if _, err := tx.Stmt(u.parent.renameMboxChilds).Exec(newPrefix, existingPrefixLen, existingPattern, u.id); err != nil {
 		u.parent.logUserErr(u, err, "RenameMailbox (childs)", existingName, newName)
-		return errors.Wrapf(err, "RenameMailbox (childs) %s, %s", existingName, newName)
+		return wrapErrf(err, "RenameMailbox (childs) %s, %s", existingName, newName)
 	}
 
 	if strings.EqualFold(existingName, "INBOX") {
 		if _, err := tx.Stmt(u.parent.createMbox).Exec(u.id, existingName, u.parent.prng.Uint32(), nil); err != nil {
 			u.parent.logUserErr(u, err, "RenameMailbox (create inbox)", existingName, newName)
-			return errors.Wrapf(err, "RenameMailbox %s, %s", existingName, newName)
+			return wrapErrf(err, "RenameMailbox %s, %s", existingName, newName)
 		}
 
 		// TODO: Cut a query here by using RETURNING on PostgreSQL
 		var inboxId uint64
 		if err = tx.Stmt(u.parent.mboxId).QueryRow(u.id, "INBOX").Scan(&inboxId); err != nil {
 			u.parent.logUserErr(u, err, "RenameMailbox (query mboxid id)", existingName, newName)
-			return errors.Wrapf(err, "RenameMailbox %s, %s", existingName, newName)
+			return wrapErrf(err, "RenameMailbox %s, %s", existingName, newName)
 		}
 		if _, err := tx.Stmt(u.parent.setInboxId).Exec(inboxId, u.id); err != nil {
 			u.parent.logUserErr(u, err, "RenameMailbox (set inbox id)", existingName, newName)
-			return errors.Wrapf(err, "RenameMailbox %s, %s", existingName, newName)
+			return wrapErrf(err, "RenameMailbox %s, %s", existingName, newName)
 		}
 	}
 
 	err = tx.Commit()
 	u.parent.logUserErr(u, err, "RenameMailbox (tx commit)", existingName, newName)
-	return errors.Wrapf(err, "RenameMailbox %s, %s", existingName, newName)
+	return wrapErrf(err, "RenameMailbox %s, %s", existingName, newName)
 }
 
 func (u *User) Logout() error {

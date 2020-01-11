@@ -12,11 +12,11 @@ require (
 	github.com/frankban/quicktest v1.5.0 // indirect
 	github.com/go-sql-driver/mysql v1.4.1
 	github.com/klauspost/compress v1.8.6
+	github.com/klauspost/cpuid v1.2.2 // indirect
 	github.com/lib/pq v1.1.1
 	github.com/mailru/easyjson v0.7.0
 	github.com/mattn/go-sqlite3 v1.10.0
 	github.com/pierrec/lz4 v2.3.0+incompatible
-	github.com/pkg/errors v0.8.1
 	github.com/stretchr/testify v1.3.0 // indirect
 	github.com/urfave/cli v1.20.0
 	golang.org/x/crypto v0.0.0-20190605123033-f99c8df09eb5

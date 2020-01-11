@@ -3,8 +3,6 @@ package imapsql
 import (
 	"strconv"
 	"strings"
-
-	"github.com/pkg/errors"
 )
 
 func (b *Backend) addSqlite3Params(dsn string) string {
@@ -91,7 +89,7 @@ func (b *Backend) initSchema() error {
             inboxId BIGINT DEFAULT 0
 		)`)
 	if err != nil {
-		return errors.Wrap(err, "create table users")
+		return wrapErr(err, "create table users")
 	}
 	_, err = b.db.Exec(`
 		CREATE TABLE IF NOT EXISTS mboxes (
@@ -110,7 +108,7 @@ func (b *Backend) initSchema() error {
 			UNIQUE(uid, name)
 		)`)
 	if err != nil {
-		return errors.Wrap(err, "create table mboxes")
+		return wrapErr(err, "create table mboxes")
 	}
 	_, err = b.db.Exec(`
 		CREATE TABLE IF NOT EXISTS extKeys (
@@ -124,14 +122,14 @@ func (b *Backend) initSchema() error {
 			refs INTEGER NOT NULL DEFAULT 1
 		)`)
 	if err != nil {
-		return errors.Wrap(err, "create table extkeys")
+		return wrapErr(err, "create table extkeys")
 	}
 
 	_, err = b.db.Exec(`
         CREATE INDEX IF NOT EXISTS extKeys_uid_id
         ON extKeys(uid, id)`)
 	if err != nil {
-		return errors.Wrap(err, "create index extKeys_uid_id")
+		return wrapErr(err, "create index extKeys_uid_id")
 	}
 
 	_, err = b.db.Exec(`
@@ -153,7 +151,7 @@ func (b *Backend) initSchema() error {
 			PRIMARY KEY(mboxId, msgId)
 		)`)
 	if err != nil {
-		return errors.Wrap(err, "create table msgs")
+		return wrapErr(err, "create table msgs")
 	}
 	_, err = b.db.Exec(`
 		CREATE TABLE IF NOT EXISTS flags (
@@ -165,7 +163,7 @@ func (b *Backend) initSchema() error {
 			UNIQUE (mboxId, msgId, flag)
 		)`)
 	if err != nil {
-		return errors.Wrap(err, "create table flags")
+		return wrapErr(err, "create table flags")
 	}
 
 	_, err = b.db.Exec(`
@@ -183,70 +181,70 @@ func (b *Backend) prepareStmts() error {
 		FROM users
 		WHERE username = ?`)
 	if err != nil {
-		return errors.Wrap(err, "userCreds prep")
+		return wrapErr(err, "userCreds prep")
 	}
 	b.listUsers, err = b.db.Prepare(`
 		SELECT id, username
 		FROM users`)
 	if err != nil {
-		return errors.Wrap(err, "listUsers prep")
+		return wrapErr(err, "listUsers prep")
 	}
 	b.addUser, err = b.db.Prepare(`
 		INSERT INTO users(username, password, password_salt)
 		VALUES (?, ?, ?)`)
 	if err != nil {
-		return errors.Wrap(err, "addUser prep")
+		return wrapErr(err, "addUser prep")
 	}
 	b.delUser, err = b.db.Prepare(`
 		DELETE FROM users
 		WHERE username = ?`)
 	if err != nil {
-		return errors.Wrap(err, "addUser prep")
+		return wrapErr(err, "addUser prep")
 	}
 	b.setUserPass, err = b.db.Prepare(`
 		UPDATE users
 		SET password = ?, password_salt = ?
 		WHERE username = ?`)
 	if err != nil {
-		return errors.Wrap(err, "addUser prep")
+		return wrapErr(err, "addUser prep")
 	}
 	b.listMboxes, err = b.db.Prepare(`
 		SELECT id, name
 		FROM mboxes
 		WHERE uid = ?`)
 	if err != nil {
-		return errors.Wrap(err, "listMboxes prep")
+		return wrapErr(err, "listMboxes prep")
 	}
 	b.listSubbedMboxes, err = b.db.Prepare(`
 		SELECT id, name
 		FROM mboxes
 		WHERE uid = ? AND sub = 1`)
 	if err != nil {
-		return errors.Wrap(err, "listSubbedMboxes prep")
+		return wrapErr(err, "listSubbedMboxes prep")
 	}
 	b.createMbox, err = b.db.Prepare(`
 		INSERT INTO mboxes(uid, name, uidvalidity, specialuse)
 		VALUES (?, ?, ?, ?)`)
 	if err != nil {
-		return errors.Wrap(err, "createMbox prep")
+		return wrapErr(err, "createMbox prep")
 	}
 	b.createMboxExistsOk, err = b.db.Prepare(`
 		INSERT INTO mboxes(uid, name, uidvalidity)
 		VALUES (?, ?, ?) ON CONFLICT DO NOTHING`)
 	if err != nil {
-		return errors.Wrap(err, "createMboxExistsOk prep")
+		return wrapErr(err, "createMboxExistsOk prep")
 	}
 	b.deleteMbox, err = b.db.Prepare(`
 		DELETE FROM mboxes
 		WHERE uid = ? AND name = ?`)
 	if err != nil {
-		return errors.Wrap(err, "deleteMbox prep")
+		return wrapErr(err, "deleteMbox prep")
 	}
 	b.renameMbox, err = b.db.Prepare(`
 		UPDATE mboxes SET name = ?
 		WHERE uid = ? AND name = ?`)
 	if err != nil {
-		return errors.Wrap(err, "renameMbox prep")
+		return wrapErr(err, "renameMbox prep")
 	}
 	if b.db.driver == "mysql" {
 		b.renameMboxChilds, err = b.db.Prepare(`
@@ -258,26 +256,26 @@ func (b *Backend) prepareStmts() error {
 		WHERE name LIKE ? AND uid = ?`)
 	}
 	if err != nil {
-		return errors.Wrap(err, "renameMboxChilds prep")
+		return wrapErr(err, "renameMboxChilds prep")
 	}
 	b.getMboxAttrs, err = b.db.Prepare(`
 		SELECT mark, specialuse FROM mboxes
 		WHERE uid = ? AND name = ?`)
 	if err != nil {
-		return errors.Wrap(err, "getMboxAttrs prep")
+		return wrapErr(err, "getMboxAttrs prep")
 	}
 	b.setSubbed, err = b.db.Prepare(`
 		UPDATE mboxes SET sub = ?
 		WHERE id = ?`)
 	if err != nil {
-		return errors.Wrap(err, "setSubbed prep")
+		return wrapErr(err, "setSubbed prep")
 	}
 	b.hasChildren, err = b.db.Prepare(`
 		SELECT count(*)
 		FROM mboxes
 		WHERE name LIKE ? AND uid = ?`)
 	if err != nil {
-		return errors.Wrap(err, "hasChildren prep")
+		return wrapErr(err, "hasChildren prep")
 	}
 	b.uidNextLocked, err = b.db.Prepare(`
 		SELECT uidnext
@@ -285,14 +283,14 @@ func (b *Backend) prepareStmts() error {
 		WHERE id = ?
 		FOR UPDATE`)
 	if err != nil {
-		return errors.Wrap(err, "uidNext prep")
+		return wrapErr(err, "uidNext prep")
 	}
 	b.uidNext, err = b.db.Prepare(`
 		SELECT uidnext
 		FROM mboxes
 		WHERE id = ?`)
 	if err != nil {
-		return errors.Wrap(err, "uidNext prep")
+		return wrapErr(err, "uidNext prep")
 	}
 	if b.db.driver == "postgres" {
 		b.increaseMsgCount, err = b.db.Prepare(`
@@ -309,28 +307,28 @@ func (b *Backend) prepareStmts() error {
 		    WHERE id = ?`)
 	}
 	if err != nil {
-		return errors.Wrap(err, "increaseMsgCount prep")
+		return wrapErr(err, "increaseMsgCount prep")
 	}
 	b.decreaseMsgCount, err = b.db.Prepare(`
 		UPDATE mboxes
 		SET msgsCount = msgsCount - ?
 		WHERE id = ?`)
 	if err != nil {
-		return errors.Wrap(err, "decreaseMsgCount prep")
+		return wrapErr(err, "decreaseMsgCount prep")
 	}
 	b.uidValidity, err = b.db.Prepare(`
 		SELECT uidvalidity
 		FROM mboxes
 		WHERE id = ?`)
 	if err != nil {
-		return errors.Wrap(err, "uidvalidity prep")
+		return wrapErr(err, "uidvalidity prep")
 	}
 	b.msgsCount, err = b.db.Prepare(`
 		SELECT msgsCount
 		FROM mboxes
 		WHERE id = ?`)
 	if err != nil {
-		return errors.Wrap(err, "msgsCount prep")
+		return wrapErr(err, "msgsCount prep")
 	}
 	b.firstUnseenSeqNum, err = b.db.Prepare(`
         SELECT rownr
@@ -348,7 +346,7 @@ func (b *Backend) prepareStmts() error {
         )
         LIMIT 1`)
 	if err != nil {
-		return errors.Wrap(err, "firstUnseenSeqNum prep")
+		return wrapErr(err, "firstUnseenSeqNum prep")
 	}
 	b.deletedSeqnums, err = b.db.Prepare(`
 		SELECT seqnum
@@ -365,7 +363,7 @@ func (b *Backend) prepareStmts() error {
 		)
 		ORDER BY seqnum DESC`)
 	if err != nil {
-		return errors.Wrap(err, "deletedSeqnums prep")
+		return wrapErr(err, "deletedSeqnums prep")
 	}
 	b.expungeMbox, err = b.db.Prepare(`
 		DELETE FROM msgs
@@ -376,20 +374,20 @@ func (b *Backend) prepareStmts() error {
 			AND flag = '\Deleted'
 		)`)
 	if err != nil {
-		return errors.Wrap(err, "expungeMbox prep")
+		return wrapErr(err, "expungeMbox prep")
 	}
 	b.mboxId, err = b.db.Prepare(`
 		SELECT id FROM mboxes
 		WHERE uid = ?
 		AND name = ?`)
 	if err != nil {
-		return errors.Wrap(err, "mboxId prep")
+		return wrapErr(err, "mboxId prep")
 	}
 	b.addMsg, err = b.db.Prepare(`
 		INSERT INTO msgs(mboxId, msgId, date, bodyLen, bodyStructure, cachedHeader, extBodyKey, seen, compressAlgo)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
-		return errors.Wrap(err, "addMsg prep")
+		return wrapErr(err, "addMsg prep")
 	}
 	b.copyMsgsUid, err = b.db.Prepare(`
 		INSERT INTO msgs
@@ -401,7 +399,7 @@ func (b *Backend) prepareStmts() error {
 		FROM msgs
 		WHERE mboxId = ? AND msgId BETWEEN ? AND ?`)
 	if err != nil {
-		return errors.Wrap(err, "copyMsgsUid prep")
+		return wrapErr(err, "copyMsgsUid prep")
 	}
 	b.copyMsgFlagsUid, err = b.db.Prepare(`
 		INSERT INTO flags
@@ -419,7 +417,7 @@ func (b *Backend) prepareStmts() error {
 		) map ON map.msgId = flags.msgId
 		AND map.mboxId = flags.mboxId`)
 	if err != nil {
-		return errors.Wrap(err, "copyMsgFlagsUid prep")
+		return wrapErr(err, "copyMsgFlagsUid prep")
 	}
 	b.copyMsgsSeq, err = b.db.Prepare(`
 		INSERT INTO msgs
@@ -436,7 +434,7 @@ func (b *Backend) prepareStmts() error {
 			LIMIT ? OFFSET ?
 		) subset`)
 	if err != nil {
-		return errors.Wrap(err, "copyMsgsSeq prep")
+		return wrapErr(err, "copyMsgsSeq prep")
 	}
 	b.copyMsgFlagsSeq, err = b.db.Prepare(`
 		INSERT INTO flags
@@ -458,7 +456,7 @@ func (b *Backend) prepareStmts() error {
 		) map ON map.msgId = flags.msgId
 		AND map.mboxId = flags.mboxId`)
 	if err != nil {
-		return errors.Wrap(err, "copyMsgFlagsSeq prep")
+		return wrapErr(err, "copyMsgFlagsSeq prep")
 	}
 	b.massClearFlagsUid, err = b.db.Prepare(`
 		DELETE FROM flags
@@ -466,7 +464,7 @@ func (b *Backend) prepareStmts() error {
 		AND msgId BETWEEN ? AND ?
 		AND flag != '\Recent'`)
 	if err != nil {
-		return errors.Wrap(err, "massClearFlagsUid prep")
+		return wrapErr(err, "massClearFlagsUid prep")
 	}
 	b.massClearFlagsSeq, err = b.db.Prepare(`
 		DELETE FROM flags
@@ -482,7 +480,7 @@ func (b *Backend) prepareStmts() error {
 		)
 		AND flag != '\Recent'`)
 	if err != nil {
-		return errors.Wrap(err, "massClearFlagsSeq prep")
+		return wrapErr(err, "massClearFlagsSeq prep")
 	}
 
 	b.addRecentToLast, err = b.db.Prepare(`
@@ -492,7 +490,7 @@ func (b *Backend) prepareStmts() error {
 		ON CONFLICT DO NOTHING
 		`)
 	if err != nil {
-		return errors.Wrap(err, "addRecenttoLast prep")
+		return wrapErr(err, "addRecenttoLast prep")
 	}
 
 	b.markUid, err = b.db.Prepare(`
@@ -501,7 +499,7 @@ func (b *Backend) prepareStmts() error {
 		WHERE mboxId = ?
 		AND msgId BETWEEN ? AND ?`)
 	if err != nil {
-		return errors.Wrap(err, "delMsgsUid prep")
+		return wrapErr(err, "delMsgsUid prep")
 	}
 	b.markSeq, err = b.db.Prepare(`
 		UPDATE msgs
@@ -517,13 +515,13 @@ func (b *Backend) prepareStmts() error {
 			WHERE seqnum BETWEEN ? AND ?
 		)`)
 	if err != nil {
-		return errors.Wrap(err, "markSeq prep")
+		return wrapErr(err, "markSeq prep")
 	}
 	b.delMarked, err = b.db.Prepare(`
 		DELETE FROM msgs
 		WHERE mark = 1`)
 	if err != nil {
-		return errors.Wrap(err, "delMarked prep")
+		return wrapErr(err, "delMarked prep")
 	}
 	b.markedSeqnums, err = b.db.Prepare(`
 		SELECT seqnum, extBodyKey
@@ -535,7 +533,7 @@ func (b *Backend) prepareStmts() error {
 		WHERE mark = 1
 		ORDER BY seqnum DESC`)
 	if err != nil {
-		return errors.Wrap(err, "markedSeqnums prep")
+		return wrapErr(err, "markedSeqnums prep")
 	}
 
 	b.setUserMsgSizeLimit, err = b.db.Prepare(`
@@ -543,28 +541,28 @@ func (b *Backend) prepareStmts() error {
 		SET msgsizelimit = ?
 		WHERE id = ?`)
 	if err != nil {
-		return errors.Wrap(err, "setUserMsgSizeLimit prep")
+		return wrapErr(err, "setUserMsgSizeLimit prep")
 	}
 	b.userMsgSizeLimit, err = b.db.Prepare(`
 		SELECT msgsizelimit
 		FROM users
 		WHERE id = ?`)
 	if err != nil {
-		return errors.Wrap(err, "userMsgSizeLimit prep")
+		return wrapErr(err, "userMsgSizeLimit prep")
 	}
 	b.setMboxMsgSizeLimit, err = b.db.Prepare(`
 		UPDATE mboxes
 		SET msgsizelimit = ?
 		WHERE id = ?`)
 	if err != nil {
-		return errors.Wrap(err, "setUserMsgSizeLimit prep")
+		return wrapErr(err, "setUserMsgSizeLimit prep")
 	}
 	b.mboxMsgSizeLimit, err = b.db.Prepare(`
 		SELECT msgsizelimit
 		FROM mboxes
 		WHERE id = ?`)
 	if err != nil {
-		return errors.Wrap(err, "userMsgSizeLimit prep")
+		return wrapErr(err, "userMsgSizeLimit prep")
 	}
 
 	b.msgFlagsUid, err = b.db.Prepare(`
@@ -582,7 +580,7 @@ func (b *Backend) prepareStmts() error {
 		GROUP BY msgs.mboxId, msgs.msgId, seqnum
 		ORDER BY seqnum DESC`)
 	if err != nil {
-		return errors.Wrap(err, "msgFlagsUid prep")
+		return wrapErr(err, "msgFlagsUid prep")
 	}
 	b.msgFlagsSeq, err = b.db.Prepare(`
 		SELECT seqnum, msgs.msgId, ` + b.db.aggrValuesSet("flag", "{") + `
@@ -599,7 +597,7 @@ func (b *Backend) prepareStmts() error {
 		GROUP BY msgs.mboxId, msgs.msgId, seqnum
 		ORDER BY seqnum DESC`)
 	if err != nil {
-		return errors.Wrap(err, "msgFlagsSeq prep")
+		return wrapErr(err, "msgFlagsSeq prep")
 	}
 
 	b.usedFlags, err = b.db.Prepare(`
@@ -607,14 +605,14 @@ func (b *Backend) prepareStmts() error {
 		FROM flags
 		WHERE mboxId = ?`)
 	if err != nil {
-		return errors.Wrap(err, "usedFlags prep")
+		return wrapErr(err, "usedFlags prep")
 	}
 	b.listMsgUids, err = b.db.Prepare(`
         SELECT msgId
         FROM msgs
         WHERE mboxId = ?`)
 	if err != nil {
-		return errors.Wrap(err, "listMsgUids prep")
+		return wrapErr(err, "listMsgUids prep")
 	}
 
 	b.searchFetch, err = b.db.Prepare(`
@@ -632,7 +630,7 @@ func (b *Backend) prepareStmts() error {
 		GROUP BY msgs.mboxId, msgs.msgId, seqnum
 		ORDER BY seqnum DESC`)
 	if err != nil {
-		return errors.Wrap(err, "searchFetch prep")
+		return wrapErr(err, "searchFetch prep")
 	}
 
 	b.searchFetchNoSeq, err = b.db.Prepare(`
@@ -644,14 +642,14 @@ func (b *Backend) prepareStmts() error {
 		GROUP BY msgs.mboxId, msgs.msgId, seqnum
 		ORDER BY seqnum DESC`)
 	if err != nil {
-		return errors.Wrap(err, "searchFetchNoSeq prep")
+		return wrapErr(err, "searchFetchNoSeq prep")
 	}
 
 	b.addExtKey, err = b.db.Prepare(`
 		INSERT INTO extKeys(id, uid, refs)
 		VALUES (?, ?, ?)`)
 	if err != nil {
-		return errors.Wrap(err, "addExtKey prep")
+		return wrapErr(err, "addExtKey prep")
 	}
 	b.decreaseRefForMarked, err = b.db.Prepare(`
 		UPDATE extKeys
@@ -663,7 +661,7 @@ func (b *Backend) prepareStmts() error {
 			WHERE mboxId = ? AND mark = 1 AND extBodyKey IS NOT NULL
 		)`)
 	if err != nil {
-		return errors.Wrap(err, "decreaseRefForMarked prep")
+		return wrapErr(err, "decreaseRefForMarked prep")
 	}
 	b.decreaseRefForDeleted, err = b.db.Prepare(`
 		UPDATE extKeys
@@ -679,7 +677,7 @@ func (b *Backend) prepareStmts() error {
 			WHERE msgs.mboxId = ?
 		)`)
 	if err != nil {
-		return errors.Wrap(err, "decreaseRefForDeleted prep")
+		return wrapErr(err, "decreaseRefForDeleted prep")
 	}
 	b.incrementRefUid, err = b.db.Prepare(`
 		UPDATE extKeys
@@ -692,7 +690,7 @@ func (b *Backend) prepareStmts() error {
 			ORDER BY msgId DESC
 		)`)
 	if err != nil {
-		return errors.Wrap(err, "incrementRefUid prep")
+		return wrapErr(err, "incrementRefUid prep")
 	}
 	b.incrementRefSeq, err = b.db.Prepare(`
 		UPDATE extKeys
@@ -711,7 +709,7 @@ func (b *Backend) prepareStmts() error {
 			ORDER BY msgs.msgId DESC
 		)`)
 	if err != nil {
-		return errors.Wrap(err, "incrementRefSeq prep")
+		return wrapErr(err, "incrementRefSeq prep")
 	}
 	b.zeroRef, err = b.db.Prepare(`
 		SELECT extBodyKey
@@ -723,7 +721,7 @@ func (b *Backend) prepareStmts() error {
 		AND mboxId = ?
 		AND refs = 0`)
 	if err != nil {
-		return errors.Wrap(err, "zeroRef prep")
+		return wrapErr(err, "zeroRef prep")
 	}
 	b.zeroRefUser, err = b.db.Prepare(`
 		SELECT id
@@ -731,14 +729,14 @@ func (b *Backend) prepareStmts() error {
 		WHERE uid = ?
 		AND refs = 0`)
 	if err != nil {
-		return errors.Wrap(err, "zeroRefUser prep")
+		return wrapErr(err, "zeroRefUser prep")
 	}
 	b.refUser, err = b.db.Prepare(`
 		SELECT id
 		FROM extKeys
 		WHERE uid = (SELECT id FROM users WHERE username = ?)`)
 	if err != nil {
-		return errors.Wrap(err, "refUser prep")
+		return wrapErr(err, "refUser prep")
 	}
 	b.deleteZeroRef, err = b.db.Prepare(`
 		DELETE FROM extKeys
@@ -747,7 +745,7 @@ func (b *Backend) prepareStmts() error {
 		WHERE uid = ?
 		AND refs = 0`)
 	if err != nil {
-		return errors.Wrap(err, "deleteZeroRef prep")
+		return wrapErr(err, "deleteZeroRef prep")
 	}
 	b.deleteUserRef, err = b.db.Prepare(`
 		DELETE FROM extKeys
@@ -755,7 +753,7 @@ func (b *Backend) prepareStmts() error {
 		-- when we have many users.
 		WHERE uid = (SELECT id FROM users WHERE username = ?)`)
 	if err != nil {
-		return errors.Wrap(err, "deleteUserRef prep")
+		return wrapErr(err, "deleteUserRef prep")
 	}
 
 	b.specialUseMbox, err = b.db.Prepare(`
@@ -765,7 +763,7 @@ func (b *Backend) prepareStmts() error {
 		AND specialuse = ?
 		LIMIT 1`)
 	if err != nil {
-		return errors.Wrap(err, "specialUseMbox")
+		return wrapErr(err, "specialUseMbox")
 	}
 
 	b.setSeenFlagUid, err = b.db.Prepare(`
@@ -774,7 +772,7 @@ func (b *Backend) prepareStmts() error {
 		WHERE mboxId = ?
 		AND msgId BETWEEN ? AND ?`)
 	if err != nil {
-		return errors.Wrap(err, "setSeenFlagUid prep")
+		return wrapErr(err, "setSeenFlagUid prep")
 	}
 	b.setSeenFlagSeq, err = b.db.Prepare(`
 		UPDATE msgs
@@ -790,7 +788,7 @@ func (b *Backend) prepareStmts() error {
 			WHERE seqnum BETWEEN ? AND ?
 		)`)
 	if err != nil {
-		return errors.Wrap(err, "setSeenFlagSeq prep")
+		return wrapErr(err, "setSeenFlagSeq prep")
 	}
 
 	b.setInboxId, err = b.db.Prepare(`
@@ -798,7 +796,7 @@ func (b *Backend) prepareStmts() error {
         SET inboxId = ?
         WHERE id = ?`)
 	if err != nil {
-		return errors.Wrap(err, "setInboxId prep")
+		return wrapErr(err, "setInboxId prep")
 	}
 
 	b.decreaseRefForMbox, err = b.db.Prepare(`
@@ -811,7 +809,7 @@ func (b *Backend) prepareStmts() error {
 			WHERE mboxId = (SELECT id FROM mboxes WHERE name = ?)
 		)`)
 	if err != nil {
-		return errors.Wrap(err, "decreaseRefForMbox prep")
+		return wrapErr(err, "decreaseRefForMbox prep")
 	}
 
 	return nil

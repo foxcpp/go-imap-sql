@@ -6,7 +6,6 @@ import (
 
 	imap "github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/backend"
-	"github.com/pkg/errors"
 )
 
 func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation imap.FlagsOp, flags []string) error {
@@ -19,12 +18,12 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 		remQuery, err = m.parent.getFlagsRemStmt(uid, flags)
 	}
 	if err != nil {
-		return errors.Wrap(err, "UpdateMessagesFlags")
+		return wrapErr(err, "UpdateMessagesFlags")
 	}
 
 	tx, err := m.parent.db.BeginLevel(sql.LevelRepeatableRead, false)
 	if err != nil {
-		return errors.Wrap(err, "UpdateMessagesFlags")
+		return wrapErr(err, "UpdateMessagesFlags")
 	}
 	defer tx.Rollback() //nolint:errcheck
 
@@ -93,11 +92,11 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 	// will not send them if tx.Commit fails.
 	updatesBuffer, err := m.flagUpdates(tx, uid, seqset)
 	if err != nil {
-		return errors.Wrap(err, "UpdateMessagesFlags")
+		return wrapErr(err, "UpdateMessagesFlags")
 	}
 
 	if err := tx.Commit(); err != nil {
-		return errors.Wrap(err, "UpdateMessagesFlags")
+		return wrapErr(err, "UpdateMessagesFlags")
 	}
 
 	if m.parent.updates != nil {

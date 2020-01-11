@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	nettextproto "net/textproto"
 	"strings"
@@ -13,7 +14,6 @@ import (
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/backend/backendutil"
 	"github.com/emersion/go-message/textproto"
-	"github.com/pkg/errors"
 )
 
 func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.FetchItem, ch chan<- *imap.Message) error {
@@ -251,18 +251,18 @@ func (n nopCloser) Close() error {
 func (m *Mailbox) openBody(needHeader bool, compressAlgoColumn, extBodyKey string) (BufferedReadCloser, error) {
 	rdr, err := m.parent.extStore.Open(extBodyKey)
 	if err != nil {
-		return BufferedReadCloser{}, errors.Wrap(err, "openBody")
+		return BufferedReadCloser{}, wrapErr(err, "openBody")
 	}
 
 	// compressAlgoColumn is in 'name params' format.
 	compressAlgoInfo := strings.Split(compressAlgoColumn, " ")
 	algoImpl, ok := compressionAlgos[compressAlgoInfo[0]]
 	if !ok {
-		return BufferedReadCloser{}, errors.Errorf("openBody: unknown compression algorithm used for body: %s", compressAlgoInfo[0])
+		return BufferedReadCloser{}, fmt.Errorf("openBody: unknown compression algorithm used for body: %s", compressAlgoInfo[0])
 	}
 	rdrDecomp, err := algoImpl.WrapDecompress(rdr)
 	if err != nil {
-		return BufferedReadCloser{}, errors.Wrap(err, "openBody")
+		return BufferedReadCloser{}, wrapErr(err, "openBody")
 	}
 
 	bufR := bufio.NewReader(rdrDecomp)
@@ -271,7 +271,7 @@ func (m *Mailbox) openBody(needHeader bool, compressAlgoColumn, extBodyKey strin
 			// Skip header if it is not needed.
 			line, err := bufR.ReadSlice('\n')
 			if err != nil {
-				return BufferedReadCloser{}, errors.Wrap(err, "openBody")
+				return BufferedReadCloser{}, wrapErr(err, "openBody")
 			}
 			// If line is empty (message uses LF delim) or contains only CR (messages uses CRLF delim)
 			if len(line) == 0 || (len(line) == 1 || line[0] == '\r') {

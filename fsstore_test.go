@@ -46,10 +46,17 @@ func initTestBackend() backendtests.Backend {
 		panic(err)
 	}
 
+	var log Logger
+	if testing.Verbose() {
+		log = globalLogger{}
+	} else {
+		log = DummyLogger{}
+	}
+
 	b, err := New(driver, dsn, &FSStore{Root: storeDir}, Opts{
 		LazyUpdatesInit: true,
 		PRNG:            prng,
-		Log:             DummyLogger{},
+		Log:             log,
 	})
 	if err != nil {
 		panic(err)

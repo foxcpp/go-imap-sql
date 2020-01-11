@@ -144,6 +144,7 @@ func (m *Mailbox) scanMessages(rows *sql.Rows, items []imap.FetchItem, ch chan<-
 		return err
 	}
 
+messageLoop:
 	for rows.Next() {
 		if err := rows.Scan(scanArgs...); err != nil {
 			return err
@@ -184,7 +185,8 @@ func (m *Mailbox) scanMessages(rows *sql.Rows, items []imap.FetchItem, ch chan<-
 				msg.Flags = strings.Split(data.flagStr, flagsSep)
 			default:
 				if err := m.extractBodyPart(item, &data, msg); err != nil {
-					return err
+					m.parent.logMboxErr(m, err, "failed to read body, skipping", data.seqNum, data.extBodyKey)
+					continue messageLoop
 				}
 			}
 		}
@@ -230,7 +232,8 @@ func (m *Mailbox) extractBodyPart(item imap.FetchItem, data *scanData, msg *imap
 
 		msg.Body[sect], err = backendutil.FetchBodySection(*data.parsedHeader, bufferedBody.Reader, sect)
 		if err != nil {
-			return err
+			m.parent.logMboxErr(m, err, "failed to fetch body section", data.seqNum, sect)
+			msg.Body[sect] = bytes.NewReader(nil)
 		}
 	}
 

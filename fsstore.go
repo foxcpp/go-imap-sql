@@ -14,17 +14,39 @@ type FSStore struct {
 }
 
 func (s *FSStore) Open(key string) (ExtStoreObj, error) {
-	return os.Open(filepath.Join(s.Root, key))
+	f, err := os.Open(filepath.Join(s.Root, key))
+	if err != nil {
+		return nil, ExternalError{
+			Key:         key,
+			Err:         err,
+			NonExistent: os.IsNotExist(err),
+		}
+	}
+	return f, nil
 }
 
 func (s *FSStore) Create(key string) (ExtStoreObj, error) {
-	return os.Create(filepath.Join(s.Root, key))
+	f, err := os.Create(filepath.Join(s.Root, key))
+	if err != nil {
+		return nil, ExternalError{
+			Key:         key,
+			Err:         err,
+			NonExistent: false,
+		}
+	}
+	return f, nil
 }
 
 func (s *FSStore) Delete(keys []string) error {
 	for _, key := range keys {
 		if err := os.Remove(filepath.Join(s.Root, key)); err != nil {
-			return err
+			if os.IsNotExist(err) {
+				continue
+			}
+			return ExternalError{
+				Key: key,
+				Err: err,
+			}
 		}
 	}
 	return nil

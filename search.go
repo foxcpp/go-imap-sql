@@ -83,18 +83,21 @@ func (m *Mailbox) searchMatches(uid, needBody bool, rows *sql.Rows, criteria *im
 	if needBody {
 		bufferedBody, err := m.openBody(true, compressAlgo, extBodyKey)
 		if err != nil {
-			return 0, err
+			m.parent.logMboxErr(m, err, "failed to read body, skipping", seqNum, extBodyKey)
+			return 0, nil
 		}
 		defer bufferedBody.Close()
 
 		hdr, err := textproto.ReadHeader(bufferedBody.Reader)
 		if err != nil {
-			return 0, err
+			m.parent.logMboxErr(m, err, "failed to parse body, skipping", seqNum, extBodyKey)
+			return 0, nil
 		}
 
 		ent, err = message.New(message.Header{Header: hdr}, bufferedBody.Reader)
 		if err != nil {
-			return 0, err
+			m.parent.logMboxErr(m, err, "failed to parse body, skipping", seqNum, extBodyKey)
+			return 0, nil
 		}
 	} else {
 		// XXX: This assumes backendutil.Match will not touch body unless it is needed for criteria.

@@ -15,6 +15,15 @@ import (
 	"github.com/emersion/go-imap/backend"
 )
 
+// VersionStr is a string value representing go-imap-sql version.
+//
+// Meant for debug logs, you may want to know which go-imap-sql version users
+// have.
+const VersionStr = "0.4.0"
+
+// SchemaVersion is incremented each time DB schema changes.
+const SchemaVersion = 5
+
 var (
 	ErrUserAlreadyExists = errors.New("imap: user already exists")
 	ErrUserDoesntExists  = errors.New("imap: user doesn't exists")
@@ -39,7 +48,7 @@ type Logger interface {
 type Opts struct {
 	// Adding unexported name to structures makes it impossible to
 	// reference fields without naming them explicitly.
-	disallowUnnamedFields struct{}
+	_ struct{}
 
 	// Maximum amount of bytes that backend will accept.
 	// Intended for use with APPENDLIMIT extension.
@@ -162,7 +171,6 @@ type Backend struct {
 	hasChildren        *sql.Stmt
 	uidValidity        *sql.Stmt
 	msgsCount          *sql.Stmt
-	recentCount        *sql.Stmt
 	firstUnseenSeqNum  *sql.Stmt
 	deletedSeqnums     *sql.Stmt
 	expungeMbox        *sql.Stmt

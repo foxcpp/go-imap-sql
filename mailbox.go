@@ -234,20 +234,6 @@ func (m *Mailbox) SetMessageLimit(val *uint32) error {
 	return err
 }
 
-func splitHeader(blob []byte) (header, body []byte) {
-	endLen := 4
-	headerEnd := bytes.Index(blob, []byte{'\r', '\n', '\r', '\n'})
-	if headerEnd == -1 {
-		endLen = 2
-		headerEnd = bytes.Index(blob, []byte{'\n', '\n'})
-		if headerEnd == -1 {
-			return nil, blob
-		}
-	}
-
-	return blob[:headerEnd+endLen], blob[headerEnd+endLen:]
-}
-
 func extractCachedData(hdr textproto.Header, bufferedBody *bufio.Reader) (bodyStructBlob, cachedHeadersBlob []byte, err error) {
 	hdrs := make(map[string][]string, len(cachedHeaderFields))
 	for field := hdr.Fields(); field.Next(); {
@@ -277,7 +263,6 @@ func extractCachedData(hdr textproto.Header, bufferedBody *bufio.Reader) (bodySt
 }
 
 func (b *Backend) processBody(literal imap.Literal) (bodyStruct, cachedHeader []byte, extBodyKey string, err error) {
-	var bodyReader io.Reader = literal
 	extBodyKey, err = randomKey()
 	if err != nil {
 		return nil, nil, "", err
@@ -294,7 +279,7 @@ func (b *Backend) processBody(literal imap.Literal) (bodyStruct, cachedHeader []
 	}
 	defer compressW.Close()
 
-	bodyReader = io.TeeReader(literal, compressW)
+	bodyReader := io.TeeReader(literal, compressW)
 	bufferedBody := bufio.NewReader(bodyReader)
 	hdr, err := textproto.ReadHeader(bufferedBody)
 	if err != nil {
@@ -387,7 +372,9 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 	}
 
 	if _, err = tx.Stmt(m.parent.addExtKey).Exec(extBodyKey, m.user.id, 1); err != nil {
-		m.parent.extStore.Delete([]string{extBodyKey})
+		if err := m.parent.extStore.Delete([]string{extBodyKey}); err != nil {
+			m.parent.logMboxErr(m, err, "delete extBodyKey)")
+		}
 		m.parent.logMboxErr(m, err, "CreateMessage (addExtKey)")
 		return wrapErr(err, "CreateMessage (addExtKey)")
 	}
@@ -399,27 +386,35 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		haveSeen, m.parent.Opts.CompressAlgo,
 	)
 	if err != nil {
-		m.parent.extStore.Delete([]string{extBodyKey})
+		if err := m.parent.extStore.Delete([]string{extBodyKey}); err != nil {
+			m.parent.logMboxErr(m, err, "delete extBodyKey)")
+		}
 		m.parent.logMboxErr(m, err, "CreateMessage (addMsg)")
 		return wrapErr(err, "CreateMessage (addMsg)")
 	}
 
 	params := m.makeFlagsAddStmtArgs(true, flags, imap.Seq{Start: msgId, Stop: msgId})
 	if _, err = tx.Stmt(stmt).Exec(params...); err != nil {
-		m.parent.extStore.Delete([]string{extBodyKey})
+		if err := m.parent.extStore.Delete([]string{extBodyKey}); err != nil {
+			m.parent.logMboxErr(m, err, "delete extBodyKey)")
+		}
 		m.parent.logMboxErr(m, err, "CreateMessage (flags)")
 		return wrapErr(err, "CreateMessage (flags)")
 	}
 
 	upd, err := m.statusUpdate(tx)
 	if err != nil {
-		m.parent.extStore.Delete([]string{extBodyKey})
+		if err := m.parent.extStore.Delete([]string{extBodyKey}); err != nil {
+			m.parent.logMboxErr(m, err, "delete extBodyKey)")
+		}
 		m.parent.logMboxErr(m, err, "CreateMessage (status query)")
 		return wrapErr(err, "CreateMessage (status query)")
 	}
 
 	if err = tx.Commit(); err != nil {
-		m.parent.extStore.Delete([]string{extBodyKey})
+		if err := m.parent.extStore.Delete([]string{extBodyKey}); err != nil {
+			m.parent.logMboxErr(m, err, "delete extBodyKey)")
+		}
 		m.parent.logMboxErr(m, err, "CreateMessage (tx commit)")
 		return wrapErr(err, "CreateMessage (tx commit)")
 	}

@@ -33,7 +33,7 @@ func buildSearchStmt(uid bool, withFlags, withoutFlags []string) string {
 			stmt += `AND flag = ? `
 		} else {
 			stmt += `AND flag IN (`
-			for i, _ := range withFlags {
+			for i := range withFlags {
 				stmt += `?`
 				if i != len(withFlags)-1 {
 					stmt += `, `

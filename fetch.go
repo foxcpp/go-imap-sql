@@ -93,7 +93,6 @@ type scanData struct {
 	extBodyKey    string
 	compressAlgo  string
 
-	bodyReader    io.ReadCloser
 	bodyStructure *imap.BodyStructure
 	cachedHeader  map[string][]string
 	parsedHeader  *textproto.Header

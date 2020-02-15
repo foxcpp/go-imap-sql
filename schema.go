@@ -40,6 +40,9 @@ func (b *Backend) setSchemaVersion(newVer int) error {
 
 	if affected == 0 {
 		_, err = b.db.Exec(`INSERT INTO schema_version VALUES (?)`, newVer)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil

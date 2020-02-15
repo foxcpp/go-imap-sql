@@ -76,7 +76,7 @@ func (b *Backend) buildFetchStmt(uid bool, items []imap.FetchItem) (stmt, cacheK
 	}
 
 	cols := make([]string, 0, len(colNames)+1)
-	for col, _ := range colNames {
+	for col := range colNames {
 		cols = append(cols, col)
 	}
 	extraParams := ""

@@ -169,6 +169,9 @@ func (b *Backend) initSchema() error {
 	_, err = b.db.Exec(`
         CREATE INDEX IF NOT EXISTS seen_msgs
         ON msgs(mboxId, seen)`)
+	if err != nil {
+		return wrapErr(err, "create index seen_msgs")
+	}
 
 	return nil
 }

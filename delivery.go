@@ -338,8 +338,6 @@ func (d *Delivery) Commit() error {
 }
 
 func (b *Backend) processParsedBody(headerInput []byte, header textproto.Header, bodyLiteral io.Reader) (bodyStruct, cachedHeader []byte, extBodyKey string, err error) {
-	bodyReader := bodyLiteral
-
 	extBodyKey, err = randomKey()
 	if err != nil {
 		return nil, nil, "", err
@@ -361,8 +359,7 @@ func (b *Backend) processParsedBody(headerInput []byte, header textproto.Header,
 		return nil, nil, "", err
 	}
 
-	bodyReader = io.TeeReader(bodyLiteral, compressW)
-	bufferedBody := bufio.NewReader(bodyReader)
+	bufferedBody := bufio.NewReader(io.TeeReader(bodyLiteral, compressW))
 	bodyStruct, cachedHeader, err = extractCachedData(header, bufferedBody)
 	if err != nil {
 		b.extStore.Delete([]string{extBodyKey})

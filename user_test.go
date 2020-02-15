@@ -28,3 +28,16 @@ func TestUserCaseInsensitivity(t *testing.T) {
 	_, err = u2.GetMailbox("BOX")
 	assert.NilError(t, err, "u2.GetMailbox")
 }
+
+func TestInboxCreation(t *testing.T) {
+	b := initTestBackend().(*Backend)
+	defer cleanBackend(b)
+
+	assert.NilError(t, b.CreateUser("foxcpp", ""))
+
+	u, err := b.GetUser("foxcpp")
+	assert.NilError(t, err, "b.GetUser")
+
+	_, err = u.GetMailbox("INBOX")
+	assert.NilError(t, err, "u.GetMailbox")
+}

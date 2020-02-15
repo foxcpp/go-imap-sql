@@ -29,6 +29,18 @@ var (
 	ErrUserDoesntExists  = errors.New("imap: user doesn't exists")
 )
 
+type SerializationError struct {
+	Err error
+}
+
+func (se SerializationError) Unwrap() error {
+	return se.Err
+}
+
+func (se SerializationError) Error() string {
+	return "imapsql: serialization failure, try again later"
+}
+
 type Rand interface {
 	Uint32() uint32
 }

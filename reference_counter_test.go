@@ -32,7 +32,7 @@ func checkKeysCount(b *Backend, expected int) is.Comparison {
 func TestKeyIsRemovedWithMsg(t *testing.T) {
 	b := initTestBackend().(*Backend)
 	defer cleanBackend(b)
-	assert.NilError(t, b.CreateUser(t.Name(), ""))
+	assert.NilError(t, b.CreateUser(t.Name()))
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)
 	assert.NilError(t, usr.CreateMailbox(t.Name()))
@@ -51,7 +51,7 @@ func TestKeyIsRemovedWithMsg(t *testing.T) {
 func TestKeyIsRemovedWithMbox(t *testing.T) {
 	b := initTestBackend().(*Backend)
 	defer cleanBackend(b)
-	assert.NilError(t, b.CreateUser(t.Name(), ""))
+	assert.NilError(t, b.CreateUser(t.Name()))
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)
 	assert.NilError(t, usr.CreateMailbox(t.Name()))
@@ -70,7 +70,7 @@ func TestKeyIsRemovedWithMbox(t *testing.T) {
 func TestKeyIsRemovedWithCopiedMsgs(t *testing.T) {
 	b := initTestBackend().(*Backend)
 	defer cleanBackend(b)
-	assert.NilError(t, b.CreateUser(t.Name(), ""))
+	assert.NilError(t, b.CreateUser(t.Name()))
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)
 
@@ -103,7 +103,7 @@ func TestKeyIsRemovedWithCopiedMsgs(t *testing.T) {
 func TestKeyIsRemovedWithUser(t *testing.T) {
 	b := initTestBackend().(*Backend)
 	defer cleanBackend(b)
-	assert.NilError(t, b.CreateUser(t.Name(), ""))
+	assert.NilError(t, b.CreateUser(t.Name()))
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)
 	assert.NilError(t, usr.CreateMailbox(t.Name()))

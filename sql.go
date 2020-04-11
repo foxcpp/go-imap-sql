@@ -81,8 +81,6 @@ func (b *Backend) initSchema() error {
 			id BIGSERIAL NOT NULL PRIMARY KEY AUTOINCREMENT,
 			username VARCHAR(255) NOT NULL UNIQUE,
 			msgsizelimit INTEGER DEFAULT NULL,
-			password VARCHAR(255) DEFAULT NULL,
-			password_salt VARCHAR(255) DEFAULT NULL,
 
             -- It does not reference mboxes, since otherwise there will
             -- be recursive foreign key constraint.
@@ -179,12 +177,12 @@ func (b *Backend) initSchema() error {
 func (b *Backend) prepareStmts() error {
 	var err error
 
-	b.userCreds, err = b.db.Prepare(`
-		SELECT id, inboxId, password, password_salt
+	b.userMeta, err = b.db.Prepare(`
+		SELECT id, inboxId
 		FROM users
 		WHERE username = ?`)
 	if err != nil {
-		return wrapErr(err, "userCreds prep")
+		return wrapErr(err, "userMeta prep")
 	}
 	b.listUsers, err = b.db.Prepare(`
 		SELECT id, username
@@ -193,20 +191,13 @@ func (b *Backend) prepareStmts() error {
 		return wrapErr(err, "listUsers prep")
 	}
 	b.addUser, err = b.db.Prepare(`
-		INSERT INTO users(username, password, password_salt)
-		VALUES (?, ?, ?)`)
+		INSERT INTO users(username)
+		VALUES (?)`)
 	if err != nil {
 		return wrapErr(err, "addUser prep")
 	}
 	b.delUser, err = b.db.Prepare(`
 		DELETE FROM users
-		WHERE username = ?`)
-	if err != nil {
-		return wrapErr(err, "addUser prep")
-	}
-	b.setUserPass, err = b.db.Prepare(`
-		UPDATE users
-		SET password = ?, password_salt = ?
 		WHERE username = ?`)
 	if err != nil {
 		return wrapErr(err, "addUser prep")

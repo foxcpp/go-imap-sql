@@ -25,7 +25,7 @@ const (
 func TestIssue7(t *testing.T) {
 	b := initTestBackend()
 	defer cleanBackend(b)
-	assert.NilError(t, b.CreateUser(t.Name(), ""))
+	assert.NilError(t, b.CreateUser(t.Name()))
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)
 	assert.NilError(t, usr.CreateMailbox(t.Name()))
@@ -67,7 +67,7 @@ func TestHeaderInMultipleBodyFetch(t *testing.T) {
 	test := func(t *testing.T, fetchItems []imap.FetchItem) {
 		b := initTestBackend()
 		defer cleanBackend(b)
-		assert.NilError(t, b.CreateUser(t.Name(), ""))
+		assert.NilError(t, b.CreateUser(t.Name()))
 		usr, err := b.GetUser(t.Name())
 		assert.NilError(t, err)
 		assert.NilError(t, usr.CreateMailbox(t.Name()))
@@ -106,7 +106,7 @@ func TestHeaderInMultipleBodyFetch(t *testing.T) {
 func TestHeaderCacheReuse(t *testing.T) {
 	b := initTestBackend()
 	defer cleanBackend(b)
-	assert.NilError(t, b.CreateUser(t.Name(), ""))
+	assert.NilError(t, b.CreateUser(t.Name()))
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)
 	assert.NilError(t, usr.CreateMailbox(t.Name()))

@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"io"
 	"io/ioutil"
-	"strings"
 	"time"
 
 	"errors"
@@ -69,9 +68,9 @@ type Delivery struct {
 // *only* for that recipient. Use this to add Received and Delivered-To
 // fields with recipient-specific information (e.g. its address).
 func (d *Delivery) AddRcpt(username string, userHeader textproto.Header) error {
-	username = strings.ToLower(username)
+	username = normalizeUsername(username)
 
-	uid, inboxId, _, _, _, err := d.b.getUserCreds(nil, username)
+	uid, inboxId, err := d.b.getUserMeta(nil, username)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return ErrUserDoesntExists

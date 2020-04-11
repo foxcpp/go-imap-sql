@@ -2,7 +2,6 @@ package imapsql
 
 import (
 	"database/sql"
-	"encoding/hex"
 	"fmt"
 	mathrand "math/rand"
 	"strings"
@@ -106,19 +105,6 @@ type Opts struct {
 	// of Close.
 	MinimizeOnClose bool
 
-	// Hash algorithm to use for authentication passwords when no algorithm is
-	// explicitly specified.
-	// "sha3-512" and "bcrypt" are supported out of the box. "bcrypt" is used
-	// by default.
-	// Support for aditional algoritms can be enabled using EnableHashAlgo.
-	DefaultHashAlgo string
-
-	// Bcrypt cost value to use when computing password hashes.
-	// Default is 10. Can't be smaller than 4, can't be bigger than 31.
-	//
-	// It is safe to change it, existing records will not be affected.
-	BcryptCost int
-
 	// Compression algorithm to use for new messages. Empty string means no compression.
 	//
 	// Algorithms should be registered before using RegisterCompressionAlgo.
@@ -155,20 +141,18 @@ type Backend struct {
 	childrenExt   bool
 	specialUseExt bool
 
-	prng           Rand
-	hashAlgorithms map[string]hashAlgorithm
-	compressAlgo   CompressionAlgo
+	prng         Rand
+	compressAlgo CompressionAlgo
 
 	updates chan backend.Update
 	// updates channel is lazily initalized, so we need to ensure thread-safety.
 	updatesLck sync.Mutex
 
 	// Shitton of pre-compiled SQL statements.
-	userCreds          *sql.Stmt
+	userMeta           *sql.Stmt
 	listUsers          *sql.Stmt
 	addUser            *sql.Stmt
 	delUser            *sql.Stmt
-	setUserPass        *sql.Stmt
 	listMboxes         *sql.Stmt
 	listSubbedMboxes   *sql.Stmt
 	createMboxExistsOk *sql.Stmt
@@ -283,7 +267,6 @@ func New(driver, dsn string, extStore ExternalStore, opts Opts) (*Backend, error
 		flagsSearchStmtsCache: make(map[string]*sql.Stmt),
 		addFlagsStmtsCache:    make(map[string]*sql.Stmt),
 		remFlagsStmtsCache:    make(map[string]*sql.Stmt),
-		hashAlgorithms:        make(map[string]hashAlgorithm),
 
 		sqliteOptimizeLoopStop: make(chan struct{}),
 
@@ -313,14 +296,6 @@ func New(driver, dsn string, extStore ExternalStore, opts Opts) (*Backend, error
 
 	if b.Opts.Log == nil {
 		b.Opts.Log = globalLogger{}
-	}
-
-	b.enableDefaultHashAlgs()
-	if b.Opts.DefaultHashAlgo == "" {
-		b.Opts.DefaultHashAlgo = defaultPassHashAlgo
-	}
-	if b.Opts.BcryptCost == 0 {
-		b.Opts.BcryptCost = 10
 	}
 
 	if b.Opts.PRNG != nil {
@@ -452,72 +427,30 @@ func (b *Backend) Updates() <-chan backend.Update {
 	return b.updates
 }
 
-func (b *Backend) getUserCreds(tx *sql.Tx, username string) (id uint64, inboxId uint64, hashAlgo string, passHash []byte, passSalt []byte, err error) {
+func (b *Backend) getUserMeta(tx *sql.Tx, username string) (id uint64, inboxId uint64, err error) {
 	var row *sql.Row
 	if tx != nil {
-		row = tx.Stmt(b.userCreds).QueryRow(username)
+		row = tx.Stmt(b.userMeta).QueryRow(username)
 	} else {
-		row = b.userCreds.QueryRow(username)
+		row = b.userMeta.QueryRow(username)
 	}
-	var passHashHex, passSaltHex sql.NullString
-	if err := row.Scan(&id, &inboxId, &passHashHex, &passSaltHex); err != nil {
-		return 0, 0, "", nil, nil, err
+	if err := row.Scan(&id, &inboxId); err != nil {
+		return 0, 0, err
 	}
-
-	if !passHashHex.Valid || !passSaltHex.Valid {
-		return id, inboxId, "", nil, nil, nil
-	}
-
-	hashHexParts := strings.Split(passHashHex.String, ":")
-	if len(hashHexParts) != 2 {
-		return id, 0, "", nil, nil, fmt.Errorf("malformed database column value for password, need algo:hexhash, got %s", passHashHex.String)
-	}
-
-	hashAlgo = hashHexParts[0]
-	passHash = []byte(hashHexParts[1])
-	passSalt, err = hex.DecodeString(passSaltHex.String)
-	if err != nil {
-		return 0, 0, "", nil, nil, err
-	}
-
-	return id, inboxId, hashAlgo, passHash, passSalt, nil
+	return id, inboxId, nil
 }
 
-// CreateUser creates user account with specified credentials.
-//
-// This method can fail if used crypto/rand fails to create enough entropy.
-// It is error to create account with username that already exists.
-// ErrUserAlreadyExists will be returned in this case.
-func (b *Backend) CreateUser(username, password string) error {
-	_, _, err := b.createUser(nil, strings.ToLower(username), b.Opts.DefaultHashAlgo, &password)
+func normalizeUsername(u string) string {
+	return strings.ToLower(u)
+}
+
+// CreateUser creates user account.
+func (b *Backend) CreateUser(username string) error {
+	_, _, err := b.createUser(nil, normalizeUsername(username))
 	return err
 }
 
-func (b *Backend) CreateUserWithHash(username, hashAlgo, password string) error {
-	_, _, err := b.createUser(nil, strings.ToLower(username), hashAlgo, &password)
-	return err
-}
-
-// CreateUserNoPass creates new user account without a password set.
-//
-// It will be unable to log in until SetUserPassword is called for it.
-func (b *Backend) CreateUserNoPass(username string) error {
-	_, _, err := b.createUser(nil, strings.ToLower(username), b.Opts.DefaultHashAlgo, nil)
-	return err
-}
-
-func (b *Backend) createUser(tx *sql.Tx, username string, passHashAlgo string, password *string) (uid, inboxId uint64, err error) {
-	var passHash, passSalt sql.NullString
-	if password != nil {
-		var err error
-		passHash.Valid = true
-		passSalt.Valid = true
-		passHash.String, passSalt.String, err = b.hashCredentials(passHashAlgo, *password)
-		if err != nil {
-			return 0, 0, wrapErr(err, "CreateUser")
-		}
-	}
-
+func (b *Backend) createUser(tx *sql.Tx, username string) (uid, inboxId uint64, err error) {
 	var shouldCommit bool
 	if tx == nil {
 		var err error
@@ -529,13 +462,13 @@ func (b *Backend) createUser(tx *sql.Tx, username string, passHashAlgo string, p
 		shouldCommit = true
 	}
 
-	_, err = tx.Stmt(b.addUser).Exec(username, passHash, passSalt)
+	_, err = tx.Stmt(b.addUser).Exec(username)
 	if err != nil && isForeignKeyErr(err) {
 		return 0, 0, ErrUserAlreadyExists
 	}
 
 	// TODO: Cut additional query here by using RETURNING on PostgreSQL.
-	uid, _, _, _, _, err = b.getUserCreds(tx, username)
+	uid, _, err = b.getUserMeta(tx, username)
 	if err != nil {
 		return 0, 0, wrapErr(err, "CreateUser")
 	}
@@ -545,7 +478,7 @@ func (b *Backend) createUser(tx *sql.Tx, username string, passHashAlgo string, p
 		return 0, 0, wrapErr(err, "CreateUser")
 	}
 
-	// Cut another query here by using RETURNING on PostgreSQL.
+	// TODO: Cut another query here by using RETURNING on PostgreSQL.
 	if err = tx.Stmt(b.mboxId).QueryRow(uid, "INBOX").Scan(&inboxId); err != nil {
 		return 0, 0, wrapErr(err, "CreateUser")
 	}
@@ -610,61 +543,6 @@ func (b *Backend) DeleteUser(username string) error {
 	return tx.Commit()
 }
 
-// ResetPassword sets user account password to invalid value such that Login
-// and CheckPlain will always return "invalid credentials" error.
-func (b *Backend) ResetPassword(username string) error {
-	username = strings.ToLower(username)
-
-	stats, err := b.setUserPass.Exec(nil, nil, username)
-	if err != nil {
-		return wrapErr(err, "ResetPassword")
-	}
-	affected, err := stats.RowsAffected()
-	if err != nil {
-		return wrapErr(err, "ResetPassword")
-	}
-	if affected == 0 {
-		return ErrUserDoesntExists
-	}
-	return nil
-}
-
-// SetUserPassword changes password associated with account with specified
-// username.
-//
-// Opts.DefaultHashAlgo is used for password hashing.
-// This method can fail if crypto/rand fails to generate enough entropy.
-//
-// It is error to change password for account that doesn't exist,
-// ErrUserDoesntExists will be returned in this case.
-func (b *Backend) SetUserPassword(username, newPassword string) error {
-	return b.SetUserPasswordWithHash(b.Opts.DefaultHashAlgo, username, newPassword)
-}
-
-// SetUserPasswordWithHash is a version of SetUserPassword that allows to
-// specify any supported hash algorithm instead of Opts.DefaultHashAlgo.
-func (b *Backend) SetUserPasswordWithHash(hashAlgo, username, newPassword string) error {
-	username = strings.ToLower(username)
-
-	digest, salt, err := b.hashCredentials(hashAlgo, newPassword)
-	if err != nil {
-		return err
-	}
-
-	stats, err := b.setUserPass.Exec(digest, salt, username)
-	if err != nil {
-		return wrapErr(err, "SetUserPassword")
-	}
-	affected, err := stats.RowsAffected()
-	if err != nil {
-		return wrapErr(err, "SetUserPassword")
-	}
-	if affected == 0 {
-		return ErrUserDoesntExists
-	}
-	return nil
-}
-
 // ListUsers returns list of existing usernames.
 //
 // It may return nil slice if no users are registered.
@@ -688,13 +566,11 @@ func (b *Backend) ListUsers() ([]string, error) {
 	return res, nil
 }
 
-// GetUser creates backend.User object without for the user credentials.
-//
-// If you want to check user credentials, you should use Login or CheckPlain.
+// GetUser creates backend.User object for the user credentials.
 func (b *Backend) GetUser(username string) (backend.User, error) {
-	username = strings.ToLower(username)
+	username = normalizeUsername(username)
 
-	uid, inboxId, _, _, _, err := b.getUserCreds(nil, username)
+	uid, inboxId, err := b.getUserMeta(nil, username)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, ErrUserDoesntExists
@@ -706,13 +582,10 @@ func (b *Backend) GetUser(username string) (backend.User, error) {
 
 // GetOrCreateUser is a convenience wrapper for GetUser and CreateUser.
 //
-// Users are created with invalid password such that CheckPlain and Login
-// will always return "invalid credentials" error.
-//
 // All database operations are executed within one transaction so
 // this method is atomic as defined by used RDBMS.
 func (b *Backend) GetOrCreateUser(username string) (backend.User, error) {
-	username = strings.ToLower(username)
+	username = normalizeUsername(username)
 
 	tx, err := b.db.Begin(false)
 	if err != nil {
@@ -720,11 +593,11 @@ func (b *Backend) GetOrCreateUser(username string) (backend.User, error) {
 	}
 	defer tx.Rollback()
 
-	uid, inboxId, _, _, _, err := b.getUserCreds(tx, username)
+	uid, inboxId, err := b.getUserMeta(tx, username)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			b.Opts.Log.Println("auto-creating storage account", username)
-			if uid, inboxId, err = b.createUser(tx, username, b.Opts.DefaultHashAlgo, nil); err != nil {
+			if uid, inboxId, err = b.createUser(tx, username); err != nil {
 				return nil, err
 			}
 		} else {
@@ -734,21 +607,13 @@ func (b *Backend) GetOrCreateUser(username string) (backend.User, error) {
 	return &User{id: uid, username: username, parent: b, inboxId: inboxId}, tx.Commit()
 }
 
-// CheckPlain checks the credentials of the user account.
-func (b *Backend) CheckPlain(username, password string) bool {
-	_, _, err := b.checkUser(strings.ToLower(username), password)
-	return err == nil
-}
-
 func (b *Backend) Login(_ *imap.ConnInfo, username, password string) (backend.User, error) {
-	uid, inboxId, err := b.checkUser(strings.ToLower(username), password)
+	u, err := b.GetOrCreateUser(username)
 	if err != nil {
 		return nil, err
 	}
-
 	b.Opts.Log.Debugln(username, "logged in")
-
-	return &User{id: uid, username: username, parent: b, inboxId: inboxId}, nil
+	return u, nil
 }
 
 func (b *Backend) CreateMessageLimit() *uint32 {

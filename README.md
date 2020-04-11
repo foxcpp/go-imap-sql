@@ -31,6 +31,13 @@ IMAP Extensions Supported
 - [MOVE]
 - [SPECIAL-USE]
 
+Authentication
+----------------
+
+go-imap-sql does not implement any authentication. "password" argument of Login
+method is not checked and the user account is created if it does not exist. You
+are supposed to wrap it to implement your own authentication the way you need
+it.
 
 Usernames case-insensitivity
 ------------------------------
@@ -39,16 +46,6 @@ Usernames are always converted to lower-case before doing anything.
 This means that if you type `imapsql-ctl ... users create FOXCPP`.  Account
 with username `foxcpp` will be created. Also this means that you can use any
 case in account settings in your IMAP client.
-
-Passwords hashing
--------------------
-
-go-imap-sql uses bcrypt hash function for account passwords. This makes passwords
-hard to brute-force, but also significantly increases CPU load.
-
-Backend users should either change hash function to sha3-512 (see Opts
-structure documentation) or implement restrictions on authentication attempts
-that will block access after certain number of attempts.
 
 secure_delete
 -------------

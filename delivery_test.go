@@ -59,8 +59,8 @@ func checkTestMsg(t *testing.T, msg *imap.Message) {
 func TestDelivery(t *testing.T) {
 	b := initTestBackend().(*Backend)
 	defer cleanBackend(b)
-	assert.NilError(t, b.CreateUser(t.Name()+"-1", ""), "CreateUser 1")
-	assert.NilError(t, b.CreateUser(t.Name()+"-2", ""), "CreateUser 2")
+	assert.NilError(t, b.CreateUser(t.Name()+"-1"), "CreateUser 1")
+	assert.NilError(t, b.CreateUser(t.Name()+"-2"), "CreateUser 2")
 
 	delivery := b.NewDelivery()
 
@@ -114,7 +114,7 @@ func TestDelivery(t *testing.T) {
 func TestDelivery_Abort(t *testing.T) {
 	b := initTestBackend().(*Backend)
 	defer cleanBackend(b)
-	assert.NilError(t, b.CreateUser(t.Name(), ""), "CreateUser")
+	assert.NilError(t, b.CreateUser(t.Name()), "CreateUser")
 
 	delivery := b.NewDelivery()
 	assert.NilError(t, delivery.AddRcpt(t.Name(), textproto.Header{}), "AddRcpt")
@@ -133,7 +133,7 @@ func TestDelivery_Abort(t *testing.T) {
 func TestDelivery_AddRcpt_NonExistent(t *testing.T) {
 	b := initTestBackend().(*Backend)
 	defer cleanBackend(b)
-	assert.NilError(t, b.CreateUser(t.Name(), ""), "CreateUser")
+	assert.NilError(t, b.CreateUser(t.Name()), "CreateUser")
 
 	delivery := b.NewDelivery()
 	assert.NilError(t, delivery.AddRcpt(t.Name(), textproto.Header{}))
@@ -163,7 +163,7 @@ func TestDelivery_AddRcpt_NonExistent(t *testing.T) {
 	// are not suddenly populated with our message.
 
 	t.Run("NON-EXISTENT user created empty", func(t *testing.T) {
-		assert.NilError(t, b.CreateUser("NON-EXISTENT", ""), "CreateUser NON-EXISTENT")
+		assert.NilError(t, b.CreateUser("NON-EXISTENT"), "CreateUser NON-EXISTENT")
 		u, err := b.GetUser("NON-EXISTENT")
 		assert.NilError(t, err, "GetUser NON-EXISTENT")
 		mbox, err := u.GetMailbox("INBOX")
@@ -180,7 +180,7 @@ func TestDelivery_Mailbox(t *testing.T) {
 		b := initTestBackend().(*Backend)
 		defer cleanBackend(b)
 		b.EnableSpecialUseExt()
-		assert.NilError(t, b.CreateUser(t.Name(), ""), "CreateUser")
+		assert.NilError(t, b.CreateUser(t.Name()), "CreateUser")
 		u, err := b.GetUser(t.Name())
 		assert.NilError(t, err, "GetUser")
 		if create {
@@ -218,7 +218,7 @@ func TestDelivery_SpecialMailbox(t *testing.T) {
 		b := initTestBackend().(*Backend)
 		defer cleanBackend(b)
 		b.EnableSpecialUseExt()
-		assert.NilError(t, b.CreateUser(t.Name(), ""), "CreateUser")
+		assert.NilError(t, b.CreateUser(t.Name()), "CreateUser")
 		u, err := b.GetUser(t.Name())
 		assert.NilError(t, err, "GetUser")
 		if create {
@@ -266,7 +266,7 @@ func TestDelivery_SpecialMailbox(t *testing.T) {
 func TestDelivery_BodyParsed(t *testing.T) {
 	b := initTestBackend().(*Backend)
 	defer cleanBackend(b)
-	assert.NilError(t, b.CreateUser(t.Name(), ""), "CreateUser")
+	assert.NilError(t, b.CreateUser(t.Name()), "CreateUser")
 
 	delivery := b.NewDelivery()
 
@@ -295,8 +295,8 @@ func TestDelivery_BodyParsed(t *testing.T) {
 func TestDelivery_UserHeader(t *testing.T) {
 	b := initTestBackend().(*Backend)
 	defer cleanBackend(b)
-	assert.NilError(t, b.CreateUser(t.Name()+"-1", ""), "CreateUser 1")
-	assert.NilError(t, b.CreateUser(t.Name()+"-2", ""), "CreateUser 2")
+	assert.NilError(t, b.CreateUser(t.Name()+"-1"), "CreateUser 1")
+	assert.NilError(t, b.CreateUser(t.Name()+"-2"), "CreateUser 2")
 
 	delivery := b.NewDelivery()
 

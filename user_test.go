@@ -9,14 +9,8 @@ import (
 func TestUserCaseInsensitivity(t *testing.T) {
 	b := initTestBackend().(*Backend)
 	defer cleanBackend(b)
-	b.Opts.DefaultHashAlgo = "sha3-512"
 
-	assert.NilError(t, b.CreateUser("foXcpp", ""))
-	assert.ErrorContains(t, b.CreateUserWithHash("foXCPP", "sha3-512", ""), ErrUserAlreadyExists.Error())
-	assert.Assert(t, b.CheckPlain("FOXCPP", ""))
-	assert.NilError(t, b.ResetPassword("foxCPP"))
-	assert.Assert(t, !b.CheckPlain("foXcPp", ""))
-	assert.NilError(t, b.SetUserPassword("FOXCPp", ""))
+	assert.NilError(t, b.CreateUser("foXcpp"))
 	_, err := b.Login(nil, "foXCpp", "")
 	assert.NilError(t, err, "b.Login")
 	u1, err := b.GetUser("Foxcpp")
@@ -33,7 +27,7 @@ func TestInboxCreation(t *testing.T) {
 	b := initTestBackend().(*Backend)
 	defer cleanBackend(b)
 
-	assert.NilError(t, b.CreateUser("foxcpp", ""))
+	assert.NilError(t, b.CreateUser("foxcpp"))
 
 	u, err := b.GetUser("foxcpp")
 	assert.NilError(t, err, "b.GetUser")

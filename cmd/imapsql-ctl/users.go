@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"github.com/urfave/cli"
-	"golang.org/x/crypto/bcrypt"
 )
 
 func usersList(ctx *cli.Context) error {
@@ -44,34 +43,7 @@ func usersCreate(ctx *cli.Context) error {
 		return errors.New("Error: User already exists")
 	}
 
-	if ctx.IsSet("null") {
-		return backend.CreateUserNoPass(username)
-	}
-
-	if ctx.IsSet("hash") {
-		backend.Opts.DefaultHashAlgo = ctx.String("hash")
-	}
-	if ctx.IsSet("bcrypt-cost") {
-		if ctx.Int("bcrypt-cost") > bcrypt.MaxCost {
-			return errors.New("Error: too big bcrypt cost")
-		}
-		if ctx.Int("bcrypt-cost") < bcrypt.MinCost {
-			return errors.New("Error: too small bcrypt cost")
-		}
-		backend.Opts.BcryptCost = ctx.Int("bcrypt-cost")
-	}
-
-	var pass string
-	if ctx.IsSet("password") {
-		pass = ctx.String("password,p")
-	} else {
-		pass, err = ReadPassword("Enter password for new user")
-		if err != nil {
-			return err
-		}
-	}
-
-	return backend.CreateUser(username, pass)
+	return backend.CreateUser(username)
 }
 
 func usersRemove(ctx *cli.Context) error {
@@ -100,51 +72,6 @@ func usersRemove(ctx *cli.Context) error {
 	}
 
 	return backend.DeleteUser(username)
-}
-
-func usersPassword(ctx *cli.Context) error {
-	if err := connectToDB(ctx); err != nil {
-		return err
-	}
-
-	username := ctx.Args().First()
-	if username == "" {
-		return errors.New("Error: USERNAME is required")
-	}
-
-	_, err := backend.GetUser(username)
-	if err != nil {
-		return errors.New("Error: User doesn't exists")
-	}
-
-	if ctx.IsSet("null") {
-		return backend.ResetPassword(username)
-	}
-
-	if ctx.IsSet("hash") {
-		backend.Opts.DefaultHashAlgo = ctx.String("hash")
-	}
-	if ctx.IsSet("bcrypt-cost") {
-		if ctx.Int("bcrypt-cost") > bcrypt.MaxCost {
-			return errors.New("Error: too big bcrypt cost")
-		}
-		if ctx.Int("bcrypt-cost") < bcrypt.MinCost {
-			return errors.New("Error: too small bcrypt cost")
-		}
-		backend.Opts.BcryptCost = ctx.Int("bcrypt-cost")
-	}
-
-	var pass string
-	if ctx.IsSet("password") {
-		pass = ctx.String("password")
-	} else {
-		pass, err = ReadPassword("Enter new password")
-		if err != nil {
-			return err
-		}
-	}
-
-	return backend.SetUserPassword(username, pass)
 }
 
 func usersAppendLimit(ctx *cli.Context) error {

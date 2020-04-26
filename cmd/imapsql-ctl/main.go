@@ -8,7 +8,6 @@ import (
 
 	imapsql "github.com/foxcpp/go-imap-sql"
 	"github.com/urfave/cli"
-	"golang.org/x/crypto/bcrypt"
 )
 
 var backend *imapsql.Backend
@@ -305,31 +304,10 @@ func main() {
 					Action: usersList,
 				},
 				{
-					Name:        "create",
-					Usage:       "Create user account",
-					Description: "Reads password from stdin",
-					ArgsUsage:   "USERNAME",
-					Flags: []cli.Flag{
-						cli.StringFlag{
-							Name:  "password,p",
-							Usage: "Use `PASSWORD instead of reading password from stdin.\n\t\tWARNING: Provided only for debugging convenience. Don't leave your passwords in shell history!",
-						},
-						cli.BoolFlag{
-							Name:  "null,n",
-							Usage: "Create account with null password",
-						},
-						cli.StringFlag{
-							Name:  "hash",
-							Usage: "Use specified hash algorithm. Valid values: sha3-512, bcrypt",
-							Value: "sha3-512",
-						},
-						cli.IntFlag{
-							Name:  "bcrypt-cost",
-							Usage: "Specify bcrypt cost value",
-							Value: bcrypt.DefaultCost,
-						},
-					},
-					Action: usersCreate,
+					Name:      "create",
+					Usage:     "Create user account",
+					ArgsUsage: "USERNAME",
+					Action:    usersCreate,
 				},
 				{
 					Name:      "remove",
@@ -342,33 +320,6 @@ func main() {
 						},
 					},
 					Action: usersRemove,
-				},
-				{
-					Name:        "password",
-					Usage:       "Change account password",
-					Description: "Reads password from stdin",
-					ArgsUsage:   "USERNAME",
-					Flags: []cli.Flag{
-						cli.StringFlag{
-							Name:  "password,p",
-							Usage: "Use `PASSWORD` instead of reading password from stdin.\n\t\tWARNING: Provided only for debugging convenience. Don't leave your passwords in shell history!",
-						},
-						cli.BoolFlag{
-							Name:  "null,n",
-							Usage: "Set password to null",
-						},
-						cli.StringFlag{
-							Name:  "hash",
-							Usage: "Use specified hash algorithm. Valid values: sha3-512, bcrypt",
-							Value: "sha3-512",
-						},
-						cli.IntFlag{
-							Name:  "bcrypt-cost",
-							Usage: "Specify bcrypt cost value",
-							Value: bcrypt.DefaultCost,
-						},
-					},
-					Action: usersPassword,
 				},
 				{
 					Name:      "appendlimit",

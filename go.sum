@@ -28,6 +28,8 @@ github.com/foxcpp/go-imap-backend-tests v0.0.0-20200104150404-bd7815ad9f5a h1:0M
 github.com/foxcpp/go-imap-backend-tests v0.0.0-20200104150404-bd7815ad9f5a/go.mod h1:yUISYv/uXLQ6tQZcds/p/hdcZ5JzrEUifyED2VffWpc=
 github.com/foxcpp/go-imap-backend-tests v0.0.0-20200411182408-7dae2bf0e51c h1:KoLS86ynArQMTRw0SC+mNRU1dIzGs6uaS++lB4O7S6U=
 github.com/foxcpp/go-imap-backend-tests v0.0.0-20200411182408-7dae2bf0e51c/go.mod h1:yUISYv/uXLQ6tQZcds/p/hdcZ5JzrEUifyED2VffWpc=
+github.com/foxcpp/go-imap-backend-tests v0.0.0-20200426175250-4110e9b66176 h1:qyze36XjZnwK9geEzr5qlChS8zJgz7L+YZ5O8JNhh90=
+github.com/foxcpp/go-imap-backend-tests v0.0.0-20200426175250-4110e9b66176/go.mod h1:yUISYv/uXLQ6tQZcds/p/hdcZ5JzrEUifyED2VffWpc=
 github.com/frankban/quicktest v1.5.0 h1:Tb4jWdSpdjKzTUicPnY61PZxKbDoGa7ABbrReT3gQVY=
 github.com/frankban/quicktest v1.5.0/go.mod h1:jaStnuzAqU1AJdCO0l53JDCJrVDKcS03DbaAcR7Ks/o=
 github.com/go-sql-driver/mysql v1.4.1 h1:g24URVg0OFbNUTx9qqY1IRZ9D9z3iPyi5zKhQZpNwpA=

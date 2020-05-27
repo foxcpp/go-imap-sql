@@ -126,6 +126,15 @@ func (b *Backend) initSchema() error {
 	_, err = b.db.Exec(`
         CREATE INDEX IF NOT EXISTS extKeys_uid_id
         ON extKeys(uid, id)`)
+	// MySQL does not support "IF NOT EXISTS", but MariaDB does.
+	if err != nil && b.db.driver == "mysql" {
+		_, err = b.db.Exec(`
+			CREATE INDEX extKeys_uid_id
+			ON extKeys(uid, id)`)
+		if err != nil && strings.HasPrefix(err.Error(), "Error 1061: Duplicate key name") {
+			err = nil
+		}
+	}
 	if err != nil {
 		return wrapErr(err, "create index extKeys_uid_id")
 	}
@@ -167,6 +176,15 @@ func (b *Backend) initSchema() error {
 	_, err = b.db.Exec(`
         CREATE INDEX IF NOT EXISTS seen_msgs
         ON msgs(mboxId, seen)`)
+	// MySQL does not support "IF NOT EXISTS", but MariaDB does.
+	if err != nil && b.db.driver == "mysql" {
+		_, err = b.db.Exec(`
+			CREATE INDEX seen_msgs
+			ON msgs(mboxId, seen)`)
+		if err != nil && strings.HasPrefix(err.Error(), "Error 1061: Duplicate key name") {
+			err = nil
+		}
+	}
 	if err != nil {
 		return wrapErr(err, "create index seen_msgs")
 	}
@@ -648,7 +666,7 @@ func (b *Backend) prepareStmts() error {
 	b.decreaseRefForMarked, err = b.db.Prepare(`
 		UPDATE extKeys
 		SET refs = refs - 1
-		WHERE uid = ? 
+		WHERE uid = ?
 		AND id IN (
 			SELECT extBodyKey
 			FROM msgs
@@ -660,7 +678,7 @@ func (b *Backend) prepareStmts() error {
 	b.decreaseRefForDeleted, err = b.db.Prepare(`
 		UPDATE extKeys
 		SET refs = refs - 1
-		WHERE uid = ? 
+		WHERE uid = ?
 		AND id IN (
 			SELECT extBodyKey
 			FROM msgs
@@ -751,7 +769,7 @@ func (b *Backend) prepareStmts() error {
 	}
 
 	b.specialUseMbox, err = b.db.Prepare(`
-		SELECT name, id 
+		SELECT name, id
 		FROM mboxes
 		WHERE uid = ?
 		AND specialuse = ?

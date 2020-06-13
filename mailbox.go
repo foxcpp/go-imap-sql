@@ -331,6 +331,10 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		return err
 	}
 
+	if date.IsZero() {
+		date = time.Now()
+	}
+
 	// Important to run before transaction, otherwise it will deadlock on
 	// SQLite.
 	haveRecent := false

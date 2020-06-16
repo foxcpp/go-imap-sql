@@ -2,8 +2,6 @@ package imapsql
 
 import (
 	"database/sql"
-
-	imap "github.com/emersion/go-imap"
 )
 
 func (b *Backend) buildFlagsAddStmt(uid bool, flags []string) string {
@@ -36,8 +34,7 @@ func (b *Backend) buildFlagsAddStmt(uid bool, flags []string) string {
 	}
 }
 
-func (m *Mailbox) makeFlagsAddStmtArgs(uid bool, flags []string, seq imap.Seq) (params []interface{}) {
-	start, stop := sqlRange(seq)
+func (m *Mailbox) makeFlagsAddStmtArgs(uid bool, flags []string, start, stop uint32) (params []interface{}) {
 	if uid {
 		params = make([]interface{}, 0, 4+len(flags))
 		params = append(params, m.id)
@@ -117,8 +114,8 @@ func (b *Backend) getFlagsRemStmt(uid bool, flags []string) (*sql.Stmt, error) {
 	return stmt, nil
 }
 
-func (m *Mailbox) makeFlagsRemStmtArgs(uid bool, flags []string, seq imap.Seq) (params []interface{}) {
-	start, stop := sqlRange(seq)
+func (m *Mailbox) makeFlagsRemStmtArgs(uid bool, flags []string, start, stop uint32) []interface{} {
+	var params []interface{}
 	if uid {
 		params = make([]interface{}, 0, 3+len(flags))
 		params = append(params, m.id, start, stop)
@@ -129,5 +126,5 @@ func (m *Mailbox) makeFlagsRemStmtArgs(uid bool, flags []string, seq imap.Seq) (
 	for _, flag := range flags {
 		params = append(params, flag)
 	}
-	return
+	return params
 }

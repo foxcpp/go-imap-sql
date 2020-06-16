@@ -287,7 +287,7 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox Mailbox, bodyLen i
 	// --- end of operations that involve msgs table ---
 
 	// --- operations that involve flags table ---
-	params := mbox.makeFlagsAddStmtArgs(true, []string{imap.RecentFlag}, imap.Seq{Start: msgId, Stop: msgId})
+	params := mbox.makeFlagsAddStmtArgs(true, []string{imap.RecentFlag}, msgId, msgId)
 	if _, err := d.tx.Stmt(flagsStmt).Exec(params...); err != nil {
 		d.b.extStore.Delete([]string{extBodyKey})
 		return wrapErr(err, "Body (flagsStmt)")

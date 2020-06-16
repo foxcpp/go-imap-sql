@@ -41,9 +41,14 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 	flags = newFlagSet
 
 	for _, seq := range seqset.Set {
+		start, stop, err := m.resolveSeq(tx, seq, uid)
+		if err != nil {
+			return wrapErr(err, "UpdateMessagesFlags (resolve seq)")
+		}
+		m.parent.Opts.Log.Debugln("UpdateMessageFlags: resolved", seq, "to", start, stop, uid)
+
 		switch operation {
 		case imap.SetFlags:
-			start, stop := sqlRange(seq)
 			if uid {
 				_, err = tx.Stmt(m.parent.massClearFlagsUid).Exec(m.id, start, stop)
 			} else {
@@ -54,12 +59,11 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 			}
 			fallthrough
 		case imap.AddFlags:
-			args := m.makeFlagsAddStmtArgs(uid, flags, seq)
+			args := m.makeFlagsAddStmtArgs(uid, flags, start, stop)
 			if _, err := tx.Stmt(addQuery).Exec(args...); err != nil {
 				return err
 			}
 			if seenModified {
-				start, stop := sqlRange(seq)
 				if uid {
 					_, err = tx.Stmt(m.parent.setSeenFlagUid).Exec(1, m.id, start, stop)
 				} else {
@@ -70,12 +74,11 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 				}
 			}
 		case imap.RemoveFlags:
-			args := m.makeFlagsRemStmtArgs(uid, flags, seq)
+			args := m.makeFlagsRemStmtArgs(uid, flags, start, stop)
 			if _, err := tx.Stmt(remQuery).Exec(args...); err != nil {
 				return err
 			}
 			if seenModified {
-				start, stop := sqlRange(seq)
 				if uid {
 					_, err = tx.Stmt(m.parent.setSeenFlagUid).Exec(0, m.id, start, stop)
 				} else {
@@ -94,6 +97,7 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 	if err != nil {
 		return wrapErr(err, "UpdateMessagesFlags")
 	}
+	m.parent.Opts.Log.Debugln("UpdateMessageFlags: emiting", len(updatesBuffer), "flag updates")
 
 	if err := tx.Commit(); err != nil {
 		return wrapErr(err, "UpdateMessagesFlags")
@@ -113,7 +117,10 @@ func (m *Mailbox) flagUpdates(tx *sql.Tx, uid bool, seqset *imap.SeqSet) ([]back
 	for _, seq := range seqset.Set {
 		var err error
 		var rows *sql.Rows
-		start, stop := sqlRange(seq)
+		start, stop, err := m.resolveSeq(tx, seq, uid)
+		if err != nil {
+			return nil, err
+		}
 
 		if uid {
 			rows, err = tx.Stmt(m.parent.msgFlagsUid).Query(m.id, m.id, start, stop)

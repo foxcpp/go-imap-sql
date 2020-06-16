@@ -48,16 +48,20 @@ func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.Fetch
 	defer tx.Rollback()
 
 	for _, seq := range seqset.Set {
-		begin, end := sqlRange(seq)
+		start, stop, err := m.resolveSeq(tx, seq, uid)
+		if err != nil {
+			m.parent.logMboxErr(m, err, "ListMessages (resolve seq)", uid, seqset, items)
+			return err
+		}
+		m.parent.Opts.Log.Debugln("ListMessages: resolved seq", seq, uid, "to", start, stop)
 
 		if setSeen {
-			params := m.makeFlagsAddStmtArgs(uid, []string{imap.SeenFlag}, seq)
+			params := m.makeFlagsAddStmtArgs(uid, []string{imap.SeenFlag}, start, stop)
 			if _, err := tx.Stmt(addSeenStmt).Exec(params...); err != nil {
 				m.parent.logMboxErr(m, err, "ListMessages (add seen)", uid, seqset, items)
 				return err
 			}
 
-			start, stop := sqlRange(seq)
 			if uid {
 				_, err = tx.Stmt(m.parent.setSeenFlagUid).Exec(1, m.id, start, stop)
 			} else {
@@ -69,7 +73,7 @@ func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.Fetch
 			}
 		}
 
-		rows, err := tx.Stmt(stmt).Query(m.id, m.id, begin, end)
+		rows, err := tx.Stmt(stmt).Query(m.id, m.id, start, stop)
 		if err != nil {
 			m.parent.logMboxErr(m, err, "ListMessages", uid, seqset, items)
 			return err
@@ -189,6 +193,8 @@ messageLoop:
 				}
 			}
 		}
+
+		m.parent.Opts.Log.Debugln("scanMessages: scanned", data.msgId, items)
 
 		ch <- msg
 	}

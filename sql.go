@@ -824,6 +824,11 @@ func (b *Backend) prepareStmts() error {
 		return wrapErr(err, "decreaseRefForMbox prep")
 	}
 
+	b.lastUid, err = b.db.Prepare(`SELECT max(msgId) FROM msgs WHERE mboxId = ?`)
+	if err != nil {
+		return wrapErr(err, "lastUid prep")
+	}
+
 	return nil
 }
 

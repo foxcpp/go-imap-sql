@@ -397,7 +397,7 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		return wrapErr(err, "CreateMessage (addMsg)")
 	}
 
-	params := m.makeFlagsAddStmtArgs(true, flags, imap.Seq{Start: msgId, Stop: msgId})
+	params := m.makeFlagsAddStmtArgs(true, flags, msgId, msgId)
 	if _, err = tx.Stmt(stmt).Exec(params...); err != nil {
 		if err := m.parent.extStore.Delete([]string{extBodyKey}); err != nil {
 			m.parent.logMboxErr(m, err, "delete extBodyKey)")
@@ -465,9 +465,11 @@ func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error
 	// Additionally, we need to know moved sequence numbers to emit EXPUNGE
 	// updates so we have to mark it even for UID operations.
 	for _, seq := range seqset.Set {
-		start, stop := sqlRange(seq)
+		start, stop, err := m.resolveSeq(tx, seq, uid)
+		if err != nil {
+			return err
+		}
 
-		var err error
 		if uid {
 			_, err = tx.Stmt(m.parent.markUid).Exec(m.id, start, stop)
 		} else {
@@ -496,7 +498,11 @@ func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error
 	// Copy messages and flags...
 	copiedCount := int64(0)
 	for _, seq := range seqset.Set {
-		start, stop := sqlRange(seq)
+		start, stop, err := m.resolveSeq(tx, seq, uid)
+		if err != nil {
+			m.parent.logMboxErr(m, err, "MoveMessages (range resolve)", uid, seqset, dest)
+			return wrapErr(err, "MoveMessages (range resolve)")
+		}
 
 		var stats sql.Result
 		if uid {
@@ -654,10 +660,12 @@ func (m *Mailbox) DelMessages(uid bool, seqset *imap.SeqSet) error {
 
 func (m *Mailbox) delMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, updsBuffer *[]backend.Update) error {
 	for _, seq := range seqset.Set {
-		start, stop := sqlRange(seq)
+		start, stop, err := m.resolveSeq(tx, seq, uid)
+		if err != nil {
+			return err
+		}
 
 		m.parent.Opts.Log.Println("delMessages: marking SQL window range", start, stop, "for deletion")
-		var err error
 		if uid {
 			_, err = tx.Stmt(m.parent.markUid).Exec(m.id, start, stop)
 		} else {
@@ -724,10 +732,13 @@ func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest s
 
 	totalCopied := int64(0)
 	for _, seq := range seqset.Set {
-		start, stop := sqlRange(seq)
+		start, stop, err := m.resolveSeq(tx, seq, uid)
+		if err != nil {
+			return err
+		}
+		m.parent.Opts.Log.Debugln("copyMessages: resolved seq", seq, uid, "to", start, stop)
 
 		var stats sql.Result
-		var err error
 		if uid {
 			stats, err = tx.Stmt(m.parent.copyMsgsUid).Exec(destID, destID, totalCopied, srcId, start, stop)
 			if err != nil {
@@ -877,14 +888,30 @@ func (m *Mailbox) expungeExternal(tx *sql.Tx) error {
 	return nil
 }
 
-func sqlRange(seq imap.Seq) (x, y uint32) {
-	x = seq.Start
-	y = seq.Stop
+func (m *Mailbox) resolveSeq(tx *sql.Tx, seq imap.Seq, uid bool) (uint32, uint32, error) {
+	// Special case: "*"
+	if seq.Start == seq.Stop && seq.Stop == 0 {
+		var val uint32
+		if uid {
+			if err := tx.Stmt(m.parent.lastUid).QueryRow(m.id).Scan(&val); err != nil {
+				return 0, 0, err
+			}
+		} else {
+			if err := tx.Stmt(m.parent.msgsCount).QueryRow(m.id).Scan(&val); err != nil {
+				return 0, 0, err
+			}
+		}
+		seq.Start = val
+		seq.Stop = val
+	}
+
+	sqlStart := seq.Start
+	sqlEnd := seq.Stop
 	if seq.Stop == 0 {
-		y = 4294967295
+		sqlEnd = 4294967295
 	}
 	if seq.Start == 0 {
-		x = 1
+		sqlStart = 4294967295
 	}
-	return
+	return sqlStart, sqlEnd, nil
 }

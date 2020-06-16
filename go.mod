@@ -7,7 +7,7 @@ require (
 	github.com/emersion/go-imap-appendlimit v0.0.0-20190308131241-25671c986a6a
 	github.com/emersion/go-imap-specialuse v0.0.0-20161227184202-ba031ced6a62
 	github.com/emersion/go-message v0.11.2
-	github.com/foxcpp/go-imap-backend-tests v0.0.0-20200426175250-4110e9b66176
+	github.com/foxcpp/go-imap-backend-tests v0.0.0-20200616221226-85255dc9f40f
 	github.com/frankban/quicktest v1.5.0 // indirect
 	github.com/go-sql-driver/mysql v1.4.1
 	github.com/klauspost/compress v1.10.5

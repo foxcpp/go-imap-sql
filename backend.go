@@ -206,6 +206,8 @@ type Backend struct {
 	markSeq   *sql.Stmt
 	delMarked *sql.Stmt
 
+	lastUid *sql.Stmt
+
 	markedSeqnums *sql.Stmt
 
 	// For APPEND-LIMIT extension

@@ -656,6 +656,7 @@ func (m *Mailbox) delMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, updsBuf
 	for _, seq := range seqset.Set {
 		start, stop := sqlRange(seq)
 
+		m.parent.Opts.Log.Println("delMessages: marking SQL window range", start, stop, "for deletion")
 		var err error
 		if uid {
 			_, err = tx.Stmt(m.parent.markUid).Exec(m.id, start, stop)
@@ -679,6 +680,7 @@ func (m *Mailbox) delMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, updsBuf
 		if err := rows.Scan(&seqnum, &extKey); err != nil {
 			return err
 		}
+		m.parent.Opts.Log.Println("delMessages:", seqnum, extKey, "is marked")
 
 		if extKey.Valid {
 			deletedExtKeys = append(deletedExtKeys, extKey.String)
@@ -692,6 +694,7 @@ func (m *Mailbox) delMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, updsBuf
 		return err
 	}
 
+	m.parent.Opts.Log.Println("delMessages: deleting storage keys: ", deletedExtKeys)
 	if err := m.parent.extStore.Delete(deletedExtKeys); err != nil {
 		return err
 	}
@@ -700,6 +703,7 @@ func (m *Mailbox) delMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, updsBuf
 		return err
 	}
 
+	m.parent.Opts.Log.Println("delMessages: deleted", len(*updsBuffer), "messages")
 	_, err = tx.Stmt(m.parent.decreaseMsgCount).Exec(len(*updsBuffer), m.id)
 	return err
 }
@@ -713,6 +717,7 @@ func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest s
 		}
 	}
 
+	m.parent.Opts.Log.Debugln("copyMessages: resolved target mailbox name to", destID)
 	destMbox := Mailbox{user: m.user, id: destID, name: dest, parent: m.parent}
 
 	srcId := m.id
@@ -745,6 +750,7 @@ func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest s
 			return err
 		}
 		totalCopied += affected
+		m.parent.Opts.Log.Debugln("copyMessages: copied", affected, "messages for range", seq, "SQL:", start, stop, uid)
 
 		if uid {
 			if _, err := tx.Stmt(m.parent.incrementRefUid).Exec(m.user.id, srcId, start, stop); err != nil {
@@ -802,6 +808,7 @@ func (m *Mailbox) Expunge() error {
 		m.parent.logMboxErr(m, err, "Expunge (deletedSeqnums)")
 		return wrapErr(err, "Expunge")
 	}
+	m.parent.Opts.Log.Debugln("expunge: pending removal for seqnums", seqnums)
 
 	if err := m.expungeExternal(tx); err != nil {
 		m.parent.logMboxErr(m, err, "Expunge (external)")

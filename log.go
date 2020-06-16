@@ -15,9 +15,13 @@ func (globalLogger) Println(v ...interface{}) {
 	log.Println(v...)
 }
 
-func (globalLogger) Debugf(format string, v ...interface{}) {}
+func (globalLogger) Debugf(format string, v ...interface{}) {
+	log.Println(v...)
+}
 
-func (globalLogger) Debugln(v ...interface{}) {}
+func (globalLogger) Debugln(v ...interface{}) {
+	log.Println(v...)
+}
 
 type DummyLogger struct{}
 

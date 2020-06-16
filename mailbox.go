@@ -814,6 +814,12 @@ func (m *Mailbox) Expunge() error {
 		return wrapErr(err, "Expunge")
 	}
 
+	_, err = tx.Stmt(m.parent.decreaseMsgCount).Exec(len(seqnums), m.id)
+	if err != nil {
+		m.parent.logMboxErr(m, err, "Expunge (decrease counters)", m.id, len(seqnums))
+		return wrapErr(err, "Expunge (decrease counters)")
+	}
+
 	if _, err := tx.Stmt(m.parent.deleteZeroRef).Exec(m.user.id); err != nil {
 		m.parent.logMboxErr(m, err, "Expunge (deleteZeroRef)")
 		return wrapErr(err, "Expunge")

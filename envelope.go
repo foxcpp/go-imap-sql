@@ -46,6 +46,13 @@ func envelopeFromHeader(hdr map[string][]string) rawEnvelope {
 		*fieldVar = strings.Join(val, ", ")
 	}
 
+	if enve.Sender == "" {
+		enve.Sender = enve.From
+	}
+	if enve.ReplyTo == "" {
+		enve.ReplyTo = enve.From
+	}
+
 	fields := [...]string{"Subject", "Message-Id"}
 	for i, fieldVar := range [...]*string{
 		&enve.Subject, &enve.MessageID,

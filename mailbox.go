@@ -335,8 +335,6 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		date = time.Now()
 	}
 
-	// Important to run before transaction, otherwise it will deadlock on
-	// SQLite.
 	haveRecent := false
 	haveSeen := uint8(0) // it needs to be stored in SQL, hence integer
 	for _, flag := range flags {
@@ -350,6 +348,9 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 	if !haveRecent {
 		flags = append(flags, imap.RecentFlag)
 	}
+
+	// Important to run before transaction, otherwise it will deadlock on
+	// SQLite.
 	stmt, err := m.parent.getFlagsAddStmt(true, flags)
 	if err != nil {
 		m.parent.logMboxErr(m, err, "CreateMessage (getFlagsAddStmt)")

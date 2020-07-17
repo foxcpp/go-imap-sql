@@ -52,6 +52,8 @@ type Delivery struct {
 	extKey        string
 	updates       []backend.Update
 	perRcptHeader map[string]textproto.Header
+	flagOverrides map[string][]string
+	mboxOverrides map[string]string
 }
 
 // AddRcpt adds the recipient username/mailbox pair to the delivery.
@@ -97,6 +99,14 @@ func (d *Delivery) Mailbox(name string) error {
 	}
 
 	for _, u := range d.users {
+		if mboxName := d.mboxOverrides[u.username]; mboxName != "" {
+			mbox, err := u.GetMailbox(mboxName)
+			if err == nil {
+				d.mboxes = append(d.mboxes, *mbox.(*Mailbox))
+				continue
+			}
+		}
+
 		mbox, err := u.GetMailbox(name)
 		if err != nil {
 			if err != backend.ErrNoSuchMailbox {
@@ -134,6 +144,14 @@ func (d *Delivery) SpecialMailbox(attribute, fallbackName string) error {
 		d.mboxes = make([]Mailbox, 0, len(d.users))
 	}
 	for _, u := range d.users {
+		if mboxName := d.mboxOverrides[u.username]; mboxName != "" {
+			mbox, err := u.GetMailbox(mboxName)
+			if err == nil {
+				d.mboxes = append(d.mboxes, *mbox.(*Mailbox))
+				continue
+			}
+		}
+
 		var mboxId uint64
 		var mboxName string
 		err := d.b.specialUseMbox.QueryRow(u.id, attribute).Scan(&mboxName, &mboxId)
@@ -160,6 +178,18 @@ func (d *Delivery) SpecialMailbox(attribute, fallbackName string) error {
 		d.mboxes = append(d.mboxes, Mailbox{user: u, id: mboxId, name: mboxName, parent: d.b})
 	}
 	return nil
+}
+
+func (d *Delivery) UserMailbox(username, mailbox string, flags []string) {
+	if d.mboxOverrides == nil {
+		d.mboxOverrides = make(map[string]string)
+	}
+	if d.flagOverrides == nil {
+		d.flagOverrides = make(map[string][]string)
+	}
+
+	d.mboxOverrides[username] = mailbox
+	d.flagOverrides[username] = flags
 }
 
 type memoryBuffer struct {
@@ -204,20 +234,32 @@ func (d *Delivery) BodyParsed(header textproto.Header, bodyLen int, body Buffer)
 	if cap(d.updates) < len(d.mboxes) {
 		d.updates = make([]backend.Update, 0, len(d.mboxes))
 	}
-	flagsStmt, err := d.b.getFlagsAddStmt(true, []string{imap.RecentFlag})
-	if err != nil {
-		return wrapErr(err, "Body")
+
+	// Make sure all auto-generated statements are generated before we start transaction
+	// so it will not cause deadlocks on SQlite when statement is prepared outside
+	// of transaction while transaction is running.
+	for _, mbox := range d.mboxes {
+		_, err := d.b.getFlagsAddStmt(true, append([]string{imap.RecentFlag}, d.flagOverrides[mbox.user.username]...))
+		if err != nil {
+			return wrapErr(err, "Body")
+		}
 	}
 
 	date := time.Now()
 
+	var err error
 	d.tx, err = d.b.db.BeginLevel(sql.LevelReadCommitted, false)
 	if err != nil {
 		return wrapErr(err, "Body")
 	}
 
 	for _, mbox := range d.mboxes {
-		err := d.mboxDelivery(header, mbox, bodyLen, body, date, flagsStmt)
+		flagsStmt, err := d.b.getFlagsAddStmt(true, append([]string{imap.RecentFlag}, d.flagOverrides[mbox.user.username]...))
+		if err != nil {
+			return wrapErr(err, "Body")
+		}
+
+		err = d.mboxDelivery(header, mbox, bodyLen, body, date, flagsStmt)
 		if err != nil {
 			return err
 		}
@@ -287,7 +329,10 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox Mailbox, bodyLen i
 	// --- end of operations that involve msgs table ---
 
 	// --- operations that involve flags table ---
-	params := mbox.makeFlagsAddStmtArgs(true, []string{imap.RecentFlag}, msgId, msgId)
+	flags := []string{imap.RecentFlag}
+	flags = append(flags, d.flagOverrides[mbox.user.username]...)
+
+	params := mbox.makeFlagsAddStmtArgs(true, flags, msgId, msgId)
 	if _, err := d.tx.Stmt(flagsStmt).Exec(params...); err != nil {
 		d.b.extStore.Delete([]string{extBodyKey})
 		return wrapErr(err, "Body (flagsStmt)")

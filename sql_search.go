@@ -10,13 +10,13 @@ func buildSearchStmt(uid bool, withFlags, withoutFlags []string) string {
 	var stmt string
 	if uid {
 		stmt += `
-			SELECT msgId
+			SELECT DISTINCT msgId
 			FROM flags
 			WHERE mboxId = ?
 			`
 	} else {
 		stmt += `
-			SELECT seqnum
+			SELECT DISTINCT seqnum
 			FROM flags
 			INNER JOIN (
 				SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId

@@ -63,6 +63,32 @@ func TestIssue7(t *testing.T) {
 	})
 }
 
+func TestDuplicateSearchWithoutFlags(t *testing.T) {
+	b := initTestBackend()
+	defer cleanBackend(b)
+	assert.NilError(t, b.CreateUser(t.Name()))
+	usr, err := b.GetUser(t.Name())
+	assert.NilError(t, err)
+	assert.NilError(t, usr.CreateMailbox(t.Name()))
+	mbox, err := usr.GetMailbox(t.Name())
+	assert.NilError(t, err)
+	for i := 0; i < 5; i++ {
+		assert.NilError(t, mbox.CreateMessage([]string{"flag1", "flag2"}, time.Now(), strings.NewReader(testMsg)))
+	}
+
+	res, err := mbox.SearchMessages(true, &imap.SearchCriteria{
+		WithoutFlags: []string{"flag3"},
+	})
+	assert.NilError(t, err)
+	assert.DeepEqual(t, res, []uint32{1, 2, 3, 4, 5})
+
+	res, err = mbox.SearchMessages(false, &imap.SearchCriteria{
+		WithoutFlags: []string{"flag3"},
+	})
+	assert.NilError(t, err)
+	assert.DeepEqual(t, res, []uint32{1, 2, 3, 4, 5})
+}
+
 func TestHeaderInMultipleBodyFetch(t *testing.T) {
 	test := func(t *testing.T, fetchItems []imap.FetchItem) {
 		b := initTestBackend()

@@ -251,6 +251,9 @@ type Backend struct {
 
 	setInboxId *sql.Stmt
 
+	cachedHeaderUid *sql.Stmt
+	cachedHeaderSeq *sql.Stmt
+
 	sqliteOptimizeLoopStop chan struct{}
 }
 

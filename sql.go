@@ -829,6 +829,27 @@ func (b *Backend) prepareStmts() error {
 		return wrapErr(err, "lastUid prep")
 	}
 
+	b.cachedHeaderUid, err = b.db.Prepare(`
+		SELECT msgId, cachedHeader, bodyLen, date
+		FROM msgs
+		WHERE msgs.mboxId = ? AND msgId BETWEEN ? AND ?`)
+	if err != nil {
+		return wrapErr(err, "cachedHeaderUid prep")
+	}
+	b.cachedHeaderSeq, err = b.db.Prepare(`
+		SELECT seqnum, cachedHeader, bodyLen, date
+		FROM msgs
+		INNER JOIN (
+			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
+			FROM msgs
+			WHERE mboxId = ?
+		) map
+		ON map.msgId = msgs.msgId
+		WHERE msgs.mboxId = ? AND map.seqnum BETWEEN ? AND ?`)
+	if err != nil {
+		return wrapErr(err, "cachedHeaderSeq prep")
+	}
+
 	return nil
 }
 

@@ -30,6 +30,7 @@ IMAP Extensions Supported
 - [APPEND-LIMIT]
 - [MOVE]
 - [SPECIAL-USE]
+- [SORT]
 
 Authentication
 ----------------
@@ -101,5 +102,6 @@ go install github.com/foxcpp/go-imap-sql/cmd/imapsql-ctl
 [UIDPLUS]: https://tools.ietf.org/html/rfc4315
 [MOVE]: https://tools.ietf.org/html/rfc6851
 [SPECIAL-USE]: https://tools.ietf.org/html/rfc6154
+[SORT]: https://tools.ietf.org/html/rfc5256
 [go-imap]: https://github.com/emersion/go-imap
 [maddy]: https://github.com/emersion/maddy

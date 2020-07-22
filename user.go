@@ -8,6 +8,7 @@ import (
 
 	specialuse "github.com/emersion/go-imap-specialuse"
 	"github.com/emersion/go-imap/backend"
+	namespace "github.com/foxcpp/go-imap-namespace"
 )
 
 const MailboxPathSep = "."
@@ -288,4 +289,13 @@ func (u *User) createParentDirs(tx *sql.Tx, name string) error {
 		}
 	}
 	return nil
+}
+
+func (u *User) Namespaces() (personal, other, shared []namespace.Namespace, err error) {
+	return []namespace.Namespace{
+		{
+			Prefix:    "",
+			Delimiter: MailboxPathSep,
+		},
+	}, nil, nil, nil
 }

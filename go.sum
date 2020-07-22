@@ -34,6 +34,8 @@ github.com/emersion/go-textwrapper v0.0.0-20160606182133-d0e65e56babe h1:40SWqY0
 github.com/emersion/go-textwrapper v0.0.0-20160606182133-d0e65e56babe/go.mod h1:aqO8z8wPrjkscevZJFVE1wXJrLpC5LtJG7fqLOsPb2U=
 github.com/foxcpp/go-imap-backend-tests v0.0.0-20200617132817-958ea5829771 h1:xemWCEhBz86Y8v5YgRBnqf6PdZg+ilVgn2jxWVoLOGo=
 github.com/foxcpp/go-imap-backend-tests v0.0.0-20200617132817-958ea5829771/go.mod h1:yUISYv/uXLQ6tQZcds/p/hdcZ5JzrEUifyED2VffWpc=
+github.com/foxcpp/go-imap-namespace v0.0.0-20200722130255-93092adf35f1 h1:B4zNQ2r4qC7FLn8J8+LWt09fFW0tXddypBPS0+HI50s=
+github.com/foxcpp/go-imap-namespace v0.0.0-20200722130255-93092adf35f1/go.mod h1:WJYkFIdxyljR/byiqcYMKUF4iFDej4CaIKe2JJrQxu8=
 github.com/foxcpp/go-imap-sortthread v1.1.0 h1:+fIk8LQ5jGn1F2oUh0sEFVEbEYNUMaMJu3FVRr4GRcs=
 github.com/foxcpp/go-imap-sortthread v1.1.0/go.mod h1:opHOzblOHZKQM1JEy+GPk1217giNLa7kleyWTN06qnc=
 github.com/foxcpp/go-imap-sortthread v1.1.1-0.20200720160710-8fb7dccfecfc h1:KBHo7sLBqAYplqZc2dgA6vsa9esTFp3yPcwrOcP/V+w=

@@ -9,6 +9,7 @@ require (
 	github.com/emersion/go-imap-specialuse v0.0.0-20161227184202-ba031ced6a62
 	github.com/emersion/go-message v0.11.2
 	github.com/foxcpp/go-imap-backend-tests v0.0.0-20200617132817-958ea5829771
+	github.com/foxcpp/go-imap-namespace v0.0.0-20200722130255-93092adf35f1
 	github.com/frankban/quicktest v1.5.0 // indirect
 	github.com/go-sql-driver/mysql v1.4.1
 	github.com/klauspost/compress v1.10.5

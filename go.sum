@@ -13,6 +13,8 @@ github.com/emersion/go-imap-move v0.0.0-20180601155324-5eb20cb834bf h1:TmRfuPmhr
 github.com/emersion/go-imap-move v0.0.0-20180601155324-5eb20cb834bf/go.mod h1:QuMaZcKFDVI0yCrnAbPLfbwllz1wtOrZH8/vZ5yzp4w=
 github.com/emersion/go-imap-sortthread v1.1.0 h1:uRbmnQkeRny5ihKfLWBPJ/1jJdTZnCdh1zYpOagbubw=
 github.com/emersion/go-imap-sortthread v1.1.0/go.mod h1:opHOzblOHZKQM1JEy+GPk1217giNLa7kleyWTN06qnc=
+github.com/emersion/go-imap-sortthread v1.1.1-0.20200727121200-18e5fb409fed h1:O1GZQnAy76K/DHEp2+S8ZI5hRmkTVNkCLc4Xb0c/RL8=
+github.com/emersion/go-imap-sortthread v1.1.1-0.20200727121200-18e5fb409fed/go.mod h1:opHOzblOHZKQM1JEy+GPk1217giNLa7kleyWTN06qnc=
 github.com/emersion/go-imap-specialuse v0.0.0-20161227184202-ba031ced6a62 h1:4ZAfwfc8aDlj26kkEap1UDSwwDnJp9Ie8Uj1MSXAkPk=
 github.com/emersion/go-imap-specialuse v0.0.0-20161227184202-ba031ced6a62/go.mod h1:/nybxhI8kXom8Tw6BrHMl42usALvka6meORflnnYwe4=
 github.com/emersion/go-message v0.9.1 h1:s6HoJ6t+1wHWEs0G/QVR1r5bb6nvx2/b6DuQfknit14=

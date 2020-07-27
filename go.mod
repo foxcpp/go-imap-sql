@@ -5,7 +5,7 @@ go 1.12
 require (
 	github.com/emersion/go-imap v1.0.4
 	github.com/emersion/go-imap-appendlimit v0.0.0-20190308131241-25671c986a6a
-	github.com/emersion/go-imap-sortthread v1.1.0
+	github.com/emersion/go-imap-sortthread v1.1.1-0.20200727121200-18e5fb409fed
 	github.com/emersion/go-imap-specialuse v0.0.0-20161227184202-ba031ced6a62
 	github.com/emersion/go-message v0.11.2
 	github.com/foxcpp/go-imap-backend-tests v0.0.0-20200617132817-958ea5829771
@@ -21,5 +21,3 @@ require (
 	google.golang.org/appengine v1.6.1 // indirect
 	gotest.tools v2.2.0+incompatible
 )
-
-replace github.com/emersion/go-imap-sortthread => github.com/foxcpp/go-imap-sortthread v1.1.1-0.20200721100531-a34cd4e99342

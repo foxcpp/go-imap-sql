@@ -36,11 +36,13 @@ func TestKeyIsRemovedWithMsg(t *testing.T) {
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)
 	assert.NilError(t, usr.CreateMailbox(t.Name()))
-	mbox, err := usr.GetMailbox(t.Name())
+	_, mbox, err := usr.GetMailbox(t.Name(), true, &noopConn{})
 	assert.NilError(t, err)
+	defer mbox.Close()
 
 	// Message is created, there should be a key.
-	assert.NilError(t, mbox.CreateMessage([]string{imap.DeletedFlag}, time.Now(), strings.NewReader(testMsg)))
+	assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{imap.DeletedFlag}, time.Now(), strings.NewReader(testMsg)))
+	assert.NilError(t, mbox.Poll(true))
 	assert.Assert(t, checkKeysCount(b, 1), "Wrong amount of external store keys created")
 
 	// Message is removed, there should be no key anymore.
@@ -55,11 +57,12 @@ func TestKeyIsRemovedWithMbox(t *testing.T) {
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)
 	assert.NilError(t, usr.CreateMailbox(t.Name()))
-	mbox, err := usr.GetMailbox(t.Name())
+	_, mbox, err := usr.GetMailbox(t.Name(), true, &noopConn{})
 	assert.NilError(t, err)
 
 	// Message is created, there should be a key.
-	assert.NilError(t, mbox.CreateMessage([]string{imap.DeletedFlag}, time.Now(), strings.NewReader(testMsg)))
+	assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{imap.DeletedFlag}, time.Now(), strings.NewReader(testMsg)))
+	assert.NilError(t, mbox.Poll(true))
 	assert.Assert(t, checkKeysCount(b, 1), "Wrong amount of external store keys created")
 
 	// The mbox is removed along with all messages, there should be no key anymore.
@@ -75,20 +78,24 @@ func TestKeyIsRemovedWithCopiedMsgs(t *testing.T) {
 	assert.NilError(t, err)
 
 	assert.NilError(t, usr.CreateMailbox(t.Name()+"-1"))
-	mbox1, err := usr.GetMailbox(t.Name() + "-1")
+	_, mbox1, err := usr.GetMailbox(t.Name()+"-1", true, &noopConn{})
 	assert.NilError(t, err)
+	defer mbox1.Close()
 
 	assert.NilError(t, usr.CreateMailbox(t.Name()+"-2"))
-	mbox2, err := usr.GetMailbox(t.Name() + "-2")
+	_, mbox2, err := usr.GetMailbox(t.Name()+"-2", true, &noopConn{})
 	assert.NilError(t, err)
+	defer mbox2.Close()
 
 	// The message is created, there should be a key.
-	assert.NilError(t, mbox1.CreateMessage([]string{imap.DeletedFlag}, time.Now(), strings.NewReader(testMsg)))
+	assert.NilError(t, usr.CreateMessage(mbox1.Name(), []string{imap.DeletedFlag}, time.Now(), strings.NewReader(testMsg)))
+	assert.NilError(t, mbox1.Poll(true))
 	assert.Assert(t, checkKeysCount(b, 1), "Wrong amount of external store keys created")
 
 	// The message is copied, there should be no duplicate key.
 	seq, _ := imap.ParseSeqSet("1")
 	assert.NilError(t, mbox1.CopyMessages(false, seq, mbox2.Name()))
+	assert.NilError(t, mbox2.Poll(true))
 	assert.Assert(t, checkKeysCount(b, 1), "Wrong amount of external store keys")
 
 	// The message copy is removed, key should be still here.
@@ -107,11 +114,12 @@ func TestKeyIsRemovedWithUser(t *testing.T) {
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)
 	assert.NilError(t, usr.CreateMailbox(t.Name()))
-	mbox, err := usr.GetMailbox(t.Name())
+	_, mbox, err := usr.GetMailbox(t.Name(), true, &noopConn{})
 	assert.NilError(t, err)
+	defer mbox.Close()
 
 	// The message is created, there should be a key.
-	assert.NilError(t, mbox.CreateMessage([]string{imap.DeletedFlag}, time.Now(), strings.NewReader(testMsg)))
+	assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{imap.DeletedFlag}, time.Now(), strings.NewReader(testMsg)))
 	assert.Assert(t, checkKeysCount(b, 1), "Wrong amount of external store keys created")
 
 	// The user account is removed, all keys should be gone.

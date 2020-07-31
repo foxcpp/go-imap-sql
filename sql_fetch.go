@@ -15,35 +15,37 @@ const flagsMidBlock = `
 
 var cachedHeaderFields = map[string]struct{}{
 	// Common header fields (requested by Thunderbird)
-	"From":         struct{}{},
-	"To":           struct{}{},
-	"Cc":           struct{}{},
-	"Bcc":          struct{}{},
-	"Subject":      struct{}{},
-	"Date":         struct{}{},
-	"Message-Id":   struct{}{},
-	"Priority":     struct{}{},
-	"x-Priority":   struct{}{},
-	"References":   struct{}{},
-	"Newsgroups":   struct{}{},
-	"In-Reply-To":  struct{}{},
-	"Content-Type": struct{}{},
-	"Reply-To":     struct{}{},
-	"Importance":   struct{}{},
-	"List-Post":    struct{}{},
+	"From":         {},
+	"To":           {},
+	"Cc":           {},
+	"Bcc":          {},
+	"Subject":      {},
+	"Date":         {},
+	"Message-Id":   {},
+	"Priority":     {},
+	"x-Priority":   {},
+	"References":   {},
+	"Newsgroups":   {},
+	"In-Reply-To":  {},
+	"Content-Type": {},
+	"Reply-To":     {},
+	"Importance":   {},
+	"List-Post":    {},
 
 	// Requested by Apple Mail
-	"X-Uniform-Type-Identifier":       struct{}{},
-	"X-Universally-Unique-Identifier": struct{}{},
+	"X-Uniform-Type-Identifier":       {},
+	"X-Universally-Unique-Identifier": {},
 
 	// Misc fields I think clients could be interested in.
-	"Return-Path":  struct{}{},
-	"Delivered-To": struct{}{},
+	"Return-Path":  {},
+	"Delivered-To": {},
 }
 
-func (b *Backend) buildFetchStmt(uid bool, items []imap.FetchItem) (stmt, cacheKey string, err error) {
-	colNames := make(map[string]struct{}, len(items))
+func (b *Backend) buildFetchStmt(items []imap.FetchItem) (stmt, cacheKey string, err error) {
+	colNames := make(map[string]struct{}, len(items)+1)
 	needFlags := false
+
+	colNames["msgs.msgId"] = struct{}{}
 
 	for _, item := range items {
 		switch item {
@@ -52,7 +54,6 @@ func (b *Backend) buildFetchStmt(uid bool, items []imap.FetchItem) (stmt, cacheK
 		case imap.FetchRFC822Size:
 			colNames["bodyLen"] = struct{}{}
 		case imap.FetchUid:
-			colNames["msgs.msgId"] = struct{}{}
 		case imap.FetchEnvelope:
 			colNames["cachedHeader"] = struct{}{}
 		case imap.FetchFlags:
@@ -87,27 +88,16 @@ func (b *Backend) buildFetchStmt(uid bool, items []imap.FetchItem) (stmt, cacheK
 
 	sort.Strings(cols)
 
-	filterId := "seqnum"
-	if uid {
-		filterId = "msgs.msgId"
-	}
-
 	columns := strings.Join(cols, ", ")
-	return `SELECT seqnum, ` + columns + `
+	return `SELECT ` + columns + `
 		FROM msgs
-		INNER JOIN (
-			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
-			FROM msgs
-			WHERE mboxId = ?
-		) map
-		ON map.msgId = msgs.msgId
 		` + extraParams + `
-		WHERE msgs.mboxId = ? AND ` + filterId + ` BETWEEN ? AND ?
-		GROUP BY seqnum, msgs.mboxId, msgs.msgId`, filterId + "/" + columns, nil
+		WHERE msgs.mboxId = ? AND msgs.msgId BETWEEN ? AND ?
+		GROUP BY msgs.mboxId, msgs.msgId`, columns, nil
 }
 
-func (b *Backend) getFetchStmt(uid bool, items []imap.FetchItem) (*sql.Stmt, error) {
-	str, key, err := b.buildFetchStmt(uid, items)
+func (b *Backend) getFetchStmt(items []imap.FetchItem) (*sql.Stmt, error) {
+	str, key, err := b.buildFetchStmt(items)
 	if err != nil {
 		return nil, err
 	}

@@ -1,13 +1,12 @@
 package imapsql
 
 import (
+	"errors"
 	"net/mail"
 	"strings"
 	"time"
 
-	"errors"
-
-	imap "github.com/emersion/go-imap"
+	"github.com/emersion/go-imap"
 )
 
 type rawEnvelope struct {
@@ -87,7 +86,7 @@ func toImapAddr(list []*mail.Address) ([]*imap.Address, error) {
 func (enve *rawEnvelope) toIMAP() *imap.Envelope {
 	res := new(imap.Envelope)
 	res.Date = time.Unix(enve.Date, 0)
-	res.Subject = enve.Subject
+	res.Subject = &enve.Subject
 	from, _ := mail.ParseAddressList(enve.From)
 	res.From, _ = toImapAddr(from)
 	// I really wonder how we can have multiple senders in a message header,

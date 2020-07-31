@@ -97,22 +97,21 @@ func (d db) rewriteSQL(req string) (res string) {
 	return
 }
 
-func (db db) valuesSubquery(rows []string) string {
-	count := len(rows)
+func (db db) valuesSubquery(flagsCount int) string {
 	sqlList := ""
 	if db.driver == "mysql" {
 
 		sqlList += "SELECT ? AS column1"
-		for i := 1; i < count; i++ {
+		for i := 1; i < flagsCount; i++ {
 			sqlList += " UNION ALL SELECT ? "
 		}
 
 		return sqlList
 	}
 
-	for i := 0; i < count; i++ {
+	for i := 0; i < flagsCount; i++ {
 		sqlList += "(?)"
-		if i+1 != count {
+		if i+1 != flagsCount {
 			sqlList += ","
 		}
 	}

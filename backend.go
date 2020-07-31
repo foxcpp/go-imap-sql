@@ -2,16 +2,16 @@ package imapsql
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	mathrand "math/rand"
 	"strings"
 	"sync"
 	"time"
 
-	"errors"
-
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/backend"
+	sequpdate "github.com/foxcpp/go-imap-sequpdate"
 )
 
 // VersionStr is a string value representing go-imap-sql version.
@@ -73,14 +73,6 @@ type Opts struct {
 	// channel.
 	LazyUpdatesInit bool
 
-	// UpdatesChan allows to pass custom channel object used for unilateral
-	// updates dispatching.
-	//
-	// You can use this to change default updates buffer size (20) or to split
-	// initializaton into phases (which allows to break circular dependencies
-	// if you need updates channel before database initialization).
-	UpdatesChan chan backend.Update
-
 	// Custom randomness source for UIDVALIDITY values generation.
 	PRNG Rand
 
@@ -119,6 +111,7 @@ type Opts struct {
 type Backend struct {
 	db       db
 	extStore ExternalStore
+	mngr     *sequpdate.Manager
 
 	// Opts structure used to construct this Backend object.
 	//
@@ -132,7 +125,6 @@ type Backend struct {
 	// - ExclusiveLock
 	// - CacheSize
 	// - NoWAL
-	// - UpdatesChan
 	Opts Opts
 
 	// database/sql.DB object created by New.
@@ -143,10 +135,6 @@ type Backend struct {
 
 	prng         Rand
 	compressAlgo CompressionAlgo
-
-	updates chan backend.Update
-	// updates channel is lazily initalized, so we need to ensure thread-safety.
-	updatesLck sync.Mutex
 
 	// Shitton of pre-compiled SQL statements.
 	userMeta           *sql.Stmt
@@ -167,21 +155,20 @@ type Backend struct {
 	hasChildren        *sql.Stmt
 	uidValidity        *sql.Stmt
 	msgsCount          *sql.Stmt
-	firstUnseenSeqNum  *sql.Stmt
-	deletedSeqnums     *sql.Stmt
+	recentCount        *sql.Stmt
+	firstUnseenUid     *sql.Stmt
+	unseenCount        *sql.Stmt
+	deletedUids        *sql.Stmt
 	expungeMbox        *sql.Stmt
 	mboxId             *sql.Stmt
 	addMsg             *sql.Stmt
 	copyMsgsUid        *sql.Stmt
 	copyMsgFlagsUid    *sql.Stmt
-	copyMsgsSeq        *sql.Stmt
-	copyMsgFlagsSeq    *sql.Stmt
 	massClearFlagsUid  *sql.Stmt
-	massClearFlagsSeq  *sql.Stmt
 	msgFlagsUid        *sql.Stmt
-	msgFlagsSeq        *sql.Stmt
 	usedFlags          *sql.Stmt
 	listMsgUids        *sql.Stmt
+	listMsgUidsRecent  *sql.Stmt
 
 	addRecentToLast *sql.Stmt
 
@@ -202,13 +189,11 @@ type Backend struct {
 	// is basically a optimization.
 
 	// For MOVE extension
-	markUid   *sql.Stmt
-	markSeq   *sql.Stmt
-	delMarked *sql.Stmt
+	markUid    *sql.Stmt
+	delMarked  *sql.Stmt
+	markedUids *sql.Stmt
 
 	lastUid *sql.Stmt
-
-	markedSeqnums *sql.Stmt
 
 	// For APPEND-LIMIT extension
 	setUserMsgSizeLimit *sql.Stmt
@@ -216,7 +201,6 @@ type Backend struct {
 	setMboxMsgSizeLimit *sql.Stmt
 	mboxMsgSizeLimit    *sql.Stmt
 
-	searchFetch      *sql.Stmt
 	searchFetchNoSeq *sql.Stmt
 
 	flagsSearchStmtsLck   sync.RWMutex
@@ -233,7 +217,6 @@ type Backend struct {
 	decreaseRefForMarked  *sql.Stmt
 	decreaseRefForDeleted *sql.Stmt
 	incrementRefUid       *sql.Stmt
-	incrementRefSeq       *sql.Stmt
 	zeroRef               *sql.Stmt
 	zeroRefUser           *sql.Stmt
 	refUser               *sql.Stmt
@@ -245,14 +228,12 @@ type Backend struct {
 	specialUseMbox *sql.Stmt
 
 	setSeenFlagUid   *sql.Stmt
-	setSeenFlagSeq   *sql.Stmt
 	increaseMsgCount *sql.Stmt
 	decreaseMsgCount *sql.Stmt
 
 	setInboxId *sql.Stmt
 
 	cachedHeaderUid *sql.Stmt
-	cachedHeaderSeq *sql.Stmt
 
 	sqliteOptimizeLoopStop chan struct{}
 }
@@ -277,6 +258,8 @@ func New(driver, dsn string, extStore ExternalStore, opts Opts) (*Backend, error
 
 		extStore: extStore,
 		Opts:     opts,
+
+		mngr: sequpdate.NewManager(),
 	}
 	var err error
 
@@ -292,12 +275,6 @@ func New(driver, dsn string, extStore ExternalStore, opts Opts) (*Backend, error
 	}
 
 	b.Opts = opts
-	if !b.Opts.LazyUpdatesInit {
-		b.updates = b.Opts.UpdatesChan
-		if b.updates == nil {
-			b.updates = make(chan backend.Update, 20)
-		}
-	}
 
 	if b.Opts.Log == nil {
 		b.Opts.Log = globalLogger{}
@@ -355,11 +332,8 @@ func New(driver, dsn string, extStore ExternalStore, opts Opts) (*Backend, error
 		imap.FetchFlags, imap.FetchEnvelope,
 		imap.FetchBodyStructure, "BODY[]", "BODY[HEADER.FIELDS (From To)]"} {
 
-		if _, err := b.getFetchStmt(true, []imap.FetchItem{item}); err != nil {
-			return nil, wrapErrf(err, "fetchStmt prime (%s, uid=true)", item)
-		}
-		if _, err := b.getFetchStmt(false, []imap.FetchItem{item}); err != nil {
-			return nil, wrapErrf(err, "fetchStmt prime (%s, uid=false)", item)
+		if _, err := b.getFetchStmt([]imap.FetchItem{item}); err != nil {
+			return nil, wrapErrf(err, "fetchStmt prime (%s)", item)
 		}
 	}
 
@@ -413,23 +387,7 @@ func (b *Backend) Close() error {
 		b.db.Exec(`PRAGMA optimize`)
 	}
 
-	if b.updates != nil {
-		close(b.updates)
-	}
-
 	return b.db.Close()
-}
-
-func (b *Backend) Updates() <-chan backend.Update {
-	if b.Opts.LazyUpdatesInit && b.updates == nil {
-		b.updatesLck.Lock()
-		defer b.updatesLck.Unlock()
-
-		if b.updates == nil {
-			b.updates = make(chan backend.Update, 20)
-		}
-	}
-	return b.updates
 }
 
 func (b *Backend) getUserMeta(tx *sql.Tx, username string) (id uint64, inboxId uint64, err error) {

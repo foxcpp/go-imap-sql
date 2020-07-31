@@ -4,18 +4,19 @@ import (
 	"database/sql"
 	"strings"
 
-	imap "github.com/emersion/go-imap"
-	"github.com/emersion/go-imap/backend"
+	"github.com/emersion/go-imap"
 )
 
-func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation imap.FlagsOp, flags []string) error {
+func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation imap.FlagsOp, silent bool, flags []string) error {
+	defer m.handle.Sync(uid)
+
 	var err error
 	var addQuery, remQuery *sql.Stmt
 	switch operation {
 	case imap.SetFlags, imap.AddFlags:
-		addQuery, err = m.parent.getFlagsAddStmt(uid, flags)
+		addQuery, err = m.parent.getFlagsAddStmt(len(flags))
 	case imap.RemoveFlags:
-		remQuery, err = m.parent.getFlagsRemStmt(uid, flags)
+		remQuery, err = m.parent.getFlagsRemStmt(len(flags))
 	}
 	if err != nil {
 		return wrapErr(err, "UpdateMessagesFlags")
@@ -25,7 +26,12 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 	if err != nil {
 		return wrapErr(err, "UpdateMessagesFlags")
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback() // nolint:errcheck
+
+	seqset, err = m.handle.ResolveSeq(uid, seqset)
+	if err != nil {
+		return err
+	}
 
 	seenModified := false
 	newFlagSet := make([]string, 0, len(flags))
@@ -41,49 +47,31 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 	flags = newFlagSet
 
 	for _, seq := range seqset.Set {
-		start, stop, err := m.resolveSeq(tx, seq, uid)
-		if err != nil {
-			return wrapErr(err, "UpdateMessagesFlags (resolve seq)")
-		}
-		m.parent.Opts.Log.Debugln("UpdateMessageFlags: resolved", seq, "to", start, stop, uid)
-
 		switch operation {
 		case imap.SetFlags:
-			if uid {
-				_, err = tx.Stmt(m.parent.massClearFlagsUid).Exec(m.id, start, stop)
-			} else {
-				_, err = tx.Stmt(m.parent.massClearFlagsSeq).Exec(m.id, m.id, start, stop)
-			}
+			_, err = tx.Stmt(m.parent.massClearFlagsUid).Exec(m.id, seq.Start, seq.Stop)
 			if err != nil {
 				return err
 			}
 			fallthrough
 		case imap.AddFlags:
-			args := m.makeFlagsAddStmtArgs(uid, flags, start, stop)
+			args := m.makeFlagsAddStmtArgs(flags, seq.Start, seq.Stop)
 			if _, err := tx.Stmt(addQuery).Exec(args...); err != nil {
 				return err
 			}
 			if seenModified {
-				if uid {
-					_, err = tx.Stmt(m.parent.setSeenFlagUid).Exec(1, m.id, start, stop)
-				} else {
-					_, err = tx.Stmt(m.parent.setSeenFlagSeq).Exec(1, m.id, m.id, start, stop)
-				}
+				_, err = tx.Stmt(m.parent.setSeenFlagUid).Exec(1, m.id, seq.Start, seq.Stop)
 				if err != nil {
 					return err
 				}
 			}
 		case imap.RemoveFlags:
-			args := m.makeFlagsRemStmtArgs(uid, flags, start, stop)
+			args := m.makeFlagsRemStmtArgs(flags, seq.Start, seq.Stop)
 			if _, err := tx.Stmt(remQuery).Exec(args...); err != nil {
 				return err
 			}
 			if seenModified {
-				if uid {
-					_, err = tx.Stmt(m.parent.setSeenFlagUid).Exec(0, m.id, start, stop)
-				} else {
-					_, err = tx.Stmt(m.parent.setSeenFlagSeq).Exec(0, m.id, m.id, start, stop)
-				}
+				_, err = tx.Stmt(m.parent.setSeenFlagUid).Exec(0, m.id, seq.Start, seq.Stop)
 				if err != nil {
 					return err
 				}
@@ -103,57 +91,48 @@ func (m *Mailbox) UpdateMessagesFlags(uid bool, seqset *imap.SeqSet, operation i
 		return wrapErr(err, "UpdateMessagesFlags")
 	}
 
-	if m.parent.updates != nil {
-		for _, update := range updatesBuffer {
-			m.parent.updates <- update
-		}
+	for _, upd := range updatesBuffer {
+		m.handle.FlagsChanged(upd.uid, upd.flags, silent)
 	}
 	return nil
 }
 
-func (m *Mailbox) flagUpdates(tx *sql.Tx, uid bool, seqset *imap.SeqSet) ([]backend.Update, error) {
-	var updatesBuffer []backend.Update
+type flagUpdate struct {
+	uid   uint32
+	flags []string
+}
+
+func (m *Mailbox) flagUpdates(tx *sql.Tx, uid bool, seqset *imap.SeqSet) ([]flagUpdate, error) {
+	var updatesBuffer []flagUpdate
 
 	for _, seq := range seqset.Set {
 		var err error
 		var rows *sql.Rows
-		start, stop, err := m.resolveSeq(tx, seq, uid)
-		if err != nil {
-			return nil, err
-		}
 
-		if uid {
-			rows, err = tx.Stmt(m.parent.msgFlagsUid).Query(m.id, m.id, start, stop)
-		} else {
-			rows, err = tx.Stmt(m.parent.msgFlagsSeq).Query(m.id, m.id, start, stop)
-		}
+		rows, err = tx.Stmt(m.parent.msgFlagsUid).Query(m.id, seq.Start, seq.Stop)
 		if err != nil {
 			return nil, err
 		}
+		defer rows.Close() // It is fine.
 
 		for rows.Next() {
-			var seqnum uint32
 			var msgId uint32
 			var flagsJoined string
 
-			if err := rows.Scan(&seqnum, &msgId, &flagsJoined); err != nil {
+			if err := rows.Scan(&msgId, &flagsJoined); err != nil {
 				return nil, err
 			}
 
-			flags := strings.Split(flagsJoined, flagsSep)
-
-			updatesBuffer = append(updatesBuffer, &backend.MessageUpdate{
-				Update: backend.NewUpdate(m.user.username, m.name),
-				Message: &imap.Message{
-					SeqNum: seqnum,
-					Items:  map[imap.FetchItem]interface{}{imap.FetchFlags: nil},
-					Flags:  flags,
-				},
+			updatesBuffer = append(updatesBuffer, flagUpdate{
+				uid:   msgId,
+				flags: strings.Split(flagsJoined, flagsSep),
 			})
 		}
 		if err := rows.Err(); err != nil {
 			return nil, err
 		}
+
+		rows.Close()
 	}
 
 	return updatesBuffer, nil

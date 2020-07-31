@@ -20,23 +20,10 @@ func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uin
 		return m.flagSearch(uid, criteria.WithFlags, criteria.WithoutFlags)
 	}
 
+	m.handle.ResolveCriteria(criteria)
+
 	needBody := searchNeedsBody(criteria)
-	noSeqNum := noSeqNumNeeded(criteria)
-	var rows *sql.Rows
-	var err error
-	if needBody {
-		if noSeqNum && uid {
-			rows, err = m.parent.searchFetchNoSeq.Query(m.id)
-		} else {
-			rows, err = m.parent.searchFetch.Query(m.id, m.id)
-		}
-	} else {
-		if noSeqNum && uid {
-			rows, err = m.parent.searchFetchNoSeq.Query(m.id)
-		} else {
-			rows, err = m.parent.searchFetch.Query(m.id, m.id)
-		}
-	}
+	rows, err := m.parent.searchFetchNoSeq.Query(m.id)
 	if err != nil {
 		return nil, err
 	}
@@ -61,15 +48,15 @@ func (m *Mailbox) SearchMessages(uid bool, criteria *imap.SearchCriteria) ([]uin
 
 func (m *Mailbox) searchMatches(uid, needBody bool, rows *sql.Rows, criteria *imap.SearchCriteria) (uint32, error) {
 	var (
-		seqNum, msgId uint32
-		dateUnix      int64
-		bodyLen       int
-		flagStr       string
-		extBodyKey    string
-		compressAlgo  string
+		msgId        uint32
+		dateUnix     int64
+		bodyLen      int
+		flagStr      string
+		extBodyKey   string
+		compressAlgo string
 	)
 
-	if err := rows.Scan(&seqNum, &msgId, &dateUnix, &bodyLen, &extBodyKey, &compressAlgo, &flagStr); err != nil {
+	if err := rows.Scan(&msgId, &dateUnix, &bodyLen, &extBodyKey, &compressAlgo, &flagStr); err != nil {
 		return 0, err
 	}
 
@@ -83,25 +70,35 @@ func (m *Mailbox) searchMatches(uid, needBody bool, rows *sql.Rows, criteria *im
 	if needBody {
 		bufferedBody, err := m.openBody(true, compressAlgo, extBodyKey)
 		if err != nil {
-			m.parent.logMboxErr(m, err, "failed to read body, skipping", seqNum, extBodyKey)
+			m.parent.logMboxErr(m, err, "failed to read body, skipping", extBodyKey)
 			return 0, nil
 		}
 		defer bufferedBody.Close()
 
 		hdr, err := textproto.ReadHeader(bufferedBody.Reader)
 		if err != nil {
-			m.parent.logMboxErr(m, err, "failed to parse body, skipping", seqNum, extBodyKey)
+			m.parent.logMboxErr(m, err, "failed to parse body, skipping", extBodyKey)
 			return 0, nil
 		}
 
 		ent, err = message.New(message.Header{Header: hdr}, bufferedBody.Reader)
 		if err != nil {
-			m.parent.logMboxErr(m, err, "failed to parse body, skipping", seqNum, extBodyKey)
+			m.parent.logMboxErr(m, err, "failed to parse body, skipping", extBodyKey)
 			return 0, nil
 		}
 	} else {
 		// XXX: This assumes backendutil.Match will not touch body unless it is needed for criteria.
 		ent, _ = message.New(message.Header{}, nil)
+	}
+
+	var seqNum uint32
+	if !uid {
+		var ok bool
+		seqNum, ok = m.handle.UidAsSeq(msgId)
+		if !ok {
+			// Wtf
+			return 0, nil
+		}
 	}
 
 	matched, err := backendutil.Match(ent, seqNum, msgId, time.Unix(dateUnix, 0), flags, criteria)
@@ -187,14 +184,9 @@ func noSeqNumNeeded(criteria *imap.SearchCriteria) bool {
 
 func (m *Mailbox) allSearch(uid bool) ([]uint32, error) {
 	if !uid {
-		row := m.parent.msgsCount.QueryRow(m.id)
-		var count uint32
-		if err := row.Scan(&count); err != nil {
-			return nil, err
-		}
-
+		count := m.handle.MsgsCount()
 		seqs := make([]uint32, 0, count)
-		for i := uint32(1); i <= count; i++ {
+		for i := uint32(1); i <= uint32(count); i++ {
 			seqs = append(seqs, i)
 		}
 		return seqs, nil

@@ -19,8 +19,9 @@ func TestUserCaseInsensitivity(t *testing.T) {
 	assert.NilError(t, err, "b.GetOrCreateUser")
 
 	assert.NilError(t, u1.CreateMailbox("BOX"))
-	_, err = u2.GetMailbox("BOX")
+	_, mbox, err := u2.GetMailbox("BOX", true, &noopConn{})
 	assert.NilError(t, err, "u2.GetMailbox")
+	defer mbox.Close()
 }
 
 func TestInboxCreation(t *testing.T) {
@@ -32,6 +33,7 @@ func TestInboxCreation(t *testing.T) {
 	u, err := b.GetUser("foxcpp")
 	assert.NilError(t, err, "b.GetUser")
 
-	_, err = u.GetMailbox("INBOX")
+	_, mbox, err := u.GetMailbox("INBOX", true, &noopConn{})
 	assert.NilError(t, err, "u.GetMailbox")
+	defer mbox.Close()
 }

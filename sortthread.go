@@ -259,48 +259,46 @@ func (m *Mailbox) headerMetaScan(tx *sql.Tx, uid bool, seqSet *imap.SeqSet, call
 		defer tx.Rollback()
 	}
 
+	seqSet, err := m.handle.ResolveSeq(uid, seqSet)
+	if err != nil {
+		return 0, err
+	}
+
 outerLoop:
 	for _, seq := range seqSet.Set {
-		start, stop, err := m.resolveSeq(tx, seq, uid)
-		if err != nil {
-			m.parent.logMboxErr(m, err, "headerMetaScan (resolve seq)", uid, seqSet)
-			return 0, err
-		}
-		m.parent.Opts.Log.Debugln("headerMetaScan: resolved seq", seq, uid, "to", start, stop)
-
-		var rows *sql.Rows
-		if uid {
-			rows, err = tx.Stmt(m.parent.cachedHeaderUid).Query(m.id, start, stop)
-		} else {
-			rows, err = tx.Stmt(m.parent.cachedHeaderSeq).Query(m.id, m.id, start, stop)
-		}
+		rows, err := tx.Stmt(m.parent.cachedHeaderUid).Query(m.id, seq.Start, seq.Stop)
 		if err != nil {
 			m.parent.logMboxErr(m, err, "headerMetaScan: cachedHeader", uid, seqSet)
 			return 0, err
 		}
-		defer rows.Close()
 
 		for rows.Next() {
 			var cachedHeaderBlob []byte
 			key := msgKey{}
 			if err := rows.Scan(&key.ID, &cachedHeaderBlob, &key.BodyLen, &key.ArrivalUnix); err != nil {
 				m.parent.logMboxErr(m, err, "headerMetaScan: cachedHeader scan", uid, seqSet)
+				rows.Close()
 				continue
 			}
 			if err := json.Unmarshal(cachedHeaderBlob, &key.CachedHeader); err != nil {
 				m.parent.logMboxErr(m, err, "headerMetaScan: cachedHeader unmarshal", uid, seqSet)
+				rows.Close()
 				continue
 			}
 
 			if err := callback(&key); err != nil {
 				m.parent.logMboxErr(m, err, "headerMetaScan: callback error", uid, seqSet)
+				rows.Close()
 				return 0, err
 			}
 
 			count++
 			if count == 10000 {
+				rows.Close()
 				break outerLoop
 			}
+
+			rows.Close()
 		}
 	}
 

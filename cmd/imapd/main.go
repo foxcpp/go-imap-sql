@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"runtime"
 
 	appendlimit "github.com/emersion/go-imap-appendlimit"
 	move "github.com/emersion/go-imap-move"
@@ -42,13 +45,17 @@ func main() {
 		os.Exit(2)
 	}
 
+	runtime.SetCPUProfileRate(200)
+	go http.ListenAndServe("127.0.0.2:9999", nil)
+
 	endpoint := os.Args[1]
 	driver := os.Args[2]
 	dsn := os.Args[3]
 	fsStore := imapsql.FSStore{Root: os.Args[4]}
 
 	bkd, err := imapsql.New(driver, dsn, &fsStore, imapsql.Opts{
-		Log: stdLogger{},
+		BusyTimeout: 100000,
+		Log:         stdLogger{},
 	})
 	defer bkd.Close()
 	if err != nil {

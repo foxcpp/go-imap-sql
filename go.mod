@@ -9,9 +9,9 @@ require (
 	github.com/emersion/go-imap-sortthread v1.1.1-0.20200727121200-18e5fb409fed
 	github.com/emersion/go-imap-specialuse v0.0.0-20161227184202-ba031ced6a62
 	github.com/emersion/go-message v0.11.2
-	github.com/foxcpp/go-imap-backend-tests v0.0.0-20200617132817-958ea5829771
-	github.com/foxcpp/go-imap-namespace v0.0.0-20200722130255-93092adf35f1
-	github.com/foxcpp/go-imap-sequpdate v0.0.0-20190308131241-25671c986a6a
+	github.com/foxcpp/go-imap-backend-tests v0.0.0-20200802090154-7e6248c85a0e
+	github.com/foxcpp/go-imap-namespace v0.0.0-20200802091432-08496dd8e0ed
+	github.com/foxcpp/go-imap-mess v0.0.0-20200802092258-6f5d36064dc1
 	github.com/frankban/quicktest v1.5.0 // indirect
 	github.com/go-sql-driver/mysql v1.4.1
 	github.com/klauspost/compress v1.10.5
@@ -24,10 +24,4 @@ require (
 	gotest.tools v2.2.0+incompatible
 )
 
-replace github.com/emersion/go-imap => ../go-imap
-
-replace github.com/foxcpp/go-imap-sequpdate => ../go-imap-sequpdate
-
-replace github.com/foxcpp/go-imap-backend-tests => ../go-imap-backend-tests
-
-replace github.com/foxcpp/go-imap-namespace => ../go-imap-namespace
+replace github.com/emersion/go-imap => github.com/foxcpp/go-imap v1.0.0-beta.1.0.20200802083659-cf943ff91d80

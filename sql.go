@@ -124,7 +124,7 @@ func (b *Backend) initSchema() error {
 	}
 
 	_, err = b.db.Exec(`
-        CREATE INDEX IF NOT EXISTS extKeys_uid_id
+        CREATE UNIQUE INDEX IF NOT EXISTS extKeys_uid_id
         ON extKeys(uid, id)`)
 	// MySQL does not support "IF NOT EXISTS", but MariaDB does.
 	if err != nil && b.db.driver == "mysql" {
@@ -351,6 +351,13 @@ func (b *Backend) prepareStmts() error {
 		AND recent = 1`)
 	if err != nil {
 		return wrapErr(err, "recentCount prep")
+	}
+	b.clearRecent, err = b.db.Prepare(`
+		UPDATE msgs
+		SET recent = 0
+		WHERE mboxId = ?`)
+	if err != nil {
+		return wrapErr(err, "clearRecent prep")
 	}
 	b.firstUnseenUid, err = b.db.Prepare(`
         SELECT msgId

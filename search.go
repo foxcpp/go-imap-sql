@@ -210,12 +210,33 @@ func (m *Mailbox) allSearch(uid bool) ([]uint32, error) {
 }
 
 func (m *Mailbox) flagSearch(uid bool, withFlags, withoutFlags []string) ([]uint32, error) {
-	stmt, err := m.getFlagSearchStmt(uid, withFlags, withoutFlags)
+	recentRequired := false
+	recentExcluded := false
+	newWithFlags := withFlags[:0]
+	for _, f := range withFlags {
+		if f == imap.RecentFlag {
+			recentRequired = true
+			continue
+		}
+		newWithFlags = append(newWithFlags, f)
+	}
+	withFlags = newWithFlags
+	newWithoutFlags := withoutFlags[:0]
+	for _, f := range withoutFlags {
+		if f == imap.RecentFlag {
+			recentExcluded = true
+			continue
+		}
+		newWithoutFlags = append(newWithoutFlags, f)
+	}
+	withoutFlags = newWithoutFlags
+
+	stmt, err := m.getFlagSearchStmt(withFlags, withoutFlags)
 	if err != nil {
 		return nil, err
 	}
 
-	args := m.buildFlagSearchQueryArgs(uid, withFlags, withoutFlags)
+	args := m.buildFlagSearchQueryArgs(withFlags, withoutFlags)
 	rows, err := stmt.Query(args...)
 	if err != nil {
 		return nil, err
@@ -227,10 +248,52 @@ func (m *Mailbox) flagSearch(uid bool, withFlags, withoutFlags []string) ([]uint
 		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
+
+		// Excluding \Recent from SQL-based search will only extend
+		// results. Since \Recent is per-connection we cannot use SQL
+		// index matching to filter by it, therefore we accept
+		// extended results and filter them additionally.
+		if recentRequired || recentExcluded {
+			if m.handle.IsRecent(id) {
+				if recentExcluded {
+					continue
+				}
+			} else if recentRequired {
+				continue
+			}
+		}
+
+		if !uid {
+			var ok bool
+			id, ok = m.handle.UidAsSeq(id)
+			if !ok {
+				continue
+			}
+		}
 		res = append(res, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	return res, nil
+}
+
+func matchFlags(flags []string, with, without []string) bool {
+	flagsSet := make(map[string]bool, len(flags))
+	for _, f := range flags {
+		flagsSet[f] = true
+	}
+
+	for _, f := range without {
+		if flagsSet[f] {
+			return false
+		}
+	}
+	for _, f := range with {
+		if !flagsSet[f] {
+			return false
+		}
+	}
+
+	return true
 }

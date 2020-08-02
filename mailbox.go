@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"io/ioutil"
+	"math/rand"
 	nettextproto "net/textproto"
 	"time"
 
@@ -15,7 +16,7 @@ import (
 	"github.com/emersion/go-imap/backend"
 	"github.com/emersion/go-imap/backend/backendutil"
 	"github.com/emersion/go-message/textproto"
-	sequpdate "github.com/foxcpp/go-imap-sequpdate"
+	mess "github.com/foxcpp/go-imap-mess"
 	"github.com/mailru/easyjson/jwriter"
 )
 
@@ -30,7 +31,7 @@ type Mailbox struct {
 	id     uint64
 
 	conn   backend.Conn
-	handle *sequpdate.MailboxHandle
+	handle *mess.MailboxHandle
 }
 
 func (m *Mailbox) Close() error {
@@ -57,7 +58,26 @@ func (m *Mailbox) Info() (*imap.MailboxInfo, error) {
 	panic("should be removed from go-imap")
 }
 
+var standardFlags = map[string]struct{}{
+	imap.SeenFlag:     {},
+	imap.AnsweredFlag: {},
+	imap.FlaggedFlag:  {},
+	imap.DeletedFlag:  {},
+	imap.DraftFlag:    {},
+}
+
 func (m *Mailbox) initSelected(unsetRecent bool) (uids []uint32, recent *imap.SeqSet, status *imap.MailboxStatus, err error) {
+	// We cannot afford to do \Recent mess when SQLite is used.
+	// Therefore we allow it only randomly in 5% of SELECT commands.
+	// This will ensure that all messages will eventually lose persistent
+	// \Recent flag without the massive (for SQLite) performance hit of
+	// updating these all times.
+	if m.parent.db.driver == "sqlite3" && !m.parent.Opts.NoSQLiteTweaks {
+		if rand.Intn(20) != 0 {
+			unsetRecent = false
+		}
+	}
+
 	tx, err := m.parent.db.Begin(!unsetRecent)
 	if err != nil {
 		return nil, nil, nil, wrapErrf(err, "statusInit %s", m.name)
@@ -88,6 +108,9 @@ func (m *Mailbox) initSelected(unsetRecent bool) (uids []uint32, recent *imap.Se
 		if err := rows.Scan(&flag); err != nil {
 			m.parent.logMboxErr(m, err, "initialize (used flags)")
 			return nil, nil, nil, wrapErrf(err, "initSelected (usedFlags) %s", m.name)
+		}
+		if _, ok := standardFlags[flag]; ok {
+			continue
 		}
 		status.Flags = append(status.Flags, flag)
 		status.PermanentFlags = append(status.PermanentFlags, flag)
@@ -147,6 +170,12 @@ func (m *Mailbox) initSelected(unsetRecent bool) (uids []uint32, recent *imap.Se
 	status.Messages = uint32(len(uids))
 	status.Recent = recentCount
 
+	if unsetRecent {
+		if _, err := tx.Stmt(m.parent.clearRecent).Exec(m.id); err != nil {
+			m.parent.logMboxErr(m, err, "initSelected (clearRecent)")
+		}
+	}
+
 	if err := tx.Stmt(m.parent.uidNext).QueryRow(m.id).Scan(&status.UidNext); err != nil {
 		if err != sql.ErrNoRows {
 			m.parent.logMboxErr(m, err, "initSelected (uidNext scan)")
@@ -159,6 +188,12 @@ func (m *Mailbox) initSelected(unsetRecent bool) (uids []uint32, recent *imap.Se
 	if err := row.Scan(&status.UidValidity); err != nil {
 		m.parent.logMboxErr(m, err, "initSelected (uidValidity)")
 		return nil, nil, nil, wrapErrf(err, "initSelected (uidvalidity) %s", m.name)
+	}
+
+	if unsetRecent {
+		if err := tx.Commit(); err != nil {
+			m.parent.logMboxErr(m, err, "initSelected (commit)")
+		}
 	}
 
 	return uids, recent, status, nil
@@ -722,14 +757,15 @@ func (m *Mailbox) Expunge() error {
 
 	rows.Close()
 
-	if err := m.expungeExternal(tx); err != nil {
-		m.parent.logMboxErr(m, err, "Expunge (external)")
+	keys, err := m.expungeExternal(tx)
+	if err != nil {
+		m.parent.logMboxErr(m, err, "Expunge (external prepare)")
 		return err
 	}
 
 	_, err = tx.Stmt(m.parent.expungeMbox).Exec(m.id, m.id)
 	if err != nil {
-		m.parent.logMboxErr(m, err, "Expunge (externalMbox)")
+		m.parent.logMboxErr(m, err, "Expunge (expunge)")
 		return wrapErr(err, "Expunge")
 	}
 
@@ -749,19 +785,23 @@ func (m *Mailbox) Expunge() error {
 		return wrapErr(err, "Expunge")
 	}
 
+	if err := m.parent.extStore.Delete(keys); err != nil {
+		return wrapErr(err, "Expunge (external)")
+	}
+
 	m.handle.RemovedSet(uids)
 
 	return nil
 }
 
-func (m *Mailbox) expungeExternal(tx *sql.Tx) error {
+func (m *Mailbox) expungeExternal(tx *sql.Tx) ([]string, error) {
 	if _, err := tx.Stmt(m.parent.decreaseRefForDeleted).Exec(m.user.id, m.id); err != nil {
-		return wrapErr(err, "Expunge (external)")
+		return nil, wrapErr(err, "Expunge (external decrease for deleted)")
 	}
 
 	rows, err := tx.Stmt(m.parent.zeroRef).Query(m.user.id, m.id)
 	if err != nil {
-		return wrapErr(err, "Expunge (external)")
+		return nil, wrapErr(err, "Expunge (external zeroRef collect)")
 	}
 	defer rows.Close()
 
@@ -769,15 +809,11 @@ func (m *Mailbox) expungeExternal(tx *sql.Tx) error {
 	for rows.Next() {
 		var extKey string
 		if err := rows.Scan(&extKey); err != nil {
-			return wrapErr(err, "Expunge (external)")
+			return nil, wrapErr(err, "Expunge (external scan)")
 		}
 		keys = append(keys, extKey)
 
 	}
 
-	if err := m.parent.extStore.Delete(keys); err != nil {
-		return wrapErr(err, "Expunge (external)")
-	}
-
-	return nil
+	return keys, nil
 }

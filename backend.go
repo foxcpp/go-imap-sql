@@ -11,7 +11,7 @@ import (
 
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/backend"
-	sequpdate "github.com/foxcpp/go-imap-sequpdate"
+	mess "github.com/foxcpp/go-imap-mess"
 )
 
 // VersionStr is a string value representing go-imap-sql version.
@@ -66,13 +66,6 @@ type Opts struct {
 	// nil value means no limit, 0 means zero limit (no new messages allowed)
 	MaxMsgBytes *uint32
 
-	// Controls when channel returned by Updates should be created.
-	// If set to false - channel will be created before NewBackend returns.
-	// If set to true - channel will be created upon first call to Updates.
-	// Second is useful for tests that don't consume values from Updates
-	// channel.
-	LazyUpdatesInit bool
-
 	// Custom randomness source for UIDVALIDITY values generation.
 	PRNG Rand
 
@@ -105,13 +98,17 @@ type Opts struct {
 	// CompressAlgoParams is passed directly to compression algorithm without changes.
 	CompressAlgoParams string
 
+	// Disable SQLite-specific tweaks that give up conformance to improve
+	// performance.
+	NoSQLiteTweaks bool
+
 	Log Logger
 }
 
 type Backend struct {
 	db       db
 	extStore ExternalStore
-	mngr     *sequpdate.Manager
+	mngr     *mess.Manager
 
 	// Opts structure used to construct this Backend object.
 	//
@@ -156,6 +153,7 @@ type Backend struct {
 	uidValidity        *sql.Stmt
 	msgsCount          *sql.Stmt
 	recentCount        *sql.Stmt
+	clearRecent        *sql.Stmt
 	firstUnseenUid     *sql.Stmt
 	unseenCount        *sql.Stmt
 	deletedUids        *sql.Stmt
@@ -259,7 +257,7 @@ func New(driver, dsn string, extStore ExternalStore, opts Opts) (*Backend, error
 		extStore: extStore,
 		Opts:     opts,
 
-		mngr: sequpdate.NewManager(),
+		mngr: mess.NewManager(),
 	}
 	var err error
 

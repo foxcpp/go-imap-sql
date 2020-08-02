@@ -37,6 +37,7 @@ var cachedHeaderFields = map[string]struct{}{
 	"X-Universally-Unique-Identifier": {},
 
 	// Misc fields I think clients could be interested in.
+	"Sender":       {},
 	"Return-Path":  {},
 	"Delivered-To": {},
 }

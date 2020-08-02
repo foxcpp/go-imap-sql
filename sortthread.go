@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/mail"
 	"sort"
 	"time"
@@ -21,18 +22,23 @@ type msgKey struct {
 
 func (m *Mailbox) Sort(uid bool, sortCrit []sortthread.SortCriterion, searchCrit *imap.SearchCriteria) ([]uint32, error) {
 	m.parent.Opts.Log.Debugln("Sort: SORT", uid, sortCrit, searchCrit)
-	msgs, err := m.SearchMessages(uid, searchCrit)
+	msgs, err := m.SearchMessages(true, searchCrit)
 	if err != nil {
 		return nil, err
 	}
 
 	if len(msgs) == 0 {
+		if uid {
+			return nil, nil
+		}
 		return nil, errors.New("No messages matched the criteria")
 	}
 
 	// IDs in msgs are sorted so this will 'compress' adjacent IDs into ranges.
 	seqSet := imap.SeqSet{}
 	seqSet.AddNum(msgs...)
+
+	m.parent.Opts.Log.Debugln("Sort: SORT found uids", seqSet)
 
 	// XXX: Split SearchMessages to allow it running in the same transaction.
 
@@ -42,7 +48,7 @@ func (m *Mailbox) Sort(uid bool, sortCrit []sortthread.SortCriterion, searchCrit
 	}
 	sortBuffer := make([]*msgKey, 0, resultCount)
 
-	_, err = m.headerMetaScan(nil, uid, &seqSet, func(k *msgKey) error {
+	_, err = m.headerMetaScan(nil, &seqSet, func(k *msgKey) error {
 		sortBuffer = append(sortBuffer, k)
 		return nil
 	})
@@ -50,10 +56,20 @@ func (m *Mailbox) Sort(uid bool, sortCrit []sortthread.SortCriterion, searchCrit
 		return nil, errors.New("Internal server error")
 	}
 
+	m.parent.Opts.Log.Debugln("Sort: sorting", len(sortBuffer), "messages")
+
 	sort.Slice(sortBuffer, messageCompare(sortBuffer, sortCrit))
 	ids := make([]uint32, len(sortBuffer))
 	for i, msg := range sortBuffer {
-		ids[i] = msg.ID /* UID or sequence number */
+		id := msg.ID
+		if !uid {
+			var ok bool
+			id, ok = m.handle.UidAsSeq(id)
+			if !ok {
+				continue // Wtf
+			}
+		}
+		ids[i] = id
 	}
 	return ids, nil
 }
@@ -96,7 +112,7 @@ func messageCompare(buf []*msgKey, sortCrit []sortthread.SortCriterion) func(i, 
 				}
 			case "CC":
 				iAddr := firstAddrFromList(buf[i].CachedHeader["Cc"])
-				jAddr := firstAddrFromList(buf[i].CachedHeader["Cc"])
+				jAddr := firstAddrFromList(buf[j].CachedHeader["Cc"])
 				if crit.Reverse && iAddr > jAddr {
 					return true
 				} else if iAddr < jAddr {
@@ -112,7 +128,8 @@ func messageCompare(buf []*msgKey, sortCrit []sortthread.SortCriterion) func(i, 
 				}
 			case "FROM":
 				iAddr := firstAddrFromList(buf[i].CachedHeader["From"])
-				jAddr := firstAddrFromList(buf[i].CachedHeader["From"])
+				jAddr := firstAddrFromList(buf[j].CachedHeader["From"])
+				log.Println(iAddr, "vs", jAddr, "=>", iAddr < jAddr)
 				if crit.Reverse && iAddr > jAddr {
 					return true
 				} else if iAddr < jAddr {
@@ -134,7 +151,7 @@ func messageCompare(buf []*msgKey, sortCrit []sortthread.SortCriterion) func(i, 
 				}
 			case "TO":
 				iAddr := firstAddrFromList(buf[i].CachedHeader["To"])
-				jAddr := firstAddrFromList(buf[i].CachedHeader["To"])
+				jAddr := firstAddrFromList(buf[j].CachedHeader["To"])
 				if crit.Reverse && iAddr > jAddr {
 					return true
 				} else if iAddr < jAddr {
@@ -184,7 +201,7 @@ func (m *Mailbox) orderedSubjThread(tx *sql.Tx, uid bool, seqSet *imap.SeqSet, m
 	// based on assumption that most messages do not have replies or forwards.
 	threads := make(map[string][]msg, msgCount/9*10)
 
-	count, err := m.headerMetaScan(tx, uid, seqSet, func(k *msgKey) error {
+	count, err := m.headerMetaScan(tx, seqSet, func(k *msgKey) error {
 		subject, _ := sortthread.GetBaseSubject(firstHeaderField(k.CachedHeader["Subject"]))
 		sentDate := sentDate(k.CachedHeader["Date"], k.ArrivalUnix)
 
@@ -238,6 +255,16 @@ func (m *Mailbox) orderedSubjThread(tx *sql.Tx, uid bool, seqSet *imap.SeqSet, m
 		for _, msg := range thread[1:] {
 			next := &threadsTree[nodeOffset]
 			nodeOffset++
+
+			id := msg.id
+			if !uid {
+				var ok bool
+				id, ok = m.handle.UidAsSeq(id)
+				if !ok {
+					continue // Wtf
+				}
+			}
+
 			next.Id = msg.id
 			current.Children = []*sortthread.Thread{next}
 			current = next
@@ -247,28 +274,23 @@ func (m *Mailbox) orderedSubjThread(tx *sql.Tx, uid bool, seqSet *imap.SeqSet, m
 	return result, nil
 }
 
-func (m *Mailbox) headerMetaScan(tx *sql.Tx, uid bool, seqSet *imap.SeqSet, callback func(k *msgKey) error) (int, error) {
+func (m *Mailbox) headerMetaScan(tx *sql.Tx, seqSet *imap.SeqSet, callback func(k *msgKey) error) (int, error) {
 	count := 0
 	if tx == nil {
 		var err error
 		tx, err = m.parent.db.BeginLevel(sql.LevelReadCommitted, true)
 		if err != nil {
-			m.parent.logMboxErr(m, err, "headerMetaScan (tx start)", uid, seqSet)
+			m.parent.logMboxErr(m, err, "headerMetaScan (tx start)", seqSet)
 			return 0, err
 		}
 		defer tx.Rollback()
-	}
-
-	seqSet, err := m.handle.ResolveSeq(uid, seqSet)
-	if err != nil {
-		return 0, err
 	}
 
 outerLoop:
 	for _, seq := range seqSet.Set {
 		rows, err := tx.Stmt(m.parent.cachedHeaderUid).Query(m.id, seq.Start, seq.Stop)
 		if err != nil {
-			m.parent.logMboxErr(m, err, "headerMetaScan: cachedHeader", uid, seqSet)
+			m.parent.logMboxErr(m, err, "headerMetaScan: cachedHeader", seqSet)
 			return 0, err
 		}
 
@@ -276,18 +298,18 @@ outerLoop:
 			var cachedHeaderBlob []byte
 			key := msgKey{}
 			if err := rows.Scan(&key.ID, &cachedHeaderBlob, &key.BodyLen, &key.ArrivalUnix); err != nil {
-				m.parent.logMboxErr(m, err, "headerMetaScan: cachedHeader scan", uid, seqSet)
+				m.parent.logMboxErr(m, err, "headerMetaScan: cachedHeader scan", seqSet)
 				rows.Close()
 				continue
 			}
 			if err := json.Unmarshal(cachedHeaderBlob, &key.CachedHeader); err != nil {
-				m.parent.logMboxErr(m, err, "headerMetaScan: cachedHeader unmarshal", uid, seqSet)
+				m.parent.logMboxErr(m, err, "headerMetaScan: cachedHeader unmarshal", seqSet)
 				rows.Close()
 				continue
 			}
 
 			if err := callback(&key); err != nil {
-				m.parent.logMboxErr(m, err, "headerMetaScan: callback error", uid, seqSet)
+				m.parent.logMboxErr(m, err, "headerMetaScan: callback error", seqSet)
 				rows.Close()
 				return 0, err
 			}
@@ -297,9 +319,8 @@ outerLoop:
 				rows.Close()
 				break outerLoop
 			}
-
-			rows.Close()
 		}
+		rows.Close()
 	}
 
 	return count, nil

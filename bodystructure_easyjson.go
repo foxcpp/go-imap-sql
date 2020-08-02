@@ -33,10 +33,7 @@ func easyjsonUnmarshalEnvelope(in *jlexer.Lexer, out *imap.Envelope) {
 				in.AddError((out.Date).UnmarshalJSON(data))
 			}
 		case "Subject":
-			if !in.IsNull() {
-				str := in.String()
-				out.Subject = &str
-			}
+			out.Subject = in.String()
 		case "From":
 			if in.IsNull() {
 				in.Skip()
@@ -250,11 +247,7 @@ func easyjsonMarshalEnvelope(out *jwriter.Writer, in imap.Envelope) {
 	{
 		const prefix string = ",\"Subject\":"
 		out.RawString(prefix)
-		if in.Subject == nil {
-			out.RawString("null")
-		} else {
-			out.String(*in.Subject)
-		}
+		out.String(in.Subject)
 	}
 	{
 		const prefix string = ",\"From\":"

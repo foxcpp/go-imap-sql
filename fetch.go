@@ -303,6 +303,11 @@ func headerSubsetFromCached(sect *imap.BodySectionName, cachedHeader map[string]
 	for i := len(sect.Fields) - 1; i >= 0; i-- {
 		field := sect.Fields[i]
 
+		// If field requested multiple times - return only once.
+		if hdr.Has(field) {
+			continue
+		}
+
 		value := cachedHeader[nettextproto.CanonicalMIMEHeaderKey(field)]
 		for i := len(value) - 1; i >= 0; i-- {
 			subval := value[i]

@@ -110,7 +110,12 @@ func (db db) valuesSubquery(flagsCount int) string {
 	}
 
 	for i := 0; i < flagsCount; i++ {
-		sqlList += "(?)"
+		if db.driver == "postgres" {
+			sqlList += "(?::text)" // query rewriter will make it into $N::text.
+			// This is a workaround for CockroachDB's https://github.com/cockroachdb/cockroach/issues/41558
+		} else {
+			sqlList += "(?)"
+		}
 		if i+1 != flagsCount {
 			sqlList += ","
 		}

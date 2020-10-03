@@ -409,12 +409,16 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 	}
 
 	recent := m.parent.mngr.NewMessage(m.id, msgId)
+	recentI := 0
+	if recent {
+		recentI = 1
+	}
 	_, err = tx.Stmt(m.parent.addMsg).Exec(
 		m.id, msgId, date.Unix(),
 		bodyLen,
 		bodyStruct, cachedHdr, extBodyKey,
 		haveSeen, m.parent.Opts.CompressAlgo,
-		recent,
+		recentI,
 	)
 	if err != nil {
 		if err := m.parent.extStore.Delete([]string{extBodyKey}); err != nil {

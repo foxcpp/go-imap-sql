@@ -19,7 +19,10 @@ go-imap-sql is known to work with (and constantly being tested against) followin
 - SQLite 3.25.0
 - PostgreSQL 9.6
 
-Following RDBMS was actively supported in the past, it's unknown whether they
+Following RDBMS have experimental support:
+- CockroachDB 20.1.5
+
+Following RDBMS were actively supported in the past, it's unknown whether they
 still work with go-imap-sql:
 - MariaDB 10.2 
 

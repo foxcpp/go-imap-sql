@@ -813,3 +813,7 @@ func (m *Mailbox) expungeExternal(tx *sql.Tx) ([]string, error) {
 
 	return keys, nil
 }
+
+func (m *Mailbox) Idle(done <-chan struct{}) {
+	m.handle.Idle(done)
+}

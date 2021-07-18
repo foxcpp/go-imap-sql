@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"io/ioutil"
-	"math/rand"
 	nettextproto "net/textproto"
 	"time"
 
@@ -67,15 +66,8 @@ var standardFlags = map[string]struct{}{
 }
 
 func (m *Mailbox) initSelected(unsetRecent bool) (uids []uint32, recent *imap.SeqSet, status *imap.MailboxStatus, err error) {
-	// We cannot afford to do \Recent mess when SQLite is used.
-	// Therefore we allow it only randomly in 5% of SELECT commands.
-	// This will ensure that all messages will eventually lose persistent
-	// \Recent flag without the massive (for SQLite) performance hit of
-	// updating these all times.
-	if m.parent.db.driver == "sqlite3" && !m.parent.Opts.NoSQLiteTweaks {
-		if rand.Intn(20) != 0 {
-			unsetRecent = false
-		}
+	if m.parent.Opts.DisableRecent {
+		unsetRecent = false
 	}
 
 	tx, err := m.parent.db.Begin(!unsetRecent)

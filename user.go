@@ -363,7 +363,7 @@ func (u *User) Namespaces() (personal, other, shared []namespace.Namespace, err 
 	}, nil, nil, nil
 }
 
-func (u *User) CreateMessage(mboxName string, flags []string, date time.Time, fullBody imap.Literal) error {
+func (u *User) CreateMessage(mboxName string, flags []string, date time.Time, fullBody imap.Literal, _ backend.Mailbox) error {
 	_, box, err := u.GetMailbox(mboxName, false, nil)
 	if err != nil {
 		return err

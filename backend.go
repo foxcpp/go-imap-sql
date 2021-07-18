@@ -98,9 +98,9 @@ type Opts struct {
 	// CompressAlgoParams is passed directly to compression algorithm without changes.
 	CompressAlgoParams string
 
-	// Disable SQLite-specific tweaks that give up conformance to improve
-	// performance.
-	NoSQLiteTweaks bool
+	// Disable RFC 3501-conforming handling of \Recent flag. This improves
+	// performance significantly.
+	DisableRecent bool
 
 	Log Logger
 }
@@ -340,6 +340,10 @@ func New(driver, dsn string, extStore ExternalStore, opts Opts) (*Backend, error
 	}
 
 	return b, nil
+}
+
+func (b *Backend) UpdateManager() *mess.Manager {
+	return b.mngr
 }
 
 // EnableChildrenExt enables generation of /HasChildren and /HasNoChildren

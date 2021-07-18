@@ -2,7 +2,6 @@ package imapsql
 
 import (
 	"database/sql"
-
 	"errors"
 )
 
@@ -62,6 +61,13 @@ func (b *Backend) upgradeSchema(currentVer int) error {
 	//	}
 	//	currentVer = 2
 	//}
+
+	if currentVer == 5 {
+		_, err = b.DB.Exec(`ALTER TABLE msgs ADD COLUMN recent INTEGER NOT NULL DEFAULT 1`)
+		if err != nil {
+			return wrapErr(err, "5->6 upgrade")
+		}
+	}
 
 	if currentVer != SchemaVersion {
 		return errors.New("database schema version is too old and can't be upgraded using this go-imap-sql version")

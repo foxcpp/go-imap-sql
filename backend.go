@@ -21,7 +21,7 @@ import (
 const VersionStr = "0.4.0"
 
 // SchemaVersion is incremented each time DB schema changes.
-const SchemaVersion = 5
+const SchemaVersion = 6
 
 var (
 	ErrUserAlreadyExists = errors.New("imap: user already exists")

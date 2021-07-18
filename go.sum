@@ -45,6 +45,8 @@ github.com/foxcpp/go-imap-mess v0.0.0-20200802092258-6f5d36064dc1 h1:AlwpQvHCx3u
 github.com/foxcpp/go-imap-mess v0.0.0-20200802092258-6f5d36064dc1/go.mod h1:TCwQaQF5PPV0umFCvu4N8UepbxJ33G1jh1UrH7y0x5A=
 github.com/foxcpp/go-imap-mess v0.0.0-20210718073110-d5eb968a0995 h1:UXksj5CP+1Zg5GCD74JEijuQ2C22vXFgquhdG/YlXuI=
 github.com/foxcpp/go-imap-mess v0.0.0-20210718073110-d5eb968a0995/go.mod h1:cps13jIcqI/3FGVJQ8azz3apLjikGoKKcB6xb65VSag=
+github.com/foxcpp/go-imap-mess v0.0.0-20210718180745-f14f34d14a3b h1:O85JcWCduTZz5FkqCrQX79wc88lgSezbTqrWNgXyEow=
+github.com/foxcpp/go-imap-mess v0.0.0-20210718180745-f14f34d14a3b/go.mod h1:cps13jIcqI/3FGVJQ8azz3apLjikGoKKcB6xb65VSag=
 github.com/foxcpp/go-imap-namespace v0.0.0-20200722130255-93092adf35f1 h1:B4zNQ2r4qC7FLn8J8+LWt09fFW0tXddypBPS0+HI50s=
 github.com/foxcpp/go-imap-namespace v0.0.0-20200722130255-93092adf35f1/go.mod h1:WJYkFIdxyljR/byiqcYMKUF4iFDej4CaIKe2JJrQxu8=
 github.com/foxcpp/go-imap-namespace v0.0.0-20200802091432-08496dd8e0ed h1:1Jo7geyvunrPSjL6F6D9EcXoNApS5v3LQaro7aUNPnE=

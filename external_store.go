@@ -44,7 +44,7 @@ ExternalStore is an interface used by go-imap-sql to store message bodies
 outside of main database.
 */
 type ExternalStore interface {
-	Create(key string) (ExtStoreObj, error)
+	Create(key string, objectSize int64) (ExtStoreObj, error)
 
 	// Open returns the ExtStoreObj that reads the message body specified by
 	// passed key.

@@ -4,11 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"database/sql"
+	"errors"
 	"io"
 	"io/ioutil"
 	"time"
-
-	"errors"
 
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/backend"
@@ -259,7 +258,7 @@ func (d *Delivery) BodyParsed(header textproto.Header, bodyLen int, body Buffer)
 			return wrapErr(err, "Body")
 		}
 
-		err = d.mboxDelivery(header, mbox, bodyLen, body, date, flagsStmt)
+		err = d.mboxDelivery(header, mbox, int64(bodyLen), body, date, flagsStmt)
 		if err != nil {
 			return err
 		}
@@ -268,7 +267,7 @@ func (d *Delivery) BodyParsed(header textproto.Header, bodyLen int, body Buffer)
 	return nil
 }
 
-func (d *Delivery) mboxDelivery(header textproto.Header, mbox Mailbox, bodyLen int, body Buffer, date time.Time, flagsStmt *sql.Stmt) (err error) {
+func (d *Delivery) mboxDelivery(header textproto.Header, mbox Mailbox, bodyLen int64, body Buffer, date time.Time, flagsStmt *sql.Stmt) (err error) {
 	header = header.Copy()
 	userHeader := d.perRcptHeader[mbox.user.username]
 	for fields := userHeader.Fields(); fields.Next(); {
@@ -280,13 +279,13 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox Mailbox, bodyLen i
 		return wrapErr(err, "Body (WriteHeader)")
 	}
 
-	length := headerBlob.Len() + bodyLen
+	length := int64(headerBlob.Len()) + bodyLen
 	bodyReader, err := body.Open()
 	if err != nil {
 		return err
 	}
 
-	bodyStruct, cachedHeader, extBodyKey, err := d.b.processParsedBody(headerBlob.Bytes(), header, bodyReader)
+	bodyStruct, cachedHeader, extBodyKey, err := d.b.processParsedBody(headerBlob.Bytes(), header, bodyReader, bodyLen)
 	if err != nil {
 		return err
 	}
@@ -381,12 +380,18 @@ func (d *Delivery) Commit() error {
 	return nil
 }
 
-func (b *Backend) processParsedBody(headerInput []byte, header textproto.Header, bodyLiteral io.Reader) (bodyStruct, cachedHeader []byte, extBodyKey string, err error) {
+func (b *Backend) processParsedBody(headerInput []byte, header textproto.Header, bodyLiteral io.Reader, bodyLen int64) (bodyStruct, cachedHeader []byte, extBodyKey string, err error) {
 	extBodyKey, err = randomKey()
 	if err != nil {
 		return nil, nil, "", err
 	}
-	extWriter, err := b.extStore.Create(extBodyKey)
+
+	objSize := int64(len(headerInput)) + bodyLen
+	if b.Opts.CompressAlgo != "" {
+		objSize = -1
+	}
+
+	extWriter, err := b.extStore.Create(extBodyKey, objSize)
 	if err != nil {
 		return nil, nil, "", err
 	}

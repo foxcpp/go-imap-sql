@@ -4,12 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"database/sql"
+	"errors"
 	"io"
 	"io/ioutil"
 	nettextproto "net/textproto"
 	"time"
-
-	"errors"
 
 	"github.com/emersion/go-imap"
 	appendlimit "github.com/emersion/go-imap-appendlimit"
@@ -267,7 +266,13 @@ func (b *Backend) processBody(literal imap.Literal) (bodyStruct, cachedHeader []
 	if err != nil {
 		return nil, nil, "", err
 	}
-	extWriter, err := b.extStore.Create(extBodyKey)
+
+	objSize := literal.Len()
+	if b.Opts.CompressAlgo != "" {
+		objSize = 0
+	}
+
+	extWriter, err := b.extStore.Create(extBodyKey, int64(objSize))
 	if err != nil {
 		return nil, nil, "", err
 	}

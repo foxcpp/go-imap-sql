@@ -23,7 +23,7 @@ var cachedHeaderFields = map[string]struct{}{
 	"Date":         {},
 	"Message-Id":   {},
 	"Priority":     {},
-	"x-Priority":   {},
+	"X-Priority":   {},
 	"References":   {},
 	"Newsgroups":   {},
 	"In-Reply-To":  {},

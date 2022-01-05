@@ -25,13 +25,21 @@ func (s *FSStore) Open(key string) (ExtStoreObj, error) {
 	return f, nil
 }
 
-func (s *FSStore) Create(key string) (ExtStoreObj, error) {
+func (s *FSStore) Create(key string, blobSize int64) (ExtStoreObj, error) {
 	f, err := os.Create(filepath.Join(s.Root, key))
 	if err != nil {
 		return nil, ExternalError{
 			Key:         key,
 			Err:         err,
 			NonExistent: false,
+		}
+	}
+	if blobSize != -1 {
+		if err := f.Truncate(blobSize); err != nil {
+			return nil, ExternalError{
+				Key: key,
+				Err: err,
+			}
 		}
 	}
 	return f, nil

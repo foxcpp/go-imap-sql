@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/emersion/go-imap"
-	specialuse "github.com/emersion/go-imap-specialuse"
 	"github.com/emersion/go-imap/backend"
 	"github.com/emersion/go-message/textproto"
 	"gotest.tools/assert"
@@ -25,7 +24,7 @@ func checkTestMsg(t *testing.T, msg *imap.Message) {
 		switch item {
 		case imap.FetchEnvelope:
 			assert.DeepEqual(t, msg.Envelope, &imap.Envelope{
-				Subject: &hello,
+				Subject: hello,
 				From: []*imap.Address{
 					{
 						MailboxName: "foxcpp",
@@ -189,7 +188,6 @@ func TestDelivery_Mailbox(t *testing.T) {
 	test := func(t *testing.T, create bool) {
 		b := initTestBackend().(*Backend)
 		defer cleanBackend(b)
-		b.EnableSpecialUseExt()
 		assert.NilError(t, b.CreateUser(t.Name()), "CreateUser")
 		u, err := b.GetUser(t.Name())
 		assert.NilError(t, err, "GetUser")
@@ -228,7 +226,6 @@ func TestDelivery_SpecialMailbox(t *testing.T) {
 	test := func(t *testing.T, create bool, specialUse string) {
 		b := initTestBackend().(*Backend)
 		defer cleanBackend(b)
-		b.EnableSpecialUseExt()
 		assert.NilError(t, b.CreateUser(t.Name()), "CreateUser")
 		u, err := b.GetUser(t.Name())
 		assert.NilError(t, err, "GetUser")
@@ -276,9 +273,9 @@ func TestDelivery_SpecialMailbox(t *testing.T) {
 		}
 	}
 
-	test(t, true, specialuse.Junk)
+	test(t, true, imap.JunkAttr)
 	t.Run("nonexistent", func(t *testing.T) {
-		test(t, false, specialuse.Junk)
+		test(t, false, imap.JunkAttr)
 	})
 }
 

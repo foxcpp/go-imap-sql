@@ -54,7 +54,6 @@ func initTestBackend() backendtests.Backend {
 	}
 
 	b, err := New(driver, dsn, &FSStore{Root: storeDir}, Opts{
-		LazyUpdatesInit: true,
 		PRNG:            prng,
 		Log:             log,
 	})

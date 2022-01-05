@@ -32,7 +32,7 @@ func TestIssue7(t *testing.T) {
 	_, mbox, err := usr.GetMailbox(t.Name(), true, &noopConn{})
 	assert.NilError(t, err)
 	for i := 0; i < 5; i++ {
-		assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{"flag1", "flag2"}, time.Now(), strings.NewReader(testMsg)))
+		assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{"flag1", "flag2"}, time.Now(), strings.NewReader(testMsg), nil))
 	}
 
 	t.Run("seq", func(t *testing.T) {
@@ -73,8 +73,9 @@ func TestDuplicateSearchWithoutFlags(t *testing.T) {
 	_, mbox, err := usr.GetMailbox(t.Name(), true, &noopConn{})
 	assert.NilError(t, err)
 	for i := 0; i < 5; i++ {
-		assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{"flag1", "flag2"}, time.Now(), strings.NewReader(testMsg)))
+		assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{"flag1", "flag2"}, time.Now(), strings.NewReader(testMsg), mbox))
 	}
+	assert.NilError(t, mbox.Poll(true))
 
 	res, err := mbox.SearchMessages(true, &imap.SearchCriteria{
 		WithoutFlags: []string{"flag3"},
@@ -100,7 +101,7 @@ func TestHeaderInMultipleBodyFetch(t *testing.T) {
 		_, mbox, err := usr.GetMailbox(t.Name(), true, &noopConn{})
 		assert.NilError(t, err)
 		for i := 0; i < 5; i++ {
-			assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{}, time.Now(), strings.NewReader(testMsg)))
+			assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{}, time.Now(), strings.NewReader(testMsg), nil))
 		}
 		assert.NilError(t, mbox.Poll(true))
 
@@ -143,8 +144,8 @@ func TestHeaderCacheReuse(t *testing.T) {
 	testComplete := "Subject: Test\r\n\r\nBody text"
 	testMissingSubject := "Another-Field: Test\r\n\r\nBody text"
 
-	assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{}, time.Now(), strings.NewReader(testComplete)))
-	assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{}, time.Now(), strings.NewReader(testMissingSubject)))
+	assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{}, time.Now(), strings.NewReader(testComplete), nil))
+	assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{}, time.Now(), strings.NewReader(testMissingSubject), nil))
 	assert.NilError(t, mbox.Poll(true))
 
 	t.Run("envelope", func(t *testing.T) {
@@ -155,7 +156,6 @@ func TestHeaderCacheReuse(t *testing.T) {
 		<-ch
 		msg2 := <-ch
 
-		emptyString := ""
-		assert.DeepEqual(t, msg2.Envelope.Subject, &emptyString)
+		assert.DeepEqual(t, msg2.Envelope.Subject, "")
 	})
 }

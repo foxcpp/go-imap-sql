@@ -127,9 +127,6 @@ type Backend struct {
 	// database/sql.DB object created by New.
 	DB *sql.DB
 
-	childrenExt   bool
-	specialUseExt bool
-
 	prng         Rand
 	compressAlgo CompressionAlgo
 
@@ -344,22 +341,6 @@ func New(driver, dsn string, extStore ExternalStore, opts Opts) (*Backend, error
 
 func (b *Backend) UpdateManager() *mess.Manager {
 	return b.mngr
-}
-
-// EnableChildrenExt enables generation of /HasChildren and /HasNoChildren
-// attributes for mailboxes. It should be used only if server advertises
-// CHILDREN extension support (see children subpackage).
-func (b *Backend) EnableChildrenExt() bool {
-	b.childrenExt = true
-	return true
-}
-
-// EnableSpecialUseExt enables generation of special-use attributes for
-// mailboxes. It should be used only if server advertises SPECIAL-USE extension
-// support (see go-imap-specialuse).
-func (b *Backend) EnableSpecialUseExt() bool {
-	b.specialUseExt = true
-	return true
 }
 
 func (b *Backend) sqliteOptimizeLoop() {

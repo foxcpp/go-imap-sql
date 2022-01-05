@@ -7,11 +7,8 @@ import (
 	"time"
 
 	"github.com/emersion/go-imap"
-	appendlimit "github.com/emersion/go-imap-appendlimit"
-	specialuse "github.com/emersion/go-imap-specialuse"
 	"github.com/emersion/go-imap/backend"
 	namespace "github.com/foxcpp/go-imap-namespace"
-	"github.com/foxcpp/go-imap-sql/children"
 )
 
 const MailboxPathSep = "."
@@ -78,22 +75,20 @@ func (u *User) ListMailboxes(subscribed bool) ([]imap.MailboxInfo, error) {
 		if mark == 1 {
 			info.Attributes = []string{imap.MarkedAttr}
 		}
-		if specialUse.Valid && u.parent.specialUseExt {
+		if specialUse.Valid {
 			info.Attributes = []string{specialUse.String}
 		}
 
-		if u.parent.childrenExt {
-			row = u.parent.hasChildren.QueryRow(info.Name+MailboxPathSep+"%", u.id)
-			childrenCount := 0
-			if err := row.Scan(&childrenCount); err != nil {
-				u.parent.logUserErr(u, err, "ListMailboxes (children count)")
-				continue
-			}
-			if childrenCount != 0 {
-				info.Attributes = append(info.Attributes, children.HasChildrenAttr)
-			} else {
-				info.Attributes = append(info.Attributes, children.HasNoChildrenAttr)
-			}
+		row = u.parent.hasChildren.QueryRow(info.Name+MailboxPathSep+"%", u.id)
+		childrenCount := 0
+		if err := row.Scan(&childrenCount); err != nil {
+			u.parent.logUserErr(u, err, "ListMailboxes (children count)")
+			continue
+		}
+		if childrenCount != 0 {
+			info.Attributes = append(info.Attributes, imap.HasChildrenAttr)
+		} else {
+			info.Attributes = append(info.Attributes, imap.HasNoChildrenAttr)
 		}
 
 		res[i] = info
@@ -192,9 +187,9 @@ var ErrUnsupportedSpecialAttr = errors.New("imap: special attribute is not suppo
 // CreateMailboxSpecial creates a mailbox with SPECIAL-USE attribute set.
 func (u *User) CreateMailboxSpecial(name, specialUseAttr string) error {
 	switch specialUseAttr {
-	case specialuse.All, specialuse.Flagged:
+	case imap.AllAttr, imap.FlaggedAttr:
 		return ErrUnsupportedSpecialAttr
-	case specialuse.Archive, specialuse.Drafts, specialuse.Junk, specialuse.Sent, specialuse.Trash:
+	case imap.ArchiveAttr, imap.DraftsAttr, imap.JunkAttr, imap.SentAttr, imap.TrashAttr:
 	default:
 		return ErrUnsupportedSpecialAttr
 	}
@@ -432,7 +427,7 @@ func (u *User) Status(mbox string, items []imap.StatusItem) (*imap.MailboxStatus
 				delete(status.Items, imap.StatusUnseen)
 				continue
 			}
-		case appendlimit.StatusAppendLimit:
+		case imap.StatusAppendLimit:
 			var res sql.NullInt64
 			row := tx.Stmt(u.parent.mboxMsgSizeLimit).QueryRow(mboxId)
 			if err := row.Scan(&res); err != nil {
@@ -440,8 +435,7 @@ func (u *User) Status(mbox string, items []imap.StatusItem) (*imap.MailboxStatus
 				continue
 			}
 			if res.Valid {
-				val := uint32(res.Int64)
-				appendlimit.StatusSetAppendLimit(status, &val)
+				status.AppendLimit = uint32(res.Int64)
 			}
 		}
 	}

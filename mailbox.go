@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/emersion/go-imap"
-	appendlimit "github.com/emersion/go-imap-appendlimit"
 	"github.com/emersion/go-imap/backend"
 	"github.com/emersion/go-imap/backend/backendutil"
 	"github.com/emersion/go-message/textproto"
@@ -324,14 +323,14 @@ func (b *Backend) processBody(literal imap.Literal) (bodyStruct, cachedHeader []
 func (m *Mailbox) checkAppendLimit(length int) error {
 	mboxLimit := m.CreateMessageLimit()
 	if mboxLimit != nil && uint32(length) > *mboxLimit {
-		return appendlimit.ErrTooBig
+		return backend.ErrTooBig
 	} else if mboxLimit == nil {
 		userLimit := m.user.CreateMessageLimit()
 		if userLimit != nil && uint32(length) > *userLimit {
-			return appendlimit.ErrTooBig
+			return backend.ErrTooBig
 		} else if userLimit == nil {
 			if m.parent.Opts.MaxMsgBytes != nil && uint32(length) > *m.parent.Opts.MaxMsgBytes {
-				return appendlimit.ErrTooBig
+				return backend.ErrTooBig
 			}
 		}
 	}

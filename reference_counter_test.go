@@ -41,7 +41,7 @@ func TestKeyIsRemovedWithMsg(t *testing.T) {
 	defer mbox.Close()
 
 	// Message is created, there should be a key.
-	assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{imap.DeletedFlag}, time.Now(), strings.NewReader(testMsg)))
+	assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{imap.DeletedFlag}, time.Now(), strings.NewReader(testMsg), mbox))
 	assert.NilError(t, mbox.Poll(true))
 	assert.Assert(t, checkKeysCount(b, 1), "Wrong amount of external store keys created")
 
@@ -61,7 +61,7 @@ func TestKeyIsRemovedWithMbox(t *testing.T) {
 	assert.NilError(t, err)
 
 	// Message is created, there should be a key.
-	assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{imap.DeletedFlag}, time.Now(), strings.NewReader(testMsg)))
+	assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{imap.DeletedFlag}, time.Now(), strings.NewReader(testMsg), mbox))
 	assert.NilError(t, mbox.Poll(true))
 	assert.Assert(t, checkKeysCount(b, 1), "Wrong amount of external store keys created")
 
@@ -88,7 +88,7 @@ func TestKeyIsRemovedWithCopiedMsgs(t *testing.T) {
 	defer mbox2.Close()
 
 	// The message is created, there should be a key.
-	assert.NilError(t, usr.CreateMessage(mbox1.Name(), []string{imap.DeletedFlag}, time.Now(), strings.NewReader(testMsg)))
+	assert.NilError(t, usr.CreateMessage(mbox1.Name(), []string{imap.DeletedFlag}, time.Now(), strings.NewReader(testMsg), mbox1))
 	assert.NilError(t, mbox1.Poll(true))
 	assert.Assert(t, checkKeysCount(b, 1), "Wrong amount of external store keys created")
 
@@ -119,7 +119,7 @@ func TestKeyIsRemovedWithUser(t *testing.T) {
 	defer mbox.Close()
 
 	// The message is created, there should be a key.
-	assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{imap.DeletedFlag}, time.Now(), strings.NewReader(testMsg)))
+	assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{imap.DeletedFlag}, time.Now(), strings.NewReader(testMsg), mbox))
 	assert.Assert(t, checkKeysCount(b, 1), "Wrong amount of external store keys created")
 
 	// The user account is removed, all keys should be gone.

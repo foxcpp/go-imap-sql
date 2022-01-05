@@ -10,13 +10,9 @@ import (
 	"os/signal"
 	"runtime"
 
-	appendlimit "github.com/emersion/go-imap-appendlimit"
-	move "github.com/emersion/go-imap-move"
 	sortthread "github.com/emersion/go-imap-sortthread"
-	specialuse "github.com/emersion/go-imap-specialuse"
 	"github.com/emersion/go-imap/server"
 	imapsql "github.com/foxcpp/go-imap-sql"
-	"github.com/foxcpp/go-imap-sql/children"
 )
 
 type stdLogger struct{}
@@ -67,12 +63,8 @@ func main() {
 	defer srv.Close()
 
 	srv.AllowInsecureAuth = true
-	srv.Enable(move.NewExtension())
-	srv.Enable(children.NewExtension())
-	srv.Enable(specialuse.NewExtension())
 	srv.Enable(sortthread.NewSortExtension())
 	srv.Enable(sortthread.NewThreadExtension())
-	srv.Enable(appendlimit.NewExtension())
 
 	l, err := net.Listen("tcp", endpoint)
 	if err != nil {

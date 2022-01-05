@@ -4,11 +4,8 @@ go 1.12
 
 require (
 	github.com/emersion/go-imap v1.0.5-0.20200511082158-271ea913b422
-	github.com/emersion/go-imap-appendlimit v0.0.0-20190308131241-25671c986a6a
-	github.com/emersion/go-imap-move v0.0.0-20180601155324-5eb20cb834bf
 	github.com/emersion/go-imap-sortthread v1.1.1-0.20200727121200-18e5fb409fed
-	github.com/emersion/go-imap-specialuse v0.0.0-20161227184202-ba031ced6a62
-	github.com/emersion/go-message v0.11.2
+	github.com/emersion/go-message v0.15.0
 	github.com/foxcpp/go-imap-backend-tests v0.0.0-20200802090154-7e6248c85a0e
 	github.com/foxcpp/go-imap-mess v0.0.0-20210718180745-f14f34d14a3b
 	github.com/foxcpp/go-imap-namespace v0.0.0-20200802091432-08496dd8e0ed
@@ -24,4 +21,5 @@ require (
 	gotest.tools v2.2.0+incompatible
 )
 
-replace github.com/emersion/go-imap => github.com/foxcpp/go-imap v1.0.0-beta.1.0.20201001193006-5a1d05e53e2c
+replace github.com/emersion/go-imap => github.com/foxcpp/go-imap v1.0.0-beta.1.0.20220105164802-1e767d4cfd62
+replace github.com/foxcpp/go-imap-backend-tests => ../go-imap-backend-tests

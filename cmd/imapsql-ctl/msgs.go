@@ -36,11 +36,6 @@ func msgsAdd(ctx *cli.Context) error {
 		return err
 	}
 
-	mbox, err := u.GetMailbox(name)
-	if err != nil {
-		return err
-	}
-
 	flags := ctx.StringSlice("flag")
 	if flags == nil {
 		flags = []string{}
@@ -60,12 +55,12 @@ func msgsAdd(ctx *cli.Context) error {
 		return errors.New("Error: Empty message, refusing to continue")
 	}
 
-	status, err := mbox.Status([]eimap.StatusItem{eimap.StatusUidNext})
+	status, err := u.Status(name, []eimap.StatusItem{eimap.StatusUidNext})
 	if err != nil {
 		return err
 	}
 
-	if err := mbox.CreateMessage(flags, date, &buf); err != nil {
+	if err := u.CreateMessage(name, flags, date, &buf, nil); err != nil {
 		return err
 	}
 
@@ -106,7 +101,7 @@ func msgsRemove(ctx *cli.Context) error {
 		return err
 	}
 
-	mbox, err := u.GetMailbox(name)
+	_, mbox, err := u.GetMailbox(name, false, nil)
 	if err != nil {
 		return err
 	}
@@ -161,7 +156,7 @@ func msgsCopy(ctx *cli.Context) error {
 		return err
 	}
 
-	srcMbox, err := u.GetMailbox(srcName)
+	_, srcMbox, err := u.GetMailbox(srcName, true, nil)
 	if err != nil {
 		return err
 	}
@@ -205,7 +200,7 @@ func msgsMove(ctx *cli.Context) error {
 		return err
 	}
 
-	srcMbox, err := u.GetMailbox(srcName)
+	_, srcMbox, err := u.GetMailbox(srcName, true, nil)
 	if err != nil {
 		return err
 	}
@@ -243,7 +238,7 @@ func msgsList(ctx *cli.Context) error {
 		return err
 	}
 
-	mbox, err := u.GetMailbox(mboxName)
+	_, mbox, err := u.GetMailbox(mboxName, true, nil)
 	if err != nil {
 		return err
 	}
@@ -323,7 +318,7 @@ func msgsDump(ctx *cli.Context) error {
 		return err
 	}
 
-	mbox, err := u.GetMailbox(mboxName)
+	_, mbox, err := u.GetMailbox(mboxName, true, nil)
 	if err != nil {
 		return err
 	}

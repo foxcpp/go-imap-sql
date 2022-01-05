@@ -32,7 +32,7 @@ func connectToDB(ctx *cli.Context) error {
 		return errors.New("Error: fsstrore is required")
 	}
 
-	opts := imapsql.Opts{LazyUpdatesInit: true}
+	opts := imapsql.Opts{}
 	opts.NoWAL = ctx.GlobalIsSet("no-wal")
 
 	var err error
@@ -40,8 +40,6 @@ func connectToDB(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-
-	backend.EnableSpecialUseExt()
 
 	return nil
 }

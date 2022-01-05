@@ -32,7 +32,7 @@ func buildSearchStmt(withFlags, withoutFlags []string) string {
 		stmt += `AND flags.msgId NOT IN (` + buildSearchStmt(withoutFlags, nil) + `)`
 	}
 	if len(withFlags) > 1 {
-		stmt += `GROUP BY flags.msgId HAVING COUNT() = ` + strconv.Itoa(len(withFlags))
+		stmt += `GROUP BY flags.msgId HAVING COUNT(*) = ` + strconv.Itoa(len(withFlags))
 	}
 
 	return stmt

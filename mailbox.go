@@ -137,8 +137,8 @@ func (m *Mailbox) initSelected(unsetRecent bool) (uids []uint32, recent *imap.Se
 		m.parent.logMboxErr(m, err, "initSelected (listMsgUidsRecent)")
 		return nil, nil, nil, wrapErrf(err, "initSelected %s", m.name)
 	}
-	defer rows.Close()
 	if err == nil {
+		defer rows.Close()
 		for rows.Next() {
 			var (
 				uid        uint32

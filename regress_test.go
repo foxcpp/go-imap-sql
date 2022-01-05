@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/emersion/go-imap"
+	"github.com/emersion/go-imap/backend"
 	"gotest.tools/assert"
 	is "gotest.tools/assert/cmp"
 )
@@ -21,6 +22,44 @@ const (
 	testMsg     = testMsgHeader +
 		testMsgBody
 )
+
+type collectorConn struct{
+	upds []backend.Update
+}
+
+func (c *collectorConn) SendUpdate(upd backend.Update) error {
+	c.upds = append(c.upds, upd)
+	return nil
+}
+
+func TestRecentIncorrectReset(t *testing.T) {
+	b := initTestBackend()
+	defer cleanBackend(b)
+	assert.NilError(t, b.CreateUser(t.Name()))
+	usr, err := b.GetUser(t.Name())
+	assert.NilError(t, err)
+	assert.NilError(t, usr.CreateMailbox(t.Name()))
+
+	for i := 0; i < 5; i++ {
+		assert.NilError(t, usr.CreateMessage(t.Name(), []string{"flag1", "flag2"}, time.Now(), strings.NewReader(testMsg), nil))
+	}
+
+	conn := collectorConn{}
+	info, mbox, err := usr.GetMailbox(t.Name(), false, &conn)
+	assert.NilError(t, err)
+	assert.Equal(t, info.Messages, uint32(5))
+	assert.Equal(t, info.Recent, uint32(5))
+
+	assert.NilError(t, usr.CreateMessage(t.Name(), []string{"flag1", "flag2"}, time.Now(), strings.NewReader(testMsg), mbox))
+	assert.NilError(t, mbox.Poll(true))
+	assert.Equal(t, conn.upds[1].(*backend.MailboxUpdate).Recent, uint32(6))
+
+	assert.NilError(t, mbox.Close())
+	info, mbox, err = usr.GetMailbox(t.Name(), false, &conn)
+	assert.NilError(t, err)
+	assert.Equal(t, info.Messages, uint32(6))
+	assert.Equal(t, info.Recent, uint32(0))
+}
 
 func TestIssue7(t *testing.T) {
 	b := initTestBackend()

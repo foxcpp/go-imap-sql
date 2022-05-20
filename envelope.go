@@ -27,7 +27,7 @@ func envelopeFromHeader(hdr map[string][]string) rawEnvelope {
 	enve := rawEnvelope{}
 	date := hdr["Date"]
 	if date != nil {
-		t, err := time.Parse("Mon, 2 Jan 2006 15:04:05 -0700", date[0])
+		t, err := parseMessageDateTime(date[0])
 		if err == nil {
 			enve.Date = t.Unix()
 		}

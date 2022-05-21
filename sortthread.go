@@ -77,7 +77,7 @@ func firstAddrFromList(all []string) string {
 }
 
 func sentDate(dateHeaders []string, arrivalUnix int64) time.Time {
-	t, err := mail.ParseDate(firstHeaderField(dateHeaders))
+	t, err := parseMessageDateTime(firstHeaderField(dateHeaders))
 	if err != nil {
 		return time.Unix(arrivalUnix, 0)
 	}

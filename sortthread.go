@@ -105,57 +105,78 @@ func messageCompare(buf []*msgKey, sortCrit []sortthread.SortCriterion) func(i, 
 		for _, crit := range sortCrit {
 			switch crit.Field {
 			case "ARRIVAL":
-				if crit.Reverse && buf[i].ArrivalUnix > buf[j].ArrivalUnix {
-					return true
-				} else if buf[i].ArrivalUnix < buf[j].ArrivalUnix {
-					return true
+				if buf[i].ArrivalUnix == buf[j].ArrivalUnix {
+					continue
+				}
+				if crit.Reverse {
+					return buf[i].ArrivalUnix > buf[j].ArrivalUnix
+				} else {
+					return buf[i].ArrivalUnix < buf[j].ArrivalUnix
 				}
 			case "CC":
 				iAddr := firstAddrFromList(buf[i].CachedHeader["Cc"])
 				jAddr := firstAddrFromList(buf[j].CachedHeader["Cc"])
-				if crit.Reverse && iAddr > jAddr {
-					return true
-				} else if iAddr < jAddr {
-					return true
+				if iAddr == jAddr {
+					continue
+				}
+				if crit.Reverse {
+					return iAddr > jAddr
+				} else {
+					return iAddr < jAddr
 				}
 			case "DATE":
 				iDate := sentDate(buf[i].CachedHeader["Date"], buf[i].ArrivalUnix)
 				jDate := sentDate(buf[j].CachedHeader["Date"], buf[j].ArrivalUnix)
-				if crit.Reverse && iDate.After(jDate) {
-					return true
-				} else if iDate.Before(jDate) {
-					return true
+				if iDate == jDate {
+					continue
+				}
+				if crit.Reverse {
+					return iDate.After(jDate)
+				} else {
+					return iDate.Before(jDate)
 				}
 			case "FROM":
 				iAddr := firstAddrFromList(buf[i].CachedHeader["From"])
 				jAddr := firstAddrFromList(buf[j].CachedHeader["From"])
 				log.Println(iAddr, "vs", jAddr, "=>", iAddr < jAddr)
-				if crit.Reverse && iAddr > jAddr {
-					return true
-				} else if iAddr < jAddr {
-					return true
+				if iAddr == jAddr {
+					continue
+				}
+				if crit.Reverse {
+					return iAddr > jAddr
+				} else {
+					return iAddr < jAddr
 				}
 			case "SIZE":
-				if crit.Reverse && buf[i].BodyLen > buf[j].BodyLen {
-					return true
-				} else if buf[i].BodyLen < buf[j].BodyLen {
-					return true
+				if buf[i].BodyLen == buf[j].BodyLen {
+					continue
+				}
+				if crit.Reverse {
+					return buf[i].BodyLen > buf[j].BodyLen
+				} else {
+					return buf[i].BodyLen < buf[j].BodyLen
 				}
 			case "SUBJECT":
 				iSubj, _ := sortthread.GetBaseSubject(firstHeaderField(buf[i].CachedHeader["Subject"]))
 				jSubj, _ := sortthread.GetBaseSubject(firstHeaderField(buf[j].CachedHeader["Subject"]))
-				if crit.Reverse && iSubj > jSubj {
-					return true
-				} else if iSubj < jSubj {
-					return true
+				if iSubj == jSubj {
+					continue
+				}
+				if crit.Reverse {
+					return iSubj > jSubj
+				} else {
+					return iSubj < jSubj
 				}
 			case "TO":
 				iAddr := firstAddrFromList(buf[i].CachedHeader["To"])
 				jAddr := firstAddrFromList(buf[j].CachedHeader["To"])
-				if crit.Reverse && iAddr > jAddr {
-					return true
-				} else if iAddr < jAddr {
-					return true
+				if iAddr == jAddr {
+					continue
+				}
+				if crit.Reverse {
+					return iAddr > jAddr
+				} else {
+					return iAddr < jAddr
 				}
 			}
 		}

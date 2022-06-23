@@ -67,6 +67,7 @@ func (b *Backend) upgradeSchema(currentVer int) error {
 		if err != nil {
 			return wrapErr(err, "5->6 upgrade")
 		}
+		currentVer = 6
 	}
 
 	if currentVer != SchemaVersion {

@@ -97,22 +97,26 @@ func (d db) rewriteSQL(req string) (res string) {
 	return
 }
 
-func (db db) valuesSubquery(rows []string) string {
-	count := len(rows)
+func (db db) valuesSubquery(flagsCount int) string {
 	sqlList := ""
 	if db.driver == "mysql" {
 
 		sqlList += "SELECT ? AS column1"
-		for i := 1; i < count; i++ {
+		for i := 1; i < flagsCount; i++ {
 			sqlList += " UNION ALL SELECT ? "
 		}
 
 		return sqlList
 	}
 
-	for i := 0; i < count; i++ {
-		sqlList += "(?)"
-		if i+1 != count {
+	for i := 0; i < flagsCount; i++ {
+		if db.driver == "postgres" {
+			sqlList += "(?::text)" // query rewriter will make it into $N::text.
+			// This is a workaround for CockroachDB's https://github.com/cockroachdb/cockroach/issues/41558
+		} else {
+			sqlList += "(?)"
+		}
+		if i+1 != flagsCount {
 			sqlList += ","
 		}
 	}

@@ -35,12 +35,7 @@ func mboxesList(ctx *cli.Context) error {
 		fmt.Fprintln(os.Stderr, "No mailboxes.")
 	}
 
-	for _, mbox := range mboxes {
-		info, err := mbox.Info()
-		if err != nil {
-			return err
-		}
-
+	for _, info := range mboxes {
 		if len(info.Attributes) != 0 {
 			fmt.Print(info.Name, "\t", info.Attributes, "\n")
 		} else {
@@ -101,17 +96,12 @@ func mboxesRemove(ctx *cli.Context) error {
 		return err
 	}
 
-	mbox, err := u.GetMailbox(name)
+	status, err := u.Status(name, []eimap.StatusItem{eimap.StatusMessages})
 	if err != nil {
 		return err
 	}
 
 	if !ctx.Bool("yes,y") {
-		status, err := mbox.Status([]eimap.StatusItem{eimap.StatusMessages})
-		if err != nil {
-			return err
-		}
-
 		if status.Messages != 0 {
 			fmt.Fprintf(os.Stderr, "Mailbox %s contains %d messages.\n", name, status.Messages)
 		}
@@ -177,7 +167,7 @@ func mboxesAppendLimit(ctx *cli.Context) error {
 		return err
 	}
 
-	mbox, err := u.GetMailbox(name)
+	_, mbox, err := u.GetMailbox(name, true, nil)
 	if err != nil {
 		return err
 	}

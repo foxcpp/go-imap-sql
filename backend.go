@@ -2,16 +2,16 @@ package imapsql
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	mathrand "math/rand"
 	"strings"
 	"sync"
 	"time"
 
-	"errors"
-
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/backend"
+	mess "github.com/foxcpp/go-imap-mess"
 )
 
 // VersionStr is a string value representing go-imap-sql version.
@@ -21,7 +21,7 @@ import (
 const VersionStr = "0.4.0"
 
 // SchemaVersion is incremented each time DB schema changes.
-const SchemaVersion = 5
+const SchemaVersion = 6
 
 var (
 	ErrUserAlreadyExists = errors.New("imap: user already exists")
@@ -66,21 +66,6 @@ type Opts struct {
 	// nil value means no limit, 0 means zero limit (no new messages allowed)
 	MaxMsgBytes *uint32
 
-	// Controls when channel returned by Updates should be created.
-	// If set to false - channel will be created before NewBackend returns.
-	// If set to true - channel will be created upon first call to Updates.
-	// Second is useful for tests that don't consume values from Updates
-	// channel.
-	LazyUpdatesInit bool
-
-	// UpdatesChan allows to pass custom channel object used for unilateral
-	// updates dispatching.
-	//
-	// You can use this to change default updates buffer size (20) or to split
-	// initializaton into phases (which allows to break circular dependencies
-	// if you need updates channel before database initialization).
-	UpdatesChan chan backend.Update
-
 	// Custom randomness source for UIDVALIDITY values generation.
 	PRNG Rand
 
@@ -113,12 +98,17 @@ type Opts struct {
 	// CompressAlgoParams is passed directly to compression algorithm without changes.
 	CompressAlgoParams string
 
+	// Disable RFC 3501-conforming handling of \Recent flag. This improves
+	// performance significantly.
+	DisableRecent bool
+
 	Log Logger
 }
 
 type Backend struct {
 	db       db
 	extStore ExternalStore
+	mngr     *mess.Manager
 
 	// Opts structure used to construct this Backend object.
 	//
@@ -132,21 +122,13 @@ type Backend struct {
 	// - ExclusiveLock
 	// - CacheSize
 	// - NoWAL
-	// - UpdatesChan
 	Opts Opts
 
 	// database/sql.DB object created by New.
 	DB *sql.DB
 
-	childrenExt   bool
-	specialUseExt bool
-
 	prng         Rand
 	compressAlgo CompressionAlgo
-
-	updates chan backend.Update
-	// updates channel is lazily initalized, so we need to ensure thread-safety.
-	updatesLck sync.Mutex
 
 	// Shitton of pre-compiled SQL statements.
 	userMeta           *sql.Stmt
@@ -167,21 +149,21 @@ type Backend struct {
 	hasChildren        *sql.Stmt
 	uidValidity        *sql.Stmt
 	msgsCount          *sql.Stmt
-	firstUnseenSeqNum  *sql.Stmt
-	deletedSeqnums     *sql.Stmt
+	recentCount        *sql.Stmt
+	clearRecent        *sql.Stmt
+	firstUnseenUid     *sql.Stmt
+	unseenCount        *sql.Stmt
+	deletedUids        *sql.Stmt
 	expungeMbox        *sql.Stmt
 	mboxId             *sql.Stmt
 	addMsg             *sql.Stmt
 	copyMsgsUid        *sql.Stmt
 	copyMsgFlagsUid    *sql.Stmt
-	copyMsgsSeq        *sql.Stmt
-	copyMsgFlagsSeq    *sql.Stmt
 	massClearFlagsUid  *sql.Stmt
-	massClearFlagsSeq  *sql.Stmt
 	msgFlagsUid        *sql.Stmt
-	msgFlagsSeq        *sql.Stmt
 	usedFlags          *sql.Stmt
 	listMsgUids        *sql.Stmt
+	listMsgUidsRecent  *sql.Stmt
 
 	addRecentToLast *sql.Stmt
 
@@ -202,13 +184,11 @@ type Backend struct {
 	// is basically a optimization.
 
 	// For MOVE extension
-	markUid   *sql.Stmt
-	markSeq   *sql.Stmt
-	delMarked *sql.Stmt
+	markUid    *sql.Stmt
+	delMarked  *sql.Stmt
+	markedUids *sql.Stmt
 
 	lastUid *sql.Stmt
-
-	markedSeqnums *sql.Stmt
 
 	// For APPEND-LIMIT extension
 	setUserMsgSizeLimit *sql.Stmt
@@ -216,7 +196,6 @@ type Backend struct {
 	setMboxMsgSizeLimit *sql.Stmt
 	mboxMsgSizeLimit    *sql.Stmt
 
-	searchFetch      *sql.Stmt
 	searchFetchNoSeq *sql.Stmt
 
 	flagsSearchStmtsLck   sync.RWMutex
@@ -233,7 +212,6 @@ type Backend struct {
 	decreaseRefForMarked  *sql.Stmt
 	decreaseRefForDeleted *sql.Stmt
 	incrementRefUid       *sql.Stmt
-	incrementRefSeq       *sql.Stmt
 	zeroRef               *sql.Stmt
 	zeroRefUser           *sql.Stmt
 	refUser               *sql.Stmt
@@ -245,14 +223,12 @@ type Backend struct {
 	specialUseMbox *sql.Stmt
 
 	setSeenFlagUid   *sql.Stmt
-	setSeenFlagSeq   *sql.Stmt
 	increaseMsgCount *sql.Stmt
 	decreaseMsgCount *sql.Stmt
 
 	setInboxId *sql.Stmt
 
 	cachedHeaderUid *sql.Stmt
-	cachedHeaderSeq *sql.Stmt
 
 	sqliteOptimizeLoopStop chan struct{}
 }
@@ -277,6 +253,8 @@ func New(driver, dsn string, extStore ExternalStore, opts Opts) (*Backend, error
 
 		extStore: extStore,
 		Opts:     opts,
+
+		mngr: mess.NewManager(),
 	}
 	var err error
 
@@ -292,12 +270,6 @@ func New(driver, dsn string, extStore ExternalStore, opts Opts) (*Backend, error
 	}
 
 	b.Opts = opts
-	if !b.Opts.LazyUpdatesInit {
-		b.updates = b.Opts.UpdatesChan
-		if b.updates == nil {
-			b.updates = make(chan backend.Update, 20)
-		}
-	}
 
 	if b.Opts.Log == nil {
 		b.Opts.Log = globalLogger{}
@@ -355,11 +327,8 @@ func New(driver, dsn string, extStore ExternalStore, opts Opts) (*Backend, error
 		imap.FetchFlags, imap.FetchEnvelope,
 		imap.FetchBodyStructure, "BODY[]", "BODY[HEADER.FIELDS (From To)]"} {
 
-		if _, err := b.getFetchStmt(true, []imap.FetchItem{item}); err != nil {
-			return nil, wrapErrf(err, "fetchStmt prime (%s, uid=true)", item)
-		}
-		if _, err := b.getFetchStmt(false, []imap.FetchItem{item}); err != nil {
-			return nil, wrapErrf(err, "fetchStmt prime (%s, uid=false)", item)
+		if _, err := b.getFetchStmt([]imap.FetchItem{item}); err != nil {
+			return nil, wrapErrf(err, "fetchStmt prime (%s)", item)
 		}
 	}
 
@@ -370,20 +339,8 @@ func New(driver, dsn string, extStore ExternalStore, opts Opts) (*Backend, error
 	return b, nil
 }
 
-// EnableChildrenExt enables generation of /HasChildren and /HasNoChildren
-// attributes for mailboxes. It should be used only if server advertises
-// CHILDREN extension support (see children subpackage).
-func (b *Backend) EnableChildrenExt() bool {
-	b.childrenExt = true
-	return true
-}
-
-// EnableSpecialUseExt enables generation of special-use attributes for
-// mailboxes. It should be used only if server advertises SPECIAL-USE extension
-// support (see go-imap-specialuse).
-func (b *Backend) EnableSpecialUseExt() bool {
-	b.specialUseExt = true
-	return true
+func (b *Backend) UpdateManager() *mess.Manager {
+	return b.mngr
 }
 
 func (b *Backend) sqliteOptimizeLoop() {
@@ -413,23 +370,7 @@ func (b *Backend) Close() error {
 		b.db.Exec(`PRAGMA optimize`)
 	}
 
-	if b.updates != nil {
-		close(b.updates)
-	}
-
 	return b.db.Close()
-}
-
-func (b *Backend) Updates() <-chan backend.Update {
-	if b.Opts.LazyUpdatesInit && b.updates == nil {
-		b.updatesLck.Lock()
-		defer b.updatesLck.Unlock()
-
-		if b.updates == nil {
-			b.updates = make(chan backend.Update, 20)
-		}
-	}
-	return b.updates
 }
 
 func (b *Backend) getUserMeta(tx *sql.Tx, username string) (id uint64, inboxId uint64, err error) {

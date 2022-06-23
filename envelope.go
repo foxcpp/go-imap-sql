@@ -1,17 +1,16 @@
 package imapsql
 
 import (
+	"errors"
 	"net/mail"
 	"strings"
 	"time"
 
-	"errors"
-
-	imap "github.com/emersion/go-imap"
+	"github.com/emersion/go-imap"
 )
 
 type rawEnvelope struct {
-	Date      int64
+	Date      time.Time
 	Subject   string
 	From      string
 	Sender    string
@@ -29,7 +28,7 @@ func envelopeFromHeader(hdr map[string][]string) rawEnvelope {
 	if date != nil {
 		t, err := time.Parse("Mon, 2 Jan 2006 15:04:05 -0700", date[0])
 		if err == nil {
-			enve.Date = t.Unix()
+			enve.Date = t
 		}
 	}
 
@@ -53,17 +52,13 @@ func envelopeFromHeader(hdr map[string][]string) rawEnvelope {
 		enve.ReplyTo = enve.From
 	}
 
-	fields := [...]string{"Subject", "Message-Id"}
-	for i, fieldVar := range [...]*string{
-		&enve.Subject, &enve.MessageID,
-	} {
-		val := hdr[fields[i]]
-		if val == nil {
-			continue
-		}
-
-		*fieldVar = val[0]
+	if val := hdr["Subject"]; val != nil {
+		enve.Subject = val[0]
 	}
+	if val := hdr["Message-Id"]; val != nil {
+		enve.MessageID = val[0]
+	}
+
 	return enve
 }
 
@@ -86,7 +81,7 @@ func toImapAddr(list []*mail.Address) ([]*imap.Address, error) {
 
 func (enve *rawEnvelope) toIMAP() *imap.Envelope {
 	res := new(imap.Envelope)
-	res.Date = time.Unix(enve.Date, 0)
+	res.Date = enve.Date
 	res.Subject = enve.Subject
 	from, _ := mail.ParseAddressList(enve.From)
 	res.From, _ = toImapAddr(from)

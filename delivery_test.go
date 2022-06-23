@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/emersion/go-imap"
-	specialuse "github.com/emersion/go-imap-specialuse"
+	"github.com/emersion/go-imap/backend"
 	"github.com/emersion/go-message/textproto"
 	"gotest.tools/assert"
 	is "gotest.tools/assert/cmp"
@@ -18,11 +18,13 @@ var testMsgFetchItems = []imap.FetchItem{imap.FetchEnvelope, imap.FetchFlags, im
 func checkTestMsg(t *testing.T, msg *imap.Message) {
 	t.Helper()
 
+	hello := "Hello!"
+
 	for _, item := range msg.Items {
 		switch item {
 		case imap.FetchEnvelope:
 			assert.DeepEqual(t, msg.Envelope, &imap.Envelope{
-				Subject: "Hello!",
+				Subject: hello,
 				From: []*imap.Address{
 					{
 						MailboxName: "foxcpp",
@@ -56,6 +58,12 @@ func checkTestMsg(t *testing.T, msg *imap.Message) {
 	}
 }
 
+type noopConn struct{}
+
+func (n *noopConn) SendUpdate(_ backend.Update) error {
+	return nil
+}
+
 func TestDelivery(t *testing.T) {
 	b := initTestBackend().(*Backend)
 	defer cleanBackend(b)
@@ -75,12 +83,14 @@ func TestDelivery(t *testing.T) {
 	u2, err := b.GetUser(t.Name() + "-2")
 	assert.NilError(t, err, "GetUser 2")
 
-	mbox1, err := u1.GetMailbox("INBOX")
+	_, mbox1, err := u1.GetMailbox("INBOX", true, &noopConn{})
 	assert.NilError(t, err, "GetMailbox 1 INBOX")
-	mbox2, err := u2.GetMailbox("INBOX")
+	defer mbox1.Close()
+	_, mbox2, err := u2.GetMailbox("INBOX", true, &noopConn{})
 	assert.NilError(t, err, "GetMailbox 2 INBOX")
+	defer mbox2.Close()
 
-	seq, _ := imap.ParseSeqSet("*")
+	seq, _ := imap.ParseSeqSet("1:*")
 	ch := make(chan *imap.Message, 10)
 
 	assert.NilError(t, mbox1.ListMessages(false, seq, testMsgFetchItems, ch), "ListMessages")
@@ -123,10 +133,9 @@ func TestDelivery_Abort(t *testing.T) {
 
 	u, err := b.GetUser(t.Name())
 	assert.NilError(t, err, "GetUser")
-	mbox, err := u.GetMailbox("INBOX")
+	status, mbox, err := u.GetMailbox("INBOX", true, &noopConn{})
 	assert.NilError(t, err, "GetMailbox")
-	status, err := mbox.Status([]imap.StatusItem{imap.StatusMessages})
-	assert.NilError(t, err, "mbox.Status")
+	defer mbox.Close()
 	assert.Equal(t, status.Messages, uint32(0))
 }
 
@@ -148,8 +157,9 @@ func TestDelivery_AddRcpt_NonExistent(t *testing.T) {
 	// Check whether the message is delivered.
 	u, err := b.GetUser(t.Name())
 	assert.NilError(t, err, "GetUser 1")
-	mbox, err := u.GetMailbox("INBOX")
+	_, mbox, err := u.GetMailbox("INBOX", true, &noopConn{})
 	assert.NilError(t, err, "GetMailbox INBOX")
+	defer mbox.Close()
 
 	seq, _ := imap.ParseSeqSet("*")
 	ch := make(chan *imap.Message, 10)
@@ -166,10 +176,9 @@ func TestDelivery_AddRcpt_NonExistent(t *testing.T) {
 		assert.NilError(t, b.CreateUser("NON-EXISTENT"), "CreateUser NON-EXISTENT")
 		u, err := b.GetUser("NON-EXISTENT")
 		assert.NilError(t, err, "GetUser NON-EXISTENT")
-		mbox, err := u.GetMailbox("INBOX")
+		status, mbox, err := u.GetMailbox("INBOX", true, &noopConn{})
 		assert.NilError(t, err, "GetMailbox INBOX")
-		status, err := mbox.Status([]imap.StatusItem{imap.StatusMessages})
-		assert.NilError(t, err, "mbox.Status")
+		defer mbox.Close()
 
 		assert.Equal(t, status.Messages, uint32(0), "INBOX of NON-EXISTENT user is non-empty")
 	})
@@ -179,7 +188,6 @@ func TestDelivery_Mailbox(t *testing.T) {
 	test := func(t *testing.T, create bool) {
 		b := initTestBackend().(*Backend)
 		defer cleanBackend(b)
-		b.EnableSpecialUseExt()
 		assert.NilError(t, b.CreateUser(t.Name()), "CreateUser")
 		u, err := b.GetUser(t.Name())
 		assert.NilError(t, err, "GetUser")
@@ -195,8 +203,9 @@ func TestDelivery_Mailbox(t *testing.T) {
 		assert.NilError(t, delivery.BodyRaw(strings.NewReader(testMsg)), "BodyRaw")
 		assert.NilError(t, delivery.Commit(), "Commit")
 
-		mbox, err := u.GetMailbox("Box")
+		_, mbox, err := u.GetMailbox("Box", true, &noopConn{})
 		assert.NilError(t, err, "GetMailbox Box")
+		defer mbox.Close()
 
 		seq, _ := imap.ParseSeqSet("*")
 		ch := make(chan *imap.Message, 10)
@@ -217,7 +226,6 @@ func TestDelivery_SpecialMailbox(t *testing.T) {
 	test := func(t *testing.T, create bool, specialUse string) {
 		b := initTestBackend().(*Backend)
 		defer cleanBackend(b)
-		b.EnableSpecialUseExt()
 		assert.NilError(t, b.CreateUser(t.Name()), "CreateUser")
 		u, err := b.GetUser(t.Name())
 		assert.NilError(t, err, "GetUser")
@@ -233,8 +241,9 @@ func TestDelivery_SpecialMailbox(t *testing.T) {
 		assert.NilError(t, delivery.BodyRaw(strings.NewReader(testMsg)), "BodyRaw")
 		assert.NilError(t, delivery.Commit(), "Commit")
 
-		mbox, err := u.GetMailbox("Box")
+		_, mbox, err := u.GetMailbox("Box", true, &noopConn{})
 		assert.NilError(t, err, "GetMailbox Box")
+		defer mbox.Close()
 
 		seq, _ := imap.ParseSeqSet("*")
 		ch := make(chan *imap.Message, 10)
@@ -245,21 +254,28 @@ func TestDelivery_SpecialMailbox(t *testing.T) {
 		checkTestMsg(t, msg)
 
 		if create {
-			info, err := mbox.Info()
-			assert.NilError(t, err, "mbox.Info")
-			containsSpecial := false
-			for _, attr := range info.Attributes {
-				if attr == specialUse {
-					containsSpecial = true
+			info, err := u.ListMailboxes(false)
+			assert.NilError(t, err, "ListMailboxes failed")
+
+			for _, box := range info {
+				if box.Name != mbox.Name() {
+					continue
 				}
+
+				containsSpecial := false
+				for _, attr := range box.Attributes {
+					if attr == specialUse {
+						containsSpecial = true
+					}
+				}
+				assert.Assert(t, containsSpecial, "Missing SPECIAL-USE attr")
 			}
-			assert.Assert(t, containsSpecial, "Missing SPECIAL-USE attr")
 		}
 	}
 
-	test(t, true, specialuse.Junk)
+	test(t, true, imap.JunkAttr)
 	t.Run("nonexistent", func(t *testing.T) {
-		test(t, false, specialuse.Junk)
+		test(t, false, imap.JunkAttr)
 	})
 }
 
@@ -280,8 +296,9 @@ func TestDelivery_BodyParsed(t *testing.T) {
 	u, err := b.GetUser(t.Name())
 	assert.NilError(t, err, "GetUser")
 
-	mbox, err := u.GetMailbox("INBOX")
+	_, mbox, err := u.GetMailbox("INBOX", true, &noopConn{})
 	assert.NilError(t, err, "GetMailbox INBOX")
+	defer mbox.Close()
 
 	seq, _ := imap.ParseSeqSet("*")
 	ch := make(chan *imap.Message, 10)
@@ -315,10 +332,12 @@ func TestDelivery_UserHeader(t *testing.T) {
 	u2, err := b.GetUser(t.Name() + "-2")
 	assert.NilError(t, err, "GetUser 2")
 
-	mbox1, err := u1.GetMailbox("INBOX")
+	_, mbox1, err := u1.GetMailbox("INBOX", true, &noopConn{})
 	assert.NilError(t, err, "GetMailbox 1 INBOX")
-	mbox2, err := u2.GetMailbox("INBOX")
+	defer mbox1.Close()
+	_, mbox2, err := u2.GetMailbox("INBOX", true, &noopConn{})
 	assert.NilError(t, err, "GetMailbox 2 INBOX")
+	defer mbox2.Close()
 
 	seq, _ := imap.ParseSeqSet("*")
 	ch := make(chan *imap.Message, 10)

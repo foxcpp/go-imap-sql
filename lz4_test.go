@@ -44,7 +44,6 @@ func initTestBackendLZ4() backendtests.Backend {
 	}
 
 	b, err := New(driver, dsn, &FSStore{Root: storeDir}, Opts{
-		LazyUpdatesInit: true,
 		CompressAlgo:    "lz4",
 		PRNG:            prng,
 		Log:             DummyLogger{},

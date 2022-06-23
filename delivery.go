@@ -9,7 +9,6 @@ import (
 	"io/ioutil"
 	"time"
 
-	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/backend"
 	"github.com/emersion/go-message/textproto"
 )
@@ -36,7 +35,6 @@ func (b *Backend) NewDelivery() Delivery {
 func (d *Delivery) clean() {
 	d.users = d.users[0:0]
 	d.mboxes = d.mboxes[0:0]
-	d.updates = d.updates[0:0]
 	d.extKey = ""
 	for k := range d.perRcptHeader {
 		delete(d.perRcptHeader, k)
@@ -49,7 +47,6 @@ type Delivery struct {
 	users         []User
 	mboxes        []Mailbox
 	extKey        string
-	updates       []backend.Update
 	perRcptHeader map[string]textproto.Header
 	flagOverrides map[string][]string
 	mboxOverrides map[string]string
@@ -99,14 +96,14 @@ func (d *Delivery) Mailbox(name string) error {
 
 	for _, u := range d.users {
 		if mboxName := d.mboxOverrides[u.username]; mboxName != "" {
-			mbox, err := u.GetMailbox(mboxName)
+			_, mbox, err := u.GetMailbox(mboxName, true, nil)
 			if err == nil {
 				d.mboxes = append(d.mboxes, *mbox.(*Mailbox))
 				continue
 			}
 		}
 
-		mbox, err := u.GetMailbox(name)
+		_, mbox, err := u.GetMailbox(name, true, nil)
 		if err != nil {
 			if err != backend.ErrNoSuchMailbox {
 				d.mboxes = nil
@@ -118,7 +115,7 @@ func (d *Delivery) Mailbox(name string) error {
 				return err
 			}
 
-			mbox, err = u.GetMailbox(name)
+			_, mbox, err = u.GetMailbox(name, true, nil)
 			if err != nil {
 				d.mboxes = nil
 				return err
@@ -144,7 +141,7 @@ func (d *Delivery) SpecialMailbox(attribute, fallbackName string) error {
 	}
 	for _, u := range d.users {
 		if mboxName := d.mboxOverrides[u.username]; mboxName != "" {
-			mbox, err := u.GetMailbox(mboxName)
+			_, mbox, err := u.GetMailbox(mboxName, true, nil)
 			if err == nil {
 				d.mboxes = append(d.mboxes, *mbox.(*Mailbox))
 				continue
@@ -165,7 +162,7 @@ func (d *Delivery) SpecialMailbox(attribute, fallbackName string) error {
 				return err
 			}
 
-			mbox, err := u.GetMailbox(fallbackName)
+			_, mbox, err := u.GetMailbox(fallbackName, true, nil)
 			if err != nil {
 				d.mboxes = nil
 				return err
@@ -230,17 +227,15 @@ func (d *Delivery) BodyParsed(header textproto.Header, bodyLen int, body Buffer)
 		}
 	}
 
-	if cap(d.updates) < len(d.mboxes) {
-		d.updates = make([]backend.Update, 0, len(d.mboxes))
-	}
-
 	// Make sure all auto-generated statements are generated before we start transaction
 	// so it will not cause deadlocks on SQlite when statement is prepared outside
 	// of transaction while transaction is running.
 	for _, mbox := range d.mboxes {
-		_, err := d.b.getFlagsAddStmt(true, append([]string{imap.RecentFlag}, d.flagOverrides[mbox.user.username]...))
-		if err != nil {
-			return wrapErr(err, "Body")
+		if len(d.flagOverrides[mbox.user.username]) != 0 {
+			_, err := d.b.getFlagsAddStmt(len(d.flagOverrides[mbox.user.username]))
+			if err != nil {
+				return wrapErr(err, "Body")
+			}
 		}
 	}
 
@@ -253,9 +248,12 @@ func (d *Delivery) BodyParsed(header textproto.Header, bodyLen int, body Buffer)
 	}
 
 	for _, mbox := range d.mboxes {
-		flagsStmt, err := d.b.getFlagsAddStmt(true, append([]string{imap.RecentFlag}, d.flagOverrides[mbox.user.username]...))
-		if err != nil {
-			return wrapErr(err, "Body")
+		var flagsStmt *sql.Stmt
+		if len(d.flagOverrides[mbox.user.username]) != 0 {
+			flagsStmt, err = d.b.getFlagsAddStmt(len(d.flagOverrides[mbox.user.username]))
+			if err != nil {
+				return wrapErr(err, "Body")
+			}
 		}
 
 		err = d.mboxDelivery(header, mbox, int64(bodyLen), body, date, flagsStmt)
@@ -306,20 +304,17 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox Mailbox, bodyLen i
 		return wrapErr(err, "Body (incrementMsgCounters)")
 	}
 
-	upd, err := mbox.statusUpdate(d.tx)
-	if err != nil {
-		d.b.extStore.Delete([]string{extBodyKey})
-		return wrapErr(err, "Body (statusUpdate)")
-	}
-	d.updates = append(d.updates, upd)
-	// --- end of operations that involve mboxes table ---
-
 	// --- operations that involve msgs table ---
+	persistRecent := 0
+	if mbox.parent.mngr.NewMessage(mbox.id, msgId) {
+		persistRecent = 1
+	}
+
 	_, err = d.tx.Stmt(d.b.addMsg).Exec(
 		mbox.id, msgId, date.Unix(),
 		length,
 		bodyStruct, cachedHeader, extBodyKey,
-		0, d.b.Opts.CompressAlgo,
+		0, d.b.Opts.CompressAlgo, persistRecent,
 	)
 	if err != nil {
 		d.b.extStore.Delete([]string{extBodyKey})
@@ -328,13 +323,14 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox Mailbox, bodyLen i
 	// --- end of operations that involve msgs table ---
 
 	// --- operations that involve flags table ---
-	flags := []string{imap.RecentFlag}
-	flags = append(flags, d.flagOverrides[mbox.user.username]...)
+	flags := d.flagOverrides[mbox.user.username]
+	if len(flags) != 0 {
 
-	params := mbox.makeFlagsAddStmtArgs(true, flags, msgId, msgId)
-	if _, err := d.tx.Stmt(flagsStmt).Exec(params...); err != nil {
-		d.b.extStore.Delete([]string{extBodyKey})
-		return wrapErr(err, "Body (flagsStmt)")
+		params := mbox.makeFlagsAddStmtArgs(flags, msgId, msgId)
+		if _, err := d.tx.Stmt(flagsStmt).Exec(params...); err != nil {
+			d.b.extStore.Delete([]string{extBodyKey})
+			return wrapErr(err, "Body (flagsStmt)")
+		}
 	}
 	// --- end operations that involve flags table ---
 
@@ -370,11 +366,6 @@ func (d *Delivery) Commit() error {
 			return err
 		}
 	}
-	if d.b.updates != nil {
-		for _, update := range d.updates {
-			d.b.updates <- update
-		}
-	}
 
 	d.clean()
 	return nil
@@ -386,7 +377,7 @@ func (b *Backend) processParsedBody(headerInput []byte, header textproto.Header,
 		return nil, nil, "", err
 	}
 
-	objSize := bodyLen
+	objSize := int64(len(headerInput)) + bodyLen
 	if b.Opts.CompressAlgo != "" {
 		objSize = -1
 	}

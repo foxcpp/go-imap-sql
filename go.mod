@@ -3,13 +3,12 @@ module github.com/foxcpp/go-imap-sql
 go 1.12
 
 require (
-	github.com/emersion/go-imap v1.0.4
-	github.com/emersion/go-imap-appendlimit v0.0.0-20190308131241-25671c986a6a
+	github.com/emersion/go-imap v1.0.5-0.20200511082158-271ea913b422
 	github.com/emersion/go-imap-sortthread v1.1.1-0.20200727121200-18e5fb409fed
-	github.com/emersion/go-imap-specialuse v0.0.0-20161227184202-ba031ced6a62
-	github.com/emersion/go-message v0.11.2
-	github.com/foxcpp/go-imap-backend-tests v0.0.0-20200617132817-958ea5829771
-	github.com/foxcpp/go-imap-namespace v0.0.0-20200722130255-93092adf35f1
+	github.com/emersion/go-message v0.15.0
+	github.com/foxcpp/go-imap-backend-tests v0.0.0-20220105184719-e80aa29a5e16
+	github.com/foxcpp/go-imap-mess v0.0.0-20220105225909-b3469f4a4315
+	github.com/foxcpp/go-imap-namespace v0.0.0-20200802091432-08496dd8e0ed
 	github.com/frankban/quicktest v1.5.0 // indirect
 	github.com/go-sql-driver/mysql v1.4.1
 	github.com/klauspost/compress v1.10.5
@@ -21,3 +20,5 @@ require (
 	google.golang.org/appengine v1.6.1 // indirect
 	gotest.tools v2.2.0+incompatible
 )
+
+replace github.com/emersion/go-imap => github.com/foxcpp/go-imap v1.0.0-beta.1.0.20220105164802-1e767d4cfd62

@@ -124,7 +124,7 @@ func (b *Backend) initSchema() error {
 	}
 
 	_, err = b.db.Exec(`
-        CREATE INDEX IF NOT EXISTS extKeys_uid_id
+        CREATE UNIQUE INDEX IF NOT EXISTS extKeys_uid_id
         ON extKeys(uid, id)`)
 	// MySQL does not support "IF NOT EXISTS", but MariaDB does.
 	if err != nil && b.db.driver == "mysql" {
@@ -154,6 +154,8 @@ func (b *Backend) initSchema() error {
             seen INTEGER NOT NULL DEFAULT 0,
 
 			compressAlgo VARCHAR(255),
+
+			recent INTEGER NOT NULL DEFAULT 1,
 
 			PRIMARY KEY(mboxId, msgId)
 		)`)
@@ -278,7 +280,7 @@ func (b *Backend) prepareStmts() error {
 	}
 	b.setSubbed, err = b.db.Prepare(`
 		UPDATE mboxes SET sub = ?
-		WHERE id = ?`)
+		WHERE uid = ? AND name = ?`)
 	if err != nil {
 		return wrapErr(err, "setSubbed prep")
 	}
@@ -342,38 +344,47 @@ func (b *Backend) prepareStmts() error {
 	if err != nil {
 		return wrapErr(err, "msgsCount prep")
 	}
-	b.firstUnseenSeqNum, err = b.db.Prepare(`
-        SELECT rownr
-        FROM (
-            SELECT row_number() OVER (ORDER BY msgId) AS rownr, msgId, seen
-            FROM msgs
-            WHERE mboxId = ?
-        ) seqnums
-        WHERE msgId = (
-            SELECT msgId
-            FROM msgs
-            WHERE mboxId = ?
-            AND seen = 0
-            LIMIT 1
-        )
-        LIMIT 1`)
+	b.recentCount, err = b.db.Prepare(`
+		SELECT count(msgId)
+		FROM msgs
+		WHERE mboxId = ?
+		AND recent = 1`)
 	if err != nil {
-		return wrapErr(err, "firstUnseenSeqNum prep")
+		return wrapErr(err, "recentCount prep")
 	}
-	b.deletedSeqnums, err = b.db.Prepare(`
-		SELECT seqnum
-		FROM (
-			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId
-			FROM msgs
-			WHERE mboxId = ?
-		) seqnums
-		WHERE msgId IN (
-			SELECT msgId
-			FROM flags
-			WHERE mboxId = ?
-			AND flag = '\Deleted'
-		)
-		ORDER BY seqnum DESC`)
+	b.clearRecent, err = b.db.Prepare(`
+		UPDATE msgs
+		SET recent = 0
+		WHERE mboxId = ?`)
+	if err != nil {
+		return wrapErr(err, "clearRecent prep")
+	}
+	b.firstUnseenUid, err = b.db.Prepare(`
+        SELECT msgId
+        FROM msgs
+	  	WHERE mboxId = ?
+		AND seen = 0
+		LIMIT 1
+        `)
+	if err != nil {
+		return wrapErr(err, "firstUnseenUid prep")
+	}
+	// Should we cache it?
+	b.unseenCount, err = b.db.Prepare(`
+        SELECT count(*)
+        FROM msgs
+	  	WHERE mboxId = ?
+		AND seen = 0
+		LIMIT 10000
+        `)
+	if err != nil {
+		return wrapErr(err, "unseenCount prep")
+	}
+	b.deletedUids, err = b.db.Prepare(`
+		SELECT msgId
+		FROM flags
+		WHERE mboxId = ?
+		AND flag = '\Deleted'`)
 	if err != nil {
 		return wrapErr(err, "deletedSeqnums prep")
 	}
@@ -396,8 +407,8 @@ func (b *Backend) prepareStmts() error {
 		return wrapErr(err, "mboxId prep")
 	}
 	b.addMsg, err = b.db.Prepare(`
-		INSERT INTO msgs(mboxId, msgId, date, bodyLen, bodyStructure, cachedHeader, extBodyKey, seen, compressAlgo)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		INSERT INTO msgs(mboxId, msgId, date, bodyLen, bodyStructure, cachedHeader, extBodyKey, seen, compressAlgo, recent)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return wrapErr(err, "addMsg prep")
 	}
@@ -407,7 +418,7 @@ func (b *Backend) prepareStmts() error {
 			SELECT uidnext - 1
 			FROM mboxes
 			WHERE id = ?
-		) + row_number() OVER (ORDER BY msgId) + ?, date, bodyLen, 0 AS mark, bodyStructure, cachedHeader, extBodyKey, seen, compressAlgo
+		) + row_number() OVER (ORDER BY msgId) + ?, date, bodyLen, 0 AS mark, bodyStructure, cachedHeader, extBodyKey, seen, compressAlgo, 0
 		FROM msgs
 		WHERE mboxId = ? AND msgId BETWEEN ? AND ?`)
 	if err != nil {
@@ -431,45 +442,7 @@ func (b *Backend) prepareStmts() error {
 	if err != nil {
 		return wrapErr(err, "copyMsgFlagsUid prep")
 	}
-	b.copyMsgsSeq, err = b.db.Prepare(`
-		INSERT INTO msgs
-		SELECT ? AS mboxId, (
-			SELECT uidnext - 1
-			FROM mboxes
-			WHERE id = ?
-		) + row_number() OVER (ORDER BY msgId) + ?, date, bodyLen, 0 AS mark, bodyStructure, cachedHeader, extBodyKey, seen, compressAlgo
-		FROM (
-			SELECT msgId, date, bodyLen, bodyStructure, cachedHeader, extBodyKey, compressAlgo, seen
-			FROM msgs
-			WHERE mboxId = ?
-			ORDER BY msgId
-			LIMIT ? OFFSET ?
-		) subset`)
-	if err != nil {
-		return wrapErr(err, "copyMsgsSeq prep")
-	}
-	b.copyMsgFlagsSeq, err = b.db.Prepare(`
-		INSERT INTO flags
-		SELECT ?, new_msgId AS msgId, flag
-		FROM flags
-		INNER JOIN (
-			SELECT (
-				SELECT uidnext - 1
-				FROM mboxes
-				WHERE id = ?
-			) + row_number() OVER (ORDER BY msgId) + ? AS new_msgId, msgId, mboxId
-			FROM (
-				SELECT msgId, mboxId
-				FROM msgs
-				WHERE mboxId = ?
-				ORDER BY msgId
-				LIMIT ? OFFSET ?
-			) subset
-		) map ON map.msgId = flags.msgId
-		AND map.mboxId = flags.mboxId`)
-	if err != nil {
-		return wrapErr(err, "copyMsgFlagsSeq prep")
-	}
+
 	b.massClearFlagsUid, err = b.db.Prepare(`
 		DELETE FROM flags
 		WHERE mboxId = ?
@@ -478,28 +451,12 @@ func (b *Backend) prepareStmts() error {
 	if err != nil {
 		return wrapErr(err, "massClearFlagsUid prep")
 	}
-	b.massClearFlagsSeq, err = b.db.Prepare(`
-		DELETE FROM flags
-		WHERE mboxId = ?
-		AND msgId IN (
-			SELECT msgId
-			FROM (
-				SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId
-				FROM msgs
-				WHERE mboxId = ?
-			) seq
-			WHERE seqnum BETWEEN ? AND ?
-		)
-		AND flag != '\Recent'`)
-	if err != nil {
-		return wrapErr(err, "massClearFlagsSeq prep")
-	}
 
 	b.addRecentToLast, err = b.db.Prepare(`
-		INSERT INTO flags
-		SELECT ? AS mboxId, msgId, '\Recent'
-		FROM (SELECT msgId FROM msgs WHERE mboxId = ? ORDER BY msgId DESC LIMIT ?) targets
-		ON CONFLICT DO NOTHING
+		UPDATE msgs
+		SET recent = 1
+		WHERE mboxId = ?
+		AND msgId = (SELECT msgId FROM msgs WHERE mboxId = ? ORDER BY msgId DESC LIMIT ?)
 		`)
 	if err != nil {
 		return wrapErr(err, "addRecenttoLast prep")
@@ -513,39 +470,20 @@ func (b *Backend) prepareStmts() error {
 	if err != nil {
 		return wrapErr(err, "delMsgsUid prep")
 	}
-	b.markSeq, err = b.db.Prepare(`
-		UPDATE msgs
-		SET mark = 1
+	b.markedUids, err = b.db.Prepare(`
+		SELECT msgId, extBodyKey
+		FROM msgs
 		WHERE mboxId = ?
-		AND msgId IN (
-			SELECT msgId
-			FROM (
-				SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId
-				FROM msgs
-				WHERE mboxId = ?
-			) seq
-			WHERE seqnum BETWEEN ? AND ?
-		)`)
+		AND mark = 1`)
 	if err != nil {
-		return wrapErr(err, "markSeq prep")
+		return wrapErr(err, "markedUids prep")
 	}
+
 	b.delMarked, err = b.db.Prepare(`
 		DELETE FROM msgs
 		WHERE mark = 1`)
 	if err != nil {
 		return wrapErr(err, "delMarked prep")
-	}
-	b.markedSeqnums, err = b.db.Prepare(`
-		SELECT seqnum, extBodyKey
-		FROM (
-			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, mark, extBodyKey
-			FROM msgs
-			WHERE mboxId = ?
-		) seqnums
-		WHERE mark = 1
-		ORDER BY seqnum DESC`)
-	if err != nil {
-		return wrapErr(err, "markedSeqnums prep")
 	}
 
 	b.setUserMsgSizeLimit, err = b.db.Prepare(`
@@ -578,38 +516,14 @@ func (b *Backend) prepareStmts() error {
 	}
 
 	b.msgFlagsUid, err = b.db.Prepare(`
-		SELECT seqnum, msgs.msgId, ` + b.db.aggrValuesSet("flag", "{") + `
+		SELECT msgs.msgId, ` + b.db.aggrValuesSet("flag", "{") + `
 		FROM msgs
-		INNER JOIN (
-			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
-			FROM msgs
-			WHERE mboxId = ?
-		) map
-		ON map.msgId = msgs.msgId
 		LEFT JOIN flags
-		ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId AND msgs.mboxId = flags.mboxId
+		ON flags.msgId = msgs.msgId AND flags.mboxId = msgs.mboxId AND msgs.mboxId = flags.mboxId
 		WHERE msgs.mboxId = ? AND msgs.msgId BETWEEN ? AND ?
-		GROUP BY msgs.mboxId, msgs.msgId, seqnum
-		ORDER BY seqnum DESC`)
+		GROUP BY msgs.mboxId, msgs.msgId`)
 	if err != nil {
 		return wrapErr(err, "msgFlagsUid prep")
-	}
-	b.msgFlagsSeq, err = b.db.Prepare(`
-		SELECT seqnum, msgs.msgId, ` + b.db.aggrValuesSet("flag", "{") + `
-		FROM msgs
-		INNER JOIN (
-			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
-			FROM msgs
-			WHERE mboxId = ?
-		) map
-		ON map.msgId = msgs.msgId
-		LEFT JOIN flags
-		ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId AND msgs.mboxId = flags.mboxId
-		WHERE msgs.mboxId = ? AND seqnum BETWEEN ? AND ?
-		GROUP BY msgs.mboxId, msgs.msgId, seqnum
-		ORDER BY seqnum DESC`)
-	if err != nil {
-		return wrapErr(err, "msgFlagsSeq prep")
 	}
 
 	b.usedFlags, err = b.db.Prepare(`
@@ -626,33 +540,22 @@ func (b *Backend) prepareStmts() error {
 	if err != nil {
 		return wrapErr(err, "listMsgUids prep")
 	}
-
-	b.searchFetch, err = b.db.Prepare(`
-		SELECT seqnum, msgs.msgId, date, bodyLen, extBodyKey, compressAlgo, ` + b.db.aggrValuesSet("flag", "{") + `
-		FROM msgs
-		INNER JOIN (
-			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
-			FROM msgs
-			WHERE mboxId = ?
-		) map
-		ON map.msgId = msgs.msgId
-		LEFT JOIN flags
-		ON flags.msgId = msgs.msgId AND flags.mboxId = map.mboxId AND msgs.mboxId = flags.mboxId
-		WHERE msgs.mboxId = ?
-		GROUP BY msgs.mboxId, msgs.msgId, seqnum
-		ORDER BY seqnum DESC`)
+	b.listMsgUidsRecent, err = b.db.Prepare(`
+        SELECT msgId, recent
+        FROM msgs
+        WHERE mboxId = ?
+		LIMIT 10000`)
 	if err != nil {
-		return wrapErr(err, "searchFetch prep")
+		return wrapErr(err, "listMsgUidsRecent prep")
 	}
 
 	b.searchFetchNoSeq, err = b.db.Prepare(`
-		SELECT 0 AS seqnum, msgs.msgId, date,  bodyLen, extBodyKey, compressAlgo, ` + b.db.aggrValuesSet("flag", "{") + `
+		SELECT msgs.msgId, date, bodyLen, extBodyKey, compressAlgo, ` + b.db.aggrValuesSet("flag", "{") + `
 		FROM msgs
 		LEFT JOIN flags
 		ON flags.msgId = msgs.msgId AND msgs.mboxId = flags.mboxId
 		WHERE msgs.mboxId = ?
-		GROUP BY msgs.mboxId, msgs.msgId, seqnum
-		ORDER BY seqnum DESC`)
+		GROUP BY msgs.mboxId, msgs.msgId`)
 	if err != nil {
 		return wrapErr(err, "searchFetchNoSeq prep")
 	}
@@ -703,25 +606,6 @@ func (b *Backend) prepareStmts() error {
 		)`)
 	if err != nil {
 		return wrapErr(err, "incrementRefUid prep")
-	}
-	b.incrementRefSeq, err = b.db.Prepare(`
-		UPDATE extKeys
-		SET refs = refs + 1
-		WHERE uid = ?
-		AND id IN (
-			SELECT extBodyKey
-			FROM msgs
-			INNER JOIN (
-				SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId
-				FROM msgs
-				WHERE mboxId = ?
-			) map
-			ON msgs.msgId = map.msgId
-			WHERE mboxId = ? AND seqnum BETWEEN ? AND ?
-			ORDER BY msgs.msgId DESC
-		)`)
-	if err != nil {
-		return wrapErr(err, "incrementRefSeq prep")
 	}
 	b.zeroRef, err = b.db.Prepare(`
 		SELECT extBodyKey
@@ -786,22 +670,6 @@ func (b *Backend) prepareStmts() error {
 	if err != nil {
 		return wrapErr(err, "setSeenFlagUid prep")
 	}
-	b.setSeenFlagSeq, err = b.db.Prepare(`
-		UPDATE msgs
-		SET seen = ?
-		WHERE mboxId = ?
-		AND msgId IN (
-			SELECT msgId
-			FROM (
-				SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId
-				FROM msgs
-				WHERE mboxId = ?
-			) seq
-			WHERE seqnum BETWEEN ? AND ?
-		)`)
-	if err != nil {
-		return wrapErr(err, "setSeenFlagSeq prep")
-	}
 
 	b.setInboxId, err = b.db.Prepare(`
         UPDATE users
@@ -835,19 +703,6 @@ func (b *Backend) prepareStmts() error {
 		WHERE msgs.mboxId = ? AND msgId BETWEEN ? AND ?`)
 	if err != nil {
 		return wrapErr(err, "cachedHeaderUid prep")
-	}
-	b.cachedHeaderSeq, err = b.db.Prepare(`
-		SELECT seqnum, cachedHeader, bodyLen, date
-		FROM msgs
-		INNER JOIN (
-			SELECT row_number() OVER (ORDER BY msgId) AS seqnum, msgId, mboxId
-			FROM msgs
-			WHERE mboxId = ?
-		) map
-		ON map.msgId = msgs.msgId
-		WHERE msgs.mboxId = ? AND map.seqnum BETWEEN ? AND ?`)
-	if err != nil {
-		return wrapErr(err, "cachedHeaderSeq prep")
 	}
 
 	return nil

@@ -23,7 +23,7 @@ func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.Fetch
 	setSeen := shouldSetSeen(items)
 	var addSeenStmt *sql.Stmt
 	if setSeen {
-		addSeenStmt, err = m.parent.getFlagsAddStmt(uid, []string{imap.SeenFlag})
+		addSeenStmt, err = m.parent.getFlagsAddStmt(1)
 		if err != nil {
 			m.parent.logMboxErr(m, err, "ListMessages (getFlagsAddStmt)", uid, seqset, items)
 			return err
@@ -33,7 +33,7 @@ func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.Fetch
 		items = append(items, imap.FetchFlags)
 	}
 
-	stmt, err := m.parent.getFetchStmt(uid, items)
+	stmt, err := m.parent.getFetchStmt(items)
 	if err != nil {
 		m.parent.logMboxErr(m, err, "ListMessages (getFetchStmt)", uid, seqset, items)
 		return err
@@ -47,33 +47,30 @@ func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.Fetch
 	}
 	defer tx.Rollback()
 
-	for _, seq := range seqset.Set {
-		start, stop, err := m.resolveSeq(tx, seq, uid)
-		if err != nil {
-			m.parent.logMboxErr(m, err, "ListMessages (resolve seq)", uid, seqset, items)
-			return err
+	seqset, err = m.handle.ResolveSeq(uid, seqset)
+	if err != nil {
+		if uid {
+			return nil
 		}
-		m.parent.Opts.Log.Debugln("ListMessages: resolved seq", seq, uid, "to", start, stop)
+		return err
+	}
 
+	for _, seq := range seqset.Set {
 		if setSeen {
-			params := m.makeFlagsAddStmtArgs(uid, []string{imap.SeenFlag}, start, stop)
+			params := m.makeFlagsAddStmtArgs([]string{imap.SeenFlag}, seq.Start, seq.Stop)
 			if _, err := tx.Stmt(addSeenStmt).Exec(params...); err != nil {
 				m.parent.logMboxErr(m, err, "ListMessages (add seen)", uid, seqset, items)
 				return err
 			}
 
-			if uid {
-				_, err = tx.Stmt(m.parent.setSeenFlagUid).Exec(1, m.id, start, stop)
-			} else {
-				_, err = tx.Stmt(m.parent.setSeenFlagSeq).Exec(1, m.id, m.id, start, stop)
-			}
+			_, err = tx.Stmt(m.parent.setSeenFlagUid).Exec(1, m.id, seq.Start, seq.Stop)
 			if err != nil {
 				m.parent.logMboxErr(m, err, "ListMessages (setSeenFlag)", uid, seqset, items)
 				return err
 			}
 		}
 
-		rows, err := tx.Stmt(stmt).Query(m.id, m.id, start, stop)
+		rows, err := tx.Stmt(stmt).Query(m.id, seq.Start, seq.Stop)
 		if err != nil {
 			m.parent.logMboxErr(m, err, "ListMessages", uid, seqset, items)
 			return err
@@ -112,8 +109,6 @@ func makeScanArgs(data *scanData, rows *sql.Rows) ([]interface{}, error) {
 	for _, col := range cols {
 		// PostgreSQL case-folds column names to lower-case.
 		switch col {
-		case "seqnum":
-			scanOrder = append(scanOrder, &data.seqNum)
 		case "date":
 			scanOrder = append(scanOrder, &data.dateUnix)
 		case "bodyLen", "bodylen":
@@ -168,7 +163,12 @@ messageLoop:
 			}
 		}
 
-		msg := imap.NewMessage(data.seqNum, items)
+		seqNum, ok := m.handle.UidAsSeq(data.msgId)
+		if !ok {
+			continue
+		}
+
+		msg := imap.NewMessage(seqNum, items)
 		for _, item := range items {
 			switch item {
 			case imap.FetchInternalDate:
@@ -185,7 +185,14 @@ messageLoop:
 			case imap.FetchBodyStructure:
 				msg.BodyStructure = data.bodyStructure
 			case imap.FetchFlags:
-				msg.Flags = strings.Split(data.flagStr, flagsSep)
+				if data.flagStr != "" {
+					msg.Flags = strings.Split(data.flagStr, flagsSep)
+				} else {
+					msg.Flags = []string{}
+				}
+				if m.handle.IsRecent(data.msgId) {
+					msg.Flags = append(msg.Flags, imap.RecentFlag)
+				}
 			default:
 				if err := m.extractBodyPart(item, &data, msg); err != nil {
 					m.parent.logMboxErr(m, err, "failed to read body, skipping", data.seqNum, data.extBodyKey)
@@ -295,6 +302,11 @@ func headerSubsetFromCached(sect *imap.BodySectionName, cachedHeader map[string]
 	hdr := textproto.Header{}
 	for i := len(sect.Fields) - 1; i >= 0; i-- {
 		field := sect.Fields[i]
+
+		// If field requested multiple times - return only once.
+		if hdr.Has(field) {
+			continue
+		}
 
 		value := cachedHeader[nettextproto.CanonicalMIMEHeaderKey(field)]
 		for i := len(value) - 1; i >= 0; i-- {

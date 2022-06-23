@@ -16,7 +16,7 @@ func (globalLogger) Println(v ...interface{}) {
 }
 
 func (globalLogger) Debugf(format string, v ...interface{}) {
-	log.Println(v...)
+	log.Printf(format, v...)
 }
 
 func (globalLogger) Debugln(v ...interface{}) {

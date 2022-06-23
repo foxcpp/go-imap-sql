@@ -11,11 +11,10 @@ import (
 	"time"
 
 	"github.com/emersion/go-imap"
-	appendlimit "github.com/emersion/go-imap-appendlimit"
 	"github.com/emersion/go-imap/backend"
 	"github.com/emersion/go-imap/backend/backendutil"
 	"github.com/emersion/go-message/textproto"
-	"github.com/foxcpp/go-imap-sql/children"
+	mess "github.com/foxcpp/go-imap-mess"
 	"github.com/mailru/easyjson/jwriter"
 )
 
@@ -28,63 +27,62 @@ type Mailbox struct {
 	name   string
 	parent *Backend
 	id     uint64
+
+	conn   backend.Conn
+	handle *mess.MailboxHandle
+}
+
+func (m *Mailbox) Close() error {
+	if m.conn == nil {
+		return nil
+	}
+	return m.handle.Close()
+}
+
+func (m *Mailbox) Poll(expunge bool) error {
+	m.handle.Sync(expunge)
+	return nil
 }
 
 func (m *Mailbox) Name() string {
 	return m.name
 }
 
-func (m *Mailbox) Info() (*imap.MailboxInfo, error) {
-	res := imap.MailboxInfo{
-		Attributes: nil,
-		Delimiter:  MailboxPathSep,
-		Name:       m.name,
-	}
-	row := m.parent.getMboxAttrs.QueryRow(m.user.id, m.name)
-	var mark int
-	var specialUse sql.NullString
-	if err := row.Scan(&mark, &specialUse); err != nil {
-		m.parent.logMboxErr(m, err, "MboxInfo (mbox attrs)")
-		return nil, wrapErrf(err, "Info %s", m.name)
-	}
-	if mark == 1 {
-		res.Attributes = []string{imap.MarkedAttr}
-	}
-	if specialUse.Valid && m.parent.specialUseExt {
-		res.Attributes = []string{specialUse.String}
-	}
-
-	if m.parent.childrenExt {
-		row = m.parent.hasChildren.QueryRow(m.name+MailboxPathSep+"%", m.user.id)
-		childrenCount := 0
-		if err := row.Scan(&childrenCount); err != nil {
-			m.parent.logMboxErr(m, err, "MboxInfo (children count)")
-			return nil, wrapErrf(err, "Info %s", m.name)
-		}
-		if childrenCount != 0 {
-			res.Attributes = append(res.Attributes, children.HasChildrenAttr)
-		} else {
-			res.Attributes = append(res.Attributes, children.HasNoChildrenAttr)
-		}
-	}
-
-	return &res, nil
+func (m *Mailbox) Conn() backend.Conn {
+	return m.conn
 }
 
-func (m *Mailbox) Status(items []imap.StatusItem) (*imap.MailboxStatus, error) {
-	tx, err := m.parent.db.Begin(true)
-	if err != nil {
-		m.parent.logMboxErr(m, err, "MboxStatus (tx start)", items)
-		return nil, wrapErrf(err, "Status %s", m.name)
-	}
-	defer tx.Rollback() //nolint:errcheck
+func (m *Mailbox) Info() (*imap.MailboxInfo, error) {
+	panic("should be removed from go-imap")
+}
 
-	res := imap.NewMailboxStatus(m.name, items)
-	res.Flags = []string{
+var standardFlags = map[string]struct{}{
+	imap.SeenFlag:     {},
+	imap.AnsweredFlag: {},
+	imap.FlaggedFlag:  {},
+	imap.DeletedFlag:  {},
+	imap.DraftFlag:    {},
+}
+
+func (m *Mailbox) initSelected(unsetRecent bool) (uids []uint32, recent *imap.SeqSet, status *imap.MailboxStatus, err error) {
+	if m.parent.Opts.DisableRecent {
+		unsetRecent = false
+	}
+
+	tx, err := m.parent.db.Begin(!unsetRecent)
+	if err != nil {
+		return nil, nil, nil, wrapErrf(err, "statusInit %s", m.name)
+	}
+	defer tx.Rollback() // nolint:errcheck
+
+	status = imap.NewMailboxStatus(m.name, []imap.StatusItem{
+		imap.StatusMessages, imap.StatusRecent, imap.StatusUidNext,
+		imap.StatusUidValidity, imap.StatusUnseen})
+	status.Flags = []string{
 		imap.SeenFlag, imap.AnsweredFlag, imap.FlaggedFlag,
 		imap.DeletedFlag, imap.DraftFlag,
 	}
-	res.PermanentFlags = []string{
+	status.PermanentFlags = []string{
 		imap.SeenFlag, imap.AnsweredFlag, imap.FlaggedFlag,
 		imap.DeletedFlag, imap.DraftFlag,
 		`\*`,
@@ -92,74 +90,104 @@ func (m *Mailbox) Status(items []imap.StatusItem) (*imap.MailboxStatus, error) {
 
 	rows, err := tx.Stmt(m.parent.usedFlags).Query(m.id)
 	if err != nil {
-		m.parent.logMboxErr(m, err, "Status (used flags)", items)
-		return nil, wrapErrf(err, "Status (usedFlags) %s", m.name)
+		m.parent.logMboxErr(m, err, "initialize (used flags)")
+		return nil, nil, nil, wrapErrf(err, "initSelected (usedFlags) %s", m.name)
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var flag string
 		if err := rows.Scan(&flag); err != nil {
-			m.parent.logMboxErr(m, err, "Status (used flags)", items)
-			return nil, wrapErrf(err, "Status (usedFlags) %s", m.name)
+			m.parent.logMboxErr(m, err, "initialize (used flags)")
+			return nil, nil, nil, wrapErrf(err, "initSelected (usedFlags) %s", m.name)
 		}
-		res.Flags = append(res.Flags, flag)
-		res.PermanentFlags = append(res.PermanentFlags, flag)
+		if _, ok := standardFlags[flag]; ok {
+			continue
+		}
+		status.Flags = append(status.Flags, flag)
+		status.PermanentFlags = append(status.PermanentFlags, flag)
 	}
 
-	row := tx.Stmt(m.parent.firstUnseenSeqNum).QueryRow(m.id, m.id)
-	if err := row.Scan(&res.UnseenSeqNum); err != nil {
+	var unseenUid uint32
+	err = tx.Stmt(m.parent.firstUnseenUid).QueryRow(m.id).Scan(&unseenUid)
+	if err != nil && err != sql.ErrNoRows {
+		m.parent.logMboxErr(m, err, "initSelected (first unseen)")
+		return nil, nil, nil, wrapErrf(err, "initSelected %s", m.name)
+	}
+
+	row := tx.Stmt(m.parent.unseenCount).QueryRow(m.id)
+	if err := row.Scan(&status.Unseen); err != nil {
 		if err != sql.ErrNoRows {
-			m.parent.logMboxErr(m, err, "Status (unseen seqnum)", items)
-			return nil, wrapErrf(err, "Status %s", m.name)
+			m.parent.logMboxErr(m, err, "initSelected (unseen count)")
+			return nil, nil, nil, wrapErrf(err, "initSelected %s", m.name)
 		}
 
 		// Don't return it if there is no unseen messages.
-		delete(res.Items, imap.StatusUnseen)
-		res.UnseenSeqNum = 0
+		delete(status.Items, imap.StatusUnseen)
+		status.UnseenSeqNum = 0
+	}
+	if status.Unseen == 0 {
+		delete(status.Items, imap.StatusUnseen)
+		status.UnseenSeqNum = 0
 	}
 
-	for _, item := range items {
-		switch item {
-		case imap.StatusMessages:
-			// While \Recent support is not implemented, the result is
-			// always the same as msgsCount, don't do the query twice.
-			if res.Recent != 0 {
-				res.Messages = res.Recent
-				continue
+	recent = new(imap.SeqSet)
+	var recentCount uint32
+	rows, err = tx.Stmt(m.parent.listMsgUidsRecent).Query(m.id)
+	if err != nil && err != sql.ErrNoRows {
+		m.parent.logMboxErr(m, err, "initSelected (listMsgUidsRecent)")
+		return nil, nil, nil, wrapErrf(err, "initSelected %s", m.name)
+	}
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var (
+				uid        uint32
+				recentFlag int
+			)
+			if err := rows.Scan(&uid, &recentFlag); err != nil {
+				m.parent.logMboxErr(m, err, "initSelected (listMsgUidsRecent scan)")
+				return nil, nil, nil, wrapErrf(err, "initSelected %s", m.name)
 			}
-			row := tx.Stmt(m.parent.msgsCount).QueryRow(m.id)
-			if err := row.Scan(&res.Messages); err != nil {
-				m.parent.logMboxErr(m, err, "Status (messages count)", items)
-				return nil, wrapErrf(err, "Status (messages) %s", m.name)
+			uids = append(uids, uid)
+			if uid == unseenUid {
+				status.UnseenSeqNum = uint32(len(uids))
 			}
-		case imap.StatusRecent:
-			if res.Messages != 0 {
-				res.Recent = res.Messages
-				continue
-			}
-			if err := tx.Stmt(m.parent.msgsCount).QueryRow(m.id).Scan(&res.Recent); err != nil {
-				m.parent.logMboxErr(m, err, "Status (recent)", items)
-				return nil, wrapErrf(err, "Status (recent) %s", m.name)
-			}
-		case imap.StatusUidNext:
-			if err := tx.Stmt(m.parent.uidNext).QueryRow(m.id).Scan(&res.UidNext); err != nil {
-				m.parent.logMboxErr(m, err, "Status (uidnext)", items)
-				return nil, wrapErrf(err, "Status (uidnext) %s", m.name)
-			}
-		case imap.StatusUidValidity:
-			row := tx.Stmt(m.parent.uidValidity).QueryRow(m.id)
-			if err := row.Scan(&res.UidValidity); err != nil {
-				m.parent.logMboxErr(m, err, "Status (uidValidity)", items)
-				return nil, wrapErrf(err, "Status (uidvalidity) %s", m.name)
-			}
-		case appendlimit.StatusAppendLimit:
-			val := m.createMessageLimit(tx)
-			if val != nil {
-				appendlimit.StatusSetAppendLimit(res, val)
+			if recentFlag == 1 {
+				recentCount++
+				recent.AddNum(uid)
 			}
 		}
 	}
+	status.Messages = uint32(len(uids))
+	status.Recent = recentCount
 
-	return res, nil
+	if unsetRecent {
+		if _, err := tx.Stmt(m.parent.clearRecent).Exec(m.id); err != nil {
+			m.parent.logMboxErr(m, err, "initSelected (clearRecent)")
+		}
+	}
+
+	if err := tx.Stmt(m.parent.uidNext).QueryRow(m.id).Scan(&status.UidNext); err != nil {
+		if err != sql.ErrNoRows {
+			m.parent.logMboxErr(m, err, "initSelected (uidNext scan)")
+			return nil, nil, nil, wrapErrf(err, "initSelected %s", m.name)
+		}
+		status.UidNext = 1
+	}
+
+	row = tx.Stmt(m.parent.uidValidity).QueryRow(m.id)
+	if err := row.Scan(&status.UidValidity); err != nil {
+		m.parent.logMboxErr(m, err, "initSelected (uidValidity)")
+		return nil, nil, nil, wrapErrf(err, "initSelected (uidvalidity) %s", m.name)
+	}
+
+	if unsetRecent {
+		if err := tx.Commit(); err != nil {
+			m.parent.logMboxErr(m, err, "initSelected (commit)")
+		}
+	}
+
+	return uids, recent, status, nil
 }
 
 func (m *Mailbox) incrementMsgCounters(tx *sql.Tx) (uint32, error) {
@@ -171,8 +199,7 @@ func (m *Mailbox) incrementMsgCounters(tx *sql.Tx) (uint32, error) {
 		return nextId, err
 	}
 
-	// For other DBs we fallback to using a query
-	// with explicit locking.
+	// For other DBs we fallback to using a query with explicit locking.
 
 	res := sql.NullInt64{}
 	if err := tx.Stmt(m.parent.uidNextLocked).QueryRow(m.id).Scan(&res); err != nil {
@@ -188,20 +215,6 @@ func (m *Mailbox) incrementMsgCounters(tx *sql.Tx) (uint32, error) {
 	} else {
 		return 1, nil
 	}
-}
-
-func (m *Mailbox) SetSubscribed(subscribed bool) error {
-	subbed := 0
-	if subscribed {
-		subbed = 1
-	}
-	_, err := m.parent.setSubbed.Exec(subbed, m.id)
-	m.parent.logMboxErr(m, err, "SetSubscribed", subscribed)
-	return wrapErr(err, "SetSubscribed")
-}
-
-func (m *Mailbox) Check() error {
-	return nil
 }
 
 func (m *Mailbox) createMessageLimit(tx *sql.Tx) *uint32 {
@@ -316,14 +329,14 @@ func (b *Backend) processBody(literal imap.Literal) (bodyStruct, cachedHeader []
 func (m *Mailbox) checkAppendLimit(length int) error {
 	mboxLimit := m.CreateMessageLimit()
 	if mboxLimit != nil && uint32(length) > *mboxLimit {
-		return appendlimit.ErrTooBig
+		return backend.ErrTooBig
 	} else if mboxLimit == nil {
 		userLimit := m.user.CreateMessageLimit()
 		if userLimit != nil && uint32(length) > *userLimit {
-			return appendlimit.ErrTooBig
+			return backend.ErrTooBig
 		} else if userLimit == nil {
 			if m.parent.Opts.MaxMsgBytes != nil && uint32(length) > *m.parent.Opts.MaxMsgBytes {
-				return appendlimit.ErrTooBig
+				return backend.ErrTooBig
 			}
 		}
 	}
@@ -340,26 +353,29 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		date = time.Now()
 	}
 
-	haveRecent := false
+	newFlags := make([]string, 0, len(flags))
 	haveSeen := uint8(0) // it needs to be stored in SQL, hence integer
 	for _, flag := range flags {
 		if flag == imap.RecentFlag {
-			haveRecent = true
+			continue
 		}
 		if flag == imap.SeenFlag {
 			haveSeen = 1
 		}
+		newFlags = append(newFlags, flag)
 	}
-	if !haveRecent {
-		flags = append(flags, imap.RecentFlag)
-	}
+	flags = newFlags
 
 	// Important to run before transaction, otherwise it will deadlock on
 	// SQLite.
-	stmt, err := m.parent.getFlagsAddStmt(true, flags)
-	if err != nil {
-		m.parent.logMboxErr(m, err, "CreateMessage (getFlagsAddStmt)")
-		return wrapErr(err, "CreateMessage")
+	var flagsAddStmt *sql.Stmt
+	if len(flags) != 0 {
+		var err error
+		flagsAddStmt, err = m.parent.getFlagsAddStmt(len(flags))
+		if err != nil {
+			m.parent.logMboxErr(m, err, "CreateMessage (getFlagsAddStmt)")
+			return wrapErr(err, "CreateMessage")
+		}
 	}
 
 	tx, err := m.parent.db.BeginLevel(sql.LevelReadCommitted, false)
@@ -367,7 +383,7 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		m.parent.logMboxErr(m, err, "CreateMessage (tx start)")
 		return wrapErr(err, "CreateMessage (tx begin)")
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback() // nolint:errcheck
 
 	msgId, err := m.incrementMsgCounters(tx)
 	if err != nil {
@@ -389,11 +405,17 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		return wrapErr(err, "CreateMessage (addExtKey)")
 	}
 
+	recent := m.parent.mngr.NewMessage(m.id, msgId)
+	recentI := 0
+	if recent {
+		recentI = 1
+	}
 	_, err = tx.Stmt(m.parent.addMsg).Exec(
 		m.id, msgId, date.Unix(),
 		bodyLen,
 		bodyStruct, cachedHdr, extBodyKey,
 		haveSeen, m.parent.Opts.CompressAlgo,
+		recentI,
 	)
 	if err != nil {
 		if err := m.parent.extStore.Delete([]string{extBodyKey}); err != nil {
@@ -403,22 +425,15 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		return wrapErr(err, "CreateMessage (addMsg)")
 	}
 
-	params := m.makeFlagsAddStmtArgs(true, flags, msgId, msgId)
-	if _, err = tx.Stmt(stmt).Exec(params...); err != nil {
-		if err := m.parent.extStore.Delete([]string{extBodyKey}); err != nil {
-			m.parent.logMboxErr(m, err, "delete extBodyKey)")
+	if len(flags) != 0 {
+		params := m.makeFlagsAddStmtArgs(flags, msgId, msgId)
+		if _, err = tx.Stmt(flagsAddStmt).Exec(params...); err != nil {
+			if err := m.parent.extStore.Delete([]string{extBodyKey}); err != nil {
+				m.parent.logMboxErr(m, err, "delete extBodyKey)")
+			}
+			m.parent.logMboxErr(m, err, "CreateMessage (flags)")
+			return wrapErr(err, "CreateMessage (flags)")
 		}
-		m.parent.logMboxErr(m, err, "CreateMessage (flags)")
-		return wrapErr(err, "CreateMessage (flags)")
-	}
-
-	upd, err := m.statusUpdate(tx)
-	if err != nil {
-		if err := m.parent.extStore.Delete([]string{extBodyKey}); err != nil {
-			m.parent.logMboxErr(m, err, "delete extBodyKey)")
-		}
-		m.parent.logMboxErr(m, err, "CreateMessage (status query)")
-		return wrapErr(err, "CreateMessage (status query)")
 	}
 
 	if err = tx.Commit(); err != nil {
@@ -429,58 +444,26 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		return wrapErr(err, "CreateMessage (tx commit)")
 	}
 
-	// Send update after commiting transaction,
-	// just in case reading side will block us for some time.
-	if m.parent.updates != nil {
-		m.parent.updates <- upd
-	}
 	return nil
 }
 
-func (m *Mailbox) statusUpdate(tx *sql.Tx) (backend.Update, error) {
-	upd := backend.MailboxUpdate{
-		Update:        backend.NewUpdate(m.user.username, m.name),
-		MailboxStatus: imap.NewMailboxStatus(m.name, []imap.StatusItem{imap.StatusMessages, imap.StatusUnseen}),
-	}
-
-	row := tx.Stmt(m.parent.msgsCount).QueryRow(m.id)
-	newCount := uint32(0)
-	if err := row.Scan(&newCount); err != nil {
-		return nil, wrapErr(err, "CreateMessage (exists read)")
-	}
-
-	upd.MailboxStatus.Flags = nil
-	upd.MailboxStatus.PermanentFlags = nil
-	upd.MailboxStatus.Messages = newCount
-
-	return &upd, nil
-}
-
 func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error {
+	defer m.handle.Sync(true)
+
 	tx, err := m.parent.db.Begin(false)
 	if err != nil {
 		m.parent.logMboxErr(m, err, "MoveMessages (tx start)", uid, seqset, dest)
 		return wrapErr(err, "MoveMessages (tx start)")
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback() // nolint:errcheck
 
-	// If that's a sequence number-based operations, we need to mark each
-	// message and then perform the operation as a whole since each
-	// sub-operaion can effect numbering.
-	//
-	// Additionally, we need to know moved sequence numbers to emit EXPUNGE
-	// updates so we have to mark it even for UID operations.
+	seqset, err = m.handle.ResolveSeq(uid, seqset)
+	if err != nil {
+		return err
+	}
+
 	for _, seq := range seqset.Set {
-		start, stop, err := m.resolveSeq(tx, seq, uid)
-		if err != nil {
-			return err
-		}
-
-		if uid {
-			_, err = tx.Stmt(m.parent.markUid).Exec(m.id, start, stop)
-		} else {
-			_, err = tx.Stmt(m.parent.markSeq).Exec(m.id, m.id, start, stop)
-		}
+		_, err = tx.Stmt(m.parent.markUid).Exec(m.id, seq.Start, seq.Stop)
 		if err != nil {
 			m.parent.logMboxErr(m, err, "MoveMessages (mark)", uid, seqset, dest)
 			return wrapErr(err, "MoveMessages (mark)")
@@ -499,68 +482,43 @@ func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error
 		m.parent.logMboxErr(m, err, "MoveMessages (target lookup)", uid, seqset, dest)
 		return wrapErr(err, "MoveMessages (target lookup)")
 	}
-	destMbox := Mailbox{user: m.user, id: destID, name: dest, parent: m.parent}
 
 	// Copy messages and flags...
-	copiedCount := int64(0)
+	copiedCount := uint32(0)
 	for _, seq := range seqset.Set {
-		start, stop, err := m.resolveSeq(tx, seq, uid)
+		stats, err := tx.Stmt(m.parent.copyMsgsUid).Exec(destID, destID, copiedCount, m.id, seq.Start, seq.Stop)
 		if err != nil {
-			m.parent.logMboxErr(m, err, "MoveMessages (range resolve)", uid, seqset, dest)
-			return wrapErr(err, "MoveMessages (range resolve)")
+			m.parent.logMboxErr(m, err, "MoveMessages (copy msgs)", uid, seqset, dest)
+			return wrapErr(err, "MoveMessages (copy msgs)")
 		}
-
-		var stats sql.Result
-		if uid {
-			stats, err = tx.Stmt(m.parent.copyMsgsUid).Exec(destID, destID, copiedCount, m.id, start, stop)
-			if err != nil {
-				m.parent.logMboxErr(m, err, "MoveMessages (copy msgs)", uid, seqset, dest)
-				return wrapErr(err, "MoveMessages (copy msgs)")
-			}
-			if _, err := tx.Stmt(m.parent.copyMsgFlagsUid).Exec(destID, destID, copiedCount, m.id, start, stop); err != nil {
-				m.parent.logMboxErr(m, err, "MoveMessages (copy msg flags)", uid, seqset, dest)
-				return wrapErr(err, "MoveMessages (copy msg flags)")
-			}
-		} else {
-			stats, err = tx.Stmt(m.parent.copyMsgsSeq).Exec(destID, destID, copiedCount, m.id, stop-start+1, start-1)
-			if err != nil {
-				m.parent.logMboxErr(m, err, "MoveMessages (copy msgs)", uid, seqset, dest)
-				return wrapErr(err, "MoveMessages (copy msgs)")
-			}
-			if _, err := tx.Stmt(m.parent.copyMsgFlagsSeq).Exec(destID, destID, copiedCount, m.id, stop-start+1, start-1); err != nil {
-				m.parent.logMboxErr(m, err, "MoveMessages (copy msgs flags)", uid, seqset, dest)
-				return wrapErr(err, "MoveMessages (copy msg flags)")
-			}
+		if _, err := tx.Stmt(m.parent.copyMsgFlagsUid).Exec(destID, destID, copiedCount, m.id, seq.Start, seq.Stop); err != nil {
+			m.parent.logMboxErr(m, err, "MoveMessages (copy msg flags)", uid, seqset, dest)
+			return wrapErr(err, "MoveMessages (copy msg flags)")
 		}
 		affected, err := stats.RowsAffected()
 		if err != nil {
 			m.parent.logMboxErr(m, err, "MoveMessages (rows affected)", uid, seqset, dest)
 			return wrapErr(err, "MoveMessages (rows affected)")
 		}
-		copiedCount += affected
+		copiedCount += uint32(affected)
 	}
+	m.parent.Opts.Log.Debugf("copied %v messages to mboxId=%v", copiedCount, destID)
 
-	// Collect sequence numbers for EXPUNGE updates before they change.
-	// markedSeqnums returns them in reversed order so we are fine sending them
-	// as is.
-	updsBuffer := make([]backend.Update, 0, copiedCount)
-	rows, err := tx.Stmt(m.parent.markedSeqnums).Query(m.id)
+	var expunged []uint32
+	rows, err := tx.Stmt(m.parent.markedUids).Query(m.id)
 	if err != nil {
-		m.parent.logMboxErr(m, err, "MoveMessages (marked seqnums)", uid, seqset, dest)
-		return wrapErr(err, "MoveMessages (marked seqnums)")
+		m.parent.logMboxErr(m, err, "MoveMessages (marked uids)", uid, seqset, dest)
+		return wrapErr(err, "MoveMessages (marked uids)")
 	}
 	for rows.Next() {
-		var seqnum uint32
+		var msgId uint32
 		var extKey sql.NullString
-		if err := rows.Scan(&seqnum, &extKey); err != nil {
-			m.parent.logMboxErr(m, err, "MoveMessages (marked seqnums scan)", uid, seqset, dest)
-			return wrapErr(err, "MoveMessages (marked seqnums scan)")
+		if err := rows.Scan(&msgId, &extKey); err != nil {
+			m.parent.logMboxErr(m, err, "MoveMessages (marked uids scan)", uid, seqset, dest)
+			return wrapErr(err, "MoveMessages (marked uids scan)")
 		}
 
-		updsBuffer = append(updsBuffer, &backend.ExpungeUpdate{
-			Update: backend.NewUpdate(m.user.username, m.name),
-			SeqNum: seqnum,
-		})
+		expunged = append(expunged, msgId)
 	}
 
 	// Delete marked messages (copies in the source mailbox)
@@ -576,17 +534,16 @@ func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error
 		return wrapErr(err, "MoveMessages (decrease counters)")
 	}
 
-	// Increase UIDNEXT and MESAGES for the target mailbox.
+	var oldUidNext uint32
+	if err := tx.Stmt(m.parent.uidNext).QueryRow(destID).Scan(&oldUidNext); err != nil {
+		m.parent.logMboxErr(m, err, "MoveMessages (old uidNext)", uid, seqset, dest)
+		return wrapErr(err, "MoveMessages (old uidNext)")
+	}
+
+	// Increase UIDNEXT and MESSAGES for the target mailbox.
 	if _, err := tx.Stmt(m.parent.increaseMsgCount).Exec(copiedCount, copiedCount, destID); err != nil {
 		m.parent.logMboxErr(m, err, "MoveMessages (increase counters)", uid, seqset, dest)
 		return wrapErr(err, "MoveMessages (increase counters)")
-	}
-
-	// Emit status update for the target mailbox.
-	statusUpd, err := destMbox.statusUpdate(tx)
-	if err != nil {
-		m.parent.logMboxErr(m, err, "MoveMessages (status update)", uid, seqset, dest)
-		return wrapErr(err, "MoveMessages (status update)")
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -594,12 +551,11 @@ func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error
 		return wrapErr(err, "MoveMessages (tx commit)")
 	}
 
-	if m.parent.updates != nil {
-		for _, upd := range updsBuffer {
-			m.parent.updates <- upd
-		}
-		m.parent.updates <- statusUpd
+	for _, uid := range expunged {
+		m.handle.Removed(uid)
 	}
+	m.parent.mngr.NewMessages(destID, imap.SeqSet{Set: []imap.Seq{{Start: oldUidNext, Stop: oldUidNext + copiedCount - 1}}})
+
 	return nil
 }
 
@@ -609,11 +565,18 @@ func (m *Mailbox) CopyMessages(uid bool, seqset *imap.SeqSet, dest string) error
 		m.parent.logMboxErr(m, err, "CopyMessages (tx start)", uid, seqset, dest)
 		return wrapErr(err, "CopyMessages")
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback() // nolint:errcheck
 
-	updatesBuffer := make([]backend.Update, 0, 16)
+	seqset, err = m.handle.ResolveSeq(uid, seqset)
+	if err != nil {
+		if uid {
+			return nil
+		}
+		return err
+	}
 
-	if err := m.copyMessages(tx, uid, seqset, dest, &updatesBuffer); err != nil {
+	firstCopy, lastCopy, destID, err := m.copyMessages(tx, seqset, dest)
+	if err != nil {
 		if err == backend.ErrNoSuchMailbox {
 			return err
 		}
@@ -621,16 +584,19 @@ func (m *Mailbox) CopyMessages(uid bool, seqset *imap.SeqSet, dest string) error
 		return wrapErr(err, "CopyMessages")
 	}
 
+	persistRecent := m.parent.mngr.NewMessages(destID, imap.SeqSet{Set: []imap.Seq{{Start: firstCopy, Stop: lastCopy}}})
+	if persistRecent {
+		if _, err := tx.Stmt(m.parent.addRecentToLast).Exec(destID, destID, lastCopy-firstCopy+1); err != nil {
+			m.parent.logMboxErr(m, err, "CopyMessages (persistRecent)", uid, seqset, dest)
+			return wrapErr(err, "CopyMessages")
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		m.parent.logMboxErr(m, err, "CopyMessages (tx commit)", uid, seqset, dest)
 		return wrapErr(err, "CopyMessages")
 	}
 
-	if m.parent.updates != nil {
-		for _, upd := range updatesBuffer {
-			m.parent.updates <- upd
-		}
-	}
 	return nil
 }
 
@@ -640,10 +606,10 @@ func (m *Mailbox) DelMessages(uid bool, seqset *imap.SeqSet) error {
 		m.parent.logMboxErr(m, err, "DelMessages (tx start)", uid, seqset)
 		return wrapErr(err, "DelMessages")
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback() // nolint:errcheck
 
-	updatesBuffer := make([]backend.Update, 0, 16)
-	if err := m.delMessages(tx, uid, seqset, &updatesBuffer); err != nil {
+	deleted, err := m.delMessages(tx, seqset)
+	if err != nil {
 		if err == backend.ErrNoSuchMailbox {
 			return err
 		}
@@ -656,191 +622,157 @@ func (m *Mailbox) DelMessages(uid bool, seqset *imap.SeqSet) error {
 		return wrapErr(err, "DelMessages")
 	}
 
-	if m.parent.updates != nil {
-		for _, upd := range updatesBuffer {
-			m.parent.updates <- upd
-		}
-	}
+	m.handle.RemovedSet(deleted)
+
 	return nil
 }
 
-func (m *Mailbox) delMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, updsBuffer *[]backend.Update) error {
+func (m *Mailbox) delMessages(tx *sql.Tx, seqset *imap.SeqSet) (imap.SeqSet, error) {
 	for _, seq := range seqset.Set {
-		start, stop, err := m.resolveSeq(tx, seq, uid)
+		m.parent.Opts.Log.Println("delMessages: marking SQL window range", seq.Start, seq.Stop, "for deletion")
+		_, err := tx.Stmt(m.parent.markUid).Exec(m.id, seq.Start, seq.Stop)
 		if err != nil {
-			return err
-		}
-
-		m.parent.Opts.Log.Println("delMessages: marking SQL window range", start, stop, "for deletion")
-		if uid {
-			_, err = tx.Stmt(m.parent.markUid).Exec(m.id, start, stop)
-		} else {
-			_, err = tx.Stmt(m.parent.markSeq).Exec(m.id, m.id, start, stop)
-		}
-		if err != nil {
-			return err
+			return imap.SeqSet{}, err
 		}
 	}
 
-	var deletedExtKeys []string
+	var (
+		deletedExtKeys []string
+		deletedUids    imap.SeqSet
+		deletedCount   uint32
+	)
 
-	rows, err := tx.Stmt(m.parent.markedSeqnums).Query(m.id)
+	rows, err := tx.Stmt(m.parent.markedUids).Query(m.id)
 	if err != nil {
-		return err
+		return imap.SeqSet{}, err
 	}
 	for rows.Next() {
-		var seqnum uint32
+		var uid uint32
 		var extKey sql.NullString
-		if err := rows.Scan(&seqnum, &extKey); err != nil {
-			return err
+		if err := rows.Scan(&uid, &extKey); err != nil {
+			return imap.SeqSet{}, err
 		}
-		m.parent.Opts.Log.Println("delMessages:", seqnum, extKey, "is marked")
+		m.parent.Opts.Log.Println("delMessages:", uid, extKey, "is marked")
 
-		if extKey.Valid {
-			deletedExtKeys = append(deletedExtKeys, extKey.String)
-		}
-		*updsBuffer = append(*updsBuffer, &backend.ExpungeUpdate{
-			Update: backend.NewUpdate(m.user.username, m.name),
-			SeqNum: seqnum,
-		})
+		deletedExtKeys = append(deletedExtKeys, extKey.String)
+		deletedUids.AddNum(uid)
+		deletedCount++
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return imap.SeqSet{}, err
 	}
 
 	m.parent.Opts.Log.Println("delMessages: deleting storage keys: ", deletedExtKeys)
 	if err := m.parent.extStore.Delete(deletedExtKeys); err != nil {
-		return err
+		return imap.SeqSet{}, err
 	}
 
 	if _, err := tx.Stmt(m.parent.delMarked).Exec(); err != nil {
-		return err
+		return imap.SeqSet{}, err
 	}
 
-	m.parent.Opts.Log.Println("delMessages: deleted", len(*updsBuffer), "messages")
-	_, err = tx.Stmt(m.parent.decreaseMsgCount).Exec(len(*updsBuffer), m.id)
-	return err
+	m.parent.Opts.Log.Println("delMessages: deleted", deletedCount, "messages")
+	_, err = tx.Stmt(m.parent.decreaseMsgCount).Exec(deletedCount, m.id)
+	return deletedUids, err
 }
 
-func (m *Mailbox) copyMessages(tx *sql.Tx, uid bool, seqset *imap.SeqSet, dest string, updsBuffer *[]backend.Update) error {
-	destID := uint64(0)
+func (m *Mailbox) copyMessages(tx *sql.Tx, seqset *imap.SeqSet, dest string) (firstCopy, lastCopy uint32, destID uint64, err error) {
 	row := tx.Stmt(m.parent.mboxId).QueryRow(m.user.id, dest)
 	if err := row.Scan(&destID); err != nil {
 		if err == sql.ErrNoRows {
-			return backend.ErrNoSuchMailbox
+			return 0, 0, 0, backend.ErrNoSuchMailbox
 		}
 	}
 
 	m.parent.Opts.Log.Debugln("copyMessages: resolved target mailbox name to", destID)
-	destMbox := Mailbox{user: m.user, id: destID, name: dest, parent: m.parent}
 
 	srcId := m.id
-
-	totalCopied := int64(0)
+	var totalCopied uint32
 	for _, seq := range seqset.Set {
-		start, stop, err := m.resolveSeq(tx, seq, uid)
+		stats, err := tx.Stmt(m.parent.copyMsgsUid).Exec(destID, destID, totalCopied, srcId, seq.Start, seq.Stop)
 		if err != nil {
-			return err
+			return 0, 0, 0, err
 		}
-		m.parent.Opts.Log.Debugln("copyMessages: resolved seq", seq, uid, "to", start, stop)
+		if _, err := tx.Stmt(m.parent.copyMsgFlagsUid).Exec(destID, destID, totalCopied, srcId, seq.Start, seq.Stop); err != nil {
+			return 0, 0, 0, err
+		}
 
-		var stats sql.Result
-		if uid {
-			stats, err = tx.Stmt(m.parent.copyMsgsUid).Exec(destID, destID, totalCopied, srcId, start, stop)
-			if err != nil {
-				return err
-			}
-			if _, err := tx.Stmt(m.parent.copyMsgFlagsUid).Exec(destID, destID, totalCopied, srcId, start, stop); err != nil {
-				return err
-			}
-		} else {
-			stats, err = tx.Stmt(m.parent.copyMsgsSeq).Exec(destID, destID, totalCopied, srcId, stop-start+1, start-1)
-			if err != nil {
-				return err
-			}
-			if _, err := tx.Stmt(m.parent.copyMsgFlagsSeq).Exec(destID, destID, totalCopied, srcId, stop-start+1, start-1); err != nil {
-				return err
-			}
-		}
 		affected, err := stats.RowsAffected()
 		if err != nil {
-			return err
+			return 0, 0, 0, err
 		}
-		totalCopied += affected
-		m.parent.Opts.Log.Debugln("copyMessages: copied", affected, "messages for range", seq, "SQL:", start, stop, uid)
+		totalCopied += uint32(affected)
+		m.parent.Opts.Log.Debugln("copyMessages: copied", affected, "messages for range", seq, "SQL:", seq.Start, seq.Stop)
 
-		if uid {
-			if _, err := tx.Stmt(m.parent.incrementRefUid).Exec(m.user.id, srcId, start, stop); err != nil {
-				return err
-			}
-		} else {
-			if _, err := tx.Stmt(m.parent.incrementRefSeq).Exec(m.user.id, srcId, srcId, start, stop); err != nil {
-				return err
-			}
+		if _, err := tx.Stmt(m.parent.incrementRefUid).Exec(m.user.id, srcId, seq.Start, seq.Stop); err != nil {
+			return 0, 0, 0, err
 		}
-
 	}
 
-	if _, err := tx.Stmt(m.parent.addRecentToLast).Exec(destID, destID, totalCopied); err != nil {
-		return err
+	var oldUidNext uint32
+	if err := tx.Stmt(m.parent.uidNext).QueryRow(destID).Scan(&oldUidNext); err != nil {
+		return 0, 0, 0, err
 	}
+
 	if _, err := tx.Stmt(m.parent.increaseMsgCount).Exec(totalCopied, totalCopied, destID); err != nil {
-		return err
+		return 0, 0, 0, err
 	}
 
-	upd, err := destMbox.statusUpdate(tx)
-	if err != nil {
-		return err
-	}
-	*updsBuffer = append(*updsBuffer, upd)
-
-	return nil
+	return oldUidNext, oldUidNext + totalCopied - 1, destID, nil
 }
 
 func (m *Mailbox) Expunge() error {
+	defer m.handle.Sync(true)
+
 	tx, err := m.parent.db.Begin(false)
 	if err != nil {
 		m.parent.logMboxErr(m, err, "Expunge (tx start)")
 		return wrapErr(err, "Expunge")
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback() // nolint:errcheck
 
-	var seqnums []uint32
-	// Query returns seqnum in reversed order.
-	rows, err := tx.Stmt(m.parent.deletedSeqnums).Query(m.id, m.id)
+	var (
+		uids          imap.SeqSet
+		expungedCount uint32
+	)
+	rows, err := tx.Stmt(m.parent.deletedUids).Query(m.id)
 	if err != nil {
-		m.parent.logMboxErr(m, err, "Expunge (deletedSeqnums)")
+		m.parent.logMboxErr(m, err, "Expunge (deletedUids)")
 		return wrapErr(err, "Expunge")
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var seqnum uint32
-		if err := rows.Scan(&seqnum); err != nil {
-			m.parent.logMboxErr(m, err, "Expunge (deletedSeqnums)")
+		var uid uint32
+		if err := rows.Scan(&uid); err != nil {
+			m.parent.logMboxErr(m, err, "Expunge (deletedUids scan)")
 			return wrapErr(err, "Expunge")
 		}
-		seqnums = append(seqnums, seqnum)
+		uids.AddNum(uid)
+		expungedCount++
 	}
 	if err := rows.Err(); err != nil {
-		m.parent.logMboxErr(m, err, "Expunge (deletedSeqnums)")
+		m.parent.logMboxErr(m, err, "Expunge (deletedUids)")
 		return wrapErr(err, "Expunge")
 	}
-	m.parent.Opts.Log.Debugln("expunge: pending removal for seqnums", seqnums)
+	m.parent.Opts.Log.Debugln("expunge: pending removal for uids", uids, expungedCount)
 
-	if err := m.expungeExternal(tx); err != nil {
-		m.parent.logMboxErr(m, err, "Expunge (external)")
+	rows.Close()
+
+	keys, err := m.expungeExternal(tx)
+	if err != nil {
+		m.parent.logMboxErr(m, err, "Expunge (external prepare)")
 		return err
 	}
 
 	_, err = tx.Stmt(m.parent.expungeMbox).Exec(m.id, m.id)
 	if err != nil {
-		m.parent.logMboxErr(m, err, "Expunge (externalMbox)")
+		m.parent.logMboxErr(m, err, "Expunge (expunge)")
 		return wrapErr(err, "Expunge")
 	}
 
-	_, err = tx.Stmt(m.parent.decreaseMsgCount).Exec(len(seqnums), m.id)
+	_, err = tx.Stmt(m.parent.decreaseMsgCount).Exec(expungedCount, m.id)
 	if err != nil {
-		m.parent.logMboxErr(m, err, "Expunge (decrease counters)", m.id, len(seqnums))
+		m.parent.logMboxErr(m, err, "Expunge (decrease counters)", m.id, expungedCount)
 		return wrapErr(err, "Expunge (decrease counters)")
 	}
 
@@ -854,26 +786,23 @@ func (m *Mailbox) Expunge() error {
 		return wrapErr(err, "Expunge")
 	}
 
-	if m.parent.updates != nil {
-		for _, seqnum := range seqnums {
-			m.parent.updates <- &backend.ExpungeUpdate{
-				Update: backend.NewUpdate(m.user.username, m.name),
-				SeqNum: seqnum,
-			}
-		}
+	if err := m.parent.extStore.Delete(keys); err != nil {
+		return wrapErr(err, "Expunge (external)")
 	}
+
+	m.handle.RemovedSet(uids)
 
 	return nil
 }
 
-func (m *Mailbox) expungeExternal(tx *sql.Tx) error {
+func (m *Mailbox) expungeExternal(tx *sql.Tx) ([]string, error) {
 	if _, err := tx.Stmt(m.parent.decreaseRefForDeleted).Exec(m.user.id, m.id); err != nil {
-		return wrapErr(err, "Expunge (external)")
+		return nil, wrapErr(err, "Expunge (external decrease for deleted)")
 	}
 
 	rows, err := tx.Stmt(m.parent.zeroRef).Query(m.user.id, m.id)
 	if err != nil {
-		return wrapErr(err, "Expunge (external)")
+		return nil, wrapErr(err, "Expunge (external zeroRef collect)")
 	}
 	defer rows.Close()
 
@@ -881,43 +810,15 @@ func (m *Mailbox) expungeExternal(tx *sql.Tx) error {
 	for rows.Next() {
 		var extKey string
 		if err := rows.Scan(&extKey); err != nil {
-			return wrapErr(err, "Expunge (external)")
+			return nil, wrapErr(err, "Expunge (external scan)")
 		}
 		keys = append(keys, extKey)
 
 	}
 
-	if err := m.parent.extStore.Delete(keys); err != nil {
-		return wrapErr(err, "Expunge (external)")
-	}
-
-	return nil
+	return keys, nil
 }
 
-func (m *Mailbox) resolveSeq(tx *sql.Tx, seq imap.Seq, uid bool) (uint32, uint32, error) {
-	// Special case: "*"
-	if seq.Start == seq.Stop && seq.Stop == 0 {
-		var val uint32
-		if uid {
-			if err := tx.Stmt(m.parent.lastUid).QueryRow(m.id).Scan(&val); err != nil {
-				return 0, 0, err
-			}
-		} else {
-			if err := tx.Stmt(m.parent.msgsCount).QueryRow(m.id).Scan(&val); err != nil {
-				return 0, 0, err
-			}
-		}
-		seq.Start = val
-		seq.Stop = val
-	}
-
-	sqlStart := seq.Start
-	sqlEnd := seq.Stop
-	if seq.Stop == 0 {
-		sqlEnd = 4294967295
-	}
-	if seq.Start == 0 {
-		sqlStart = 4294967295
-	}
-	return sqlStart, sqlEnd, nil
+func (m *Mailbox) Idle(done <-chan struct{}) {
+	m.handle.Idle(done)
 }

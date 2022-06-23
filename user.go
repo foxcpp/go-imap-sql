@@ -2,11 +2,11 @@ package imapsql
 
 import (
 	"database/sql"
-	"strings"
-
 	"errors"
+	"strings"
+	"time"
 
-	specialuse "github.com/emersion/go-imap-specialuse"
+	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/backend"
 	namespace "github.com/foxcpp/go-imap-namespace"
 )
@@ -28,9 +28,11 @@ func (u *User) ID() uint64 {
 	return u.id
 }
 
-func (u *User) ListMailboxes(subscribed bool) ([]backend.Mailbox, error) {
-	var rows *sql.Rows
-	var err error
+func (u *User) ListMailboxes(subscribed bool) ([]imap.MailboxInfo, error) {
+	var (
+		rows *sql.Rows
+		err  error
+	)
 	if subscribed {
 		rows, err = u.parent.listSubbedMboxes.Query(u.id)
 	} else {
@@ -42,39 +44,95 @@ func (u *User) ListMailboxes(subscribed bool) ([]backend.Mailbox, error) {
 	}
 	defer rows.Close()
 
-	res := []backend.Mailbox{}
+	var res []imap.MailboxInfo
 	for rows.Next() {
-		id, name := uint64(0), ""
-		if err := rows.Scan(&id, &name); err != nil {
+		info := imap.MailboxInfo{
+			Attributes: nil,
+			Delimiter:  MailboxPathSep,
+		}
+
+		var id uint64
+		if err := rows.Scan(&id, &info.Name); err != nil {
 			u.parent.logUserErr(u, err, "ListMailboxes", subscribed)
 			return nil, wrapErr(err, "ListMailboxes")
 		}
 
-		res = append(res, &Mailbox{user: *u, id: id, name: name, parent: u.parent})
+		res = append(res, info)
 	}
 	if err := rows.Err(); err != nil {
 		u.parent.logUserErr(u, err, "ListMailboxes", subscribed)
 		return res, wrapErr(rows.Err(), "ListMailboxes")
 	}
+
+	for i, info := range res {
+		row := u.parent.getMboxAttrs.QueryRow(u.id, info.Name)
+		var mark int
+		var specialUse sql.NullString
+		if err := row.Scan(&mark, &specialUse); err != nil {
+			u.parent.logUserErr(u, err, "ListMailboxes (mbox attrs)")
+			continue
+		}
+		if mark == 1 {
+			info.Attributes = []string{imap.MarkedAttr}
+		}
+		if specialUse.Valid {
+			info.Attributes = []string{specialUse.String}
+		}
+
+		row = u.parent.hasChildren.QueryRow(info.Name+MailboxPathSep+"%", u.id)
+		childrenCount := 0
+		if err := row.Scan(&childrenCount); err != nil {
+			u.parent.logUserErr(u, err, "ListMailboxes (children count)")
+			continue
+		}
+		if childrenCount != 0 {
+			info.Attributes = append(info.Attributes, imap.HasChildrenAttr)
+		} else {
+			info.Attributes = append(info.Attributes, imap.HasNoChildrenAttr)
+		}
+
+		res[i] = info
+	}
+
 	return res, nil
 }
 
-func (u *User) GetMailbox(name string) (backend.Mailbox, error) {
+func (u *User) GetMailbox(name string, readOnly bool, conn backend.Conn) (*imap.MailboxStatus, backend.Mailbox, error) {
+	var mbox *Mailbox
 	if strings.EqualFold(name, "INBOX") {
-		return &Mailbox{user: *u, id: u.inboxId, name: name, parent: u.parent}, nil
-	}
-
-	row := u.parent.mboxId.QueryRow(u.id, name)
-	id := uint64(0)
-	if err := row.Scan(&id); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, backend.ErrNoSuchMailbox
+		mbox = &Mailbox{user: *u, id: u.inboxId, name: name, parent: u.parent}
+	} else {
+		row := u.parent.mboxId.QueryRow(u.id, name)
+		id := uint64(0)
+		if err := row.Scan(&id); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil, backend.ErrNoSuchMailbox
+			}
+			u.parent.logUserErr(u, err, "GetMailbox", name)
+			return nil, nil, wrapErrf(err, "GetMailbox %s", name)
 		}
-		u.parent.logUserErr(u, err, "GetMailbox", name)
-		return nil, wrapErrf(err, "GetMailbox %s", name)
+		mbox = &Mailbox{user: *u, id: id, name: name, parent: u.parent}
 	}
 
-	return &Mailbox{user: *u, id: id, name: name, parent: u.parent}, nil
+	if conn == nil {
+		return nil, mbox, nil
+	}
+
+	mbox.conn = conn
+	uids, recent, status, err := mbox.initSelected(!readOnly)
+	if err != nil {
+		u.parent.logUserErr(u, err, "GetMailbox", name)
+		return nil, nil, wrapErrf(err, "GetMailbox %s", name)
+	}
+
+	handle, err := u.parent.mngr.Mailbox(mbox.id, mbox, uids, recent)
+	if err != nil {
+		u.parent.logUserErr(u, err, "GetMailbox handle", name)
+		return nil, nil, wrapErrf(err, "GetMailbox %s (get handle)", name)
+	}
+	mbox.handle = handle
+
+	return status, mbox, nil
 }
 
 func (u *User) CreateMessageLimit() *uint32 {
@@ -129,9 +187,9 @@ var ErrUnsupportedSpecialAttr = errors.New("imap: special attribute is not suppo
 // CreateMailboxSpecial creates a mailbox with SPECIAL-USE attribute set.
 func (u *User) CreateMailboxSpecial(name, specialUseAttr string) error {
 	switch specialUseAttr {
-	case specialuse.All, specialuse.Flagged:
+	case imap.AllAttr, imap.FlaggedAttr:
 		return ErrUnsupportedSpecialAttr
-	case specialuse.Archive, specialuse.Drafts, specialuse.Junk, specialuse.Sent, specialuse.Trash:
+	case imap.ArchiveAttr, imap.DraftsAttr, imap.JunkAttr, imap.SentAttr, imap.TrashAttr:
 	default:
 		return ErrUnsupportedSpecialAttr
 	}
@@ -298,4 +356,89 @@ func (u *User) Namespaces() (personal, other, shared []namespace.Namespace, err 
 			Delimiter: MailboxPathSep,
 		},
 	}, nil, nil, nil
+}
+
+func (u *User) CreateMessage(mboxName string, flags []string, date time.Time, fullBody imap.Literal, _ backend.Mailbox) error {
+	_, box, err := u.GetMailbox(mboxName, false, nil)
+	if err != nil {
+		return err
+	}
+	defer box.Close()
+
+	return box.(*Mailbox).CreateMessage(flags, date, fullBody)
+}
+
+func (u *User) SetSubscribed(mboxName string, sub bool) error {
+	i := 0
+	if sub {
+		i = 1
+	}
+
+	_, err := u.parent.setSubbed.Exec(i, u.id, mboxName)
+	return err
+}
+
+func (u *User) Status(mbox string, items []imap.StatusItem) (*imap.MailboxStatus, error) {
+	tx, err := u.parent.db.BeginLevel(sql.LevelReadCommitted, true)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	var mboxId uint64
+	if err := tx.Stmt(u.parent.mboxId).QueryRow(u.id, mbox).Scan(&mboxId); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, backend.ErrNoSuchMailbox
+		}
+		return nil, err
+	}
+
+	status := imap.NewMailboxStatus(mbox, items)
+	for _, item := range items {
+		switch item {
+		case imap.StatusMessages:
+			err := tx.Stmt(u.parent.msgsCount).QueryRow(mboxId).Scan(&status.Messages)
+			if err != nil {
+				u.parent.logUserErr(u, err, "Status: messages scan")
+				return nil, errors.New("I/O error")
+			}
+		case imap.StatusRecent:
+			err := tx.Stmt(u.parent.recentCount).QueryRow(mboxId).Scan(&status.Recent)
+			if err != nil {
+				u.parent.logUserErr(u, err, "Status: recent scan")
+				return nil, errors.New("I/O error")
+			}
+		case imap.StatusUidNext:
+			err := tx.Stmt(u.parent.uidNext).QueryRow(mboxId).Scan(&status.UidNext)
+			if err != nil {
+				u.parent.logUserErr(u, err, "Status: uidNext scan")
+				return nil, errors.New("I/O error")
+			}
+		case imap.StatusUidValidity:
+			err := tx.Stmt(u.parent.uidValidity).QueryRow(mboxId).Scan(&status.UidValidity)
+			if err != nil {
+				u.parent.logUserErr(u, err, "Status: uidValidity scan")
+				return nil, errors.New("I/O error")
+			}
+		case imap.StatusUnseen:
+			err := tx.Stmt(u.parent.unseenCount).QueryRow(mboxId).Scan(&status.Unseen)
+			if err != nil {
+				u.parent.logUserErr(u, err, "Status: unseen scan")
+				delete(status.Items, imap.StatusUnseen)
+				continue
+			}
+		case imap.StatusAppendLimit:
+			var res sql.NullInt64
+			row := tx.Stmt(u.parent.mboxMsgSizeLimit).QueryRow(mboxId)
+			if err := row.Scan(&res); err != nil {
+				u.parent.logUserErr(u, err, "Status: appendLimit scan")
+				continue
+			}
+			if res.Valid {
+				status.AppendLimit = uint32(res.Int64)
+			}
+		}
+	}
+
+	return status, nil
 }

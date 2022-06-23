@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/emersion/go-imap"
+	"github.com/emersion/go-imap/backend"
 	"gotest.tools/assert"
 	is "gotest.tools/assert/cmp"
 )
@@ -22,6 +23,44 @@ const (
 		testMsgBody
 )
 
+type collectorConn struct{
+	upds []backend.Update
+}
+
+func (c *collectorConn) SendUpdate(upd backend.Update) error {
+	c.upds = append(c.upds, upd)
+	return nil
+}
+
+func TestRecentIncorrectReset(t *testing.T) {
+	b := initTestBackend()
+	defer cleanBackend(b)
+	assert.NilError(t, b.CreateUser(t.Name()))
+	usr, err := b.GetUser(t.Name())
+	assert.NilError(t, err)
+	assert.NilError(t, usr.CreateMailbox(t.Name()))
+
+	for i := 0; i < 5; i++ {
+		assert.NilError(t, usr.CreateMessage(t.Name(), []string{"flag1", "flag2"}, time.Now(), strings.NewReader(testMsg), nil))
+	}
+
+	conn := collectorConn{}
+	info, mbox, err := usr.GetMailbox(t.Name(), false, &conn)
+	assert.NilError(t, err)
+	assert.Equal(t, info.Messages, uint32(5))
+	assert.Equal(t, info.Recent, uint32(5))
+
+	assert.NilError(t, usr.CreateMessage(t.Name(), []string{"flag1", "flag2"}, time.Now(), strings.NewReader(testMsg), mbox))
+	assert.NilError(t, mbox.Poll(true))
+	assert.Equal(t, conn.upds[1].(*backend.MailboxUpdate).Recent, uint32(6))
+
+	assert.NilError(t, mbox.Close())
+	info, mbox, err = usr.GetMailbox(t.Name(), false, &conn)
+	assert.NilError(t, err)
+	assert.Equal(t, info.Messages, uint32(6))
+	assert.Equal(t, info.Recent, uint32(0))
+}
+
 func TestIssue7(t *testing.T) {
 	b := initTestBackend()
 	defer cleanBackend(b)
@@ -29,10 +68,10 @@ func TestIssue7(t *testing.T) {
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)
 	assert.NilError(t, usr.CreateMailbox(t.Name()))
-	mbox, err := usr.GetMailbox(t.Name())
+	_, mbox, err := usr.GetMailbox(t.Name(), true, &noopConn{})
 	assert.NilError(t, err)
 	for i := 0; i < 5; i++ {
-		assert.NilError(t, mbox.CreateMessage([]string{"flag1", "flag2"}, time.Now(), strings.NewReader(testMsg)))
+		assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{"flag1", "flag2"}, time.Now(), strings.NewReader(testMsg), nil))
 	}
 
 	t.Run("seq", func(t *testing.T) {
@@ -70,11 +109,12 @@ func TestDuplicateSearchWithoutFlags(t *testing.T) {
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)
 	assert.NilError(t, usr.CreateMailbox(t.Name()))
-	mbox, err := usr.GetMailbox(t.Name())
+	_, mbox, err := usr.GetMailbox(t.Name(), true, &noopConn{})
 	assert.NilError(t, err)
 	for i := 0; i < 5; i++ {
-		assert.NilError(t, mbox.CreateMessage([]string{"flag1", "flag2"}, time.Now(), strings.NewReader(testMsg)))
+		assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{"flag1", "flag2"}, time.Now(), strings.NewReader(testMsg), mbox))
 	}
+	assert.NilError(t, mbox.Poll(true))
 
 	res, err := mbox.SearchMessages(true, &imap.SearchCriteria{
 		WithoutFlags: []string{"flag3"},
@@ -97,11 +137,12 @@ func TestHeaderInMultipleBodyFetch(t *testing.T) {
 		usr, err := b.GetUser(t.Name())
 		assert.NilError(t, err)
 		assert.NilError(t, usr.CreateMailbox(t.Name()))
-		mbox, err := usr.GetMailbox(t.Name())
+		_, mbox, err := usr.GetMailbox(t.Name(), true, &noopConn{})
 		assert.NilError(t, err)
 		for i := 0; i < 5; i++ {
-			assert.NilError(t, mbox.CreateMessage([]string{}, time.Now(), strings.NewReader(testMsg)))
+			assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{}, time.Now(), strings.NewReader(testMsg), nil))
 		}
+		assert.NilError(t, mbox.Poll(true))
 
 		seq, _ := imap.ParseSeqSet("1")
 		ch := make(chan *imap.Message, 5)
@@ -136,14 +177,15 @@ func TestHeaderCacheReuse(t *testing.T) {
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)
 	assert.NilError(t, usr.CreateMailbox(t.Name()))
-	mbox, err := usr.GetMailbox(t.Name())
+	_, mbox, err := usr.GetMailbox(t.Name(), true, &noopConn{})
 	assert.NilError(t, err)
 
 	testComplete := "Subject: Test\r\n\r\nBody text"
 	testMissingSubject := "Another-Field: Test\r\n\r\nBody text"
 
-	assert.NilError(t, mbox.CreateMessage([]string{}, time.Now(), strings.NewReader(testComplete)))
-	assert.NilError(t, mbox.CreateMessage([]string{}, time.Now(), strings.NewReader(testMissingSubject)))
+	assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{}, time.Now(), strings.NewReader(testComplete), nil))
+	assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{}, time.Now(), strings.NewReader(testMissingSubject), nil))
+	assert.NilError(t, mbox.Poll(true))
 
 	t.Run("envelope", func(t *testing.T) {
 		seq, _ := imap.ParseSeqSet("1:*")
@@ -153,6 +195,6 @@ func TestHeaderCacheReuse(t *testing.T) {
 		<-ch
 		msg2 := <-ch
 
-		assert.Equal(t, msg2.Envelope.Subject, "")
+		assert.DeepEqual(t, msg2.Envelope.Subject, "")
 	})
 }

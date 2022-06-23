@@ -39,7 +39,7 @@ func msgsFlags(ctx *cli.Context) error {
 		return err
 	}
 
-	mbox, err := u.GetMailbox(name)
+	_, mbox, err := u.GetMailbox(name, true, nil)
 	if err != nil {
 		return err
 	}
@@ -61,5 +61,5 @@ func msgsFlags(ctx *cli.Context) error {
 		panic("unknown command: " + ctx.Command.Name)
 	}
 
-	return mbox.UpdateMessagesFlags(ctx.IsSet("uid"), seq, op, flags)
+	return mbox.UpdateMessagesFlags(ctx.IsSet("uid"), seq, op, true, flags)
 }

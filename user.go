@@ -99,6 +99,8 @@ func (u *User) ListMailboxes(subscribed bool) ([]imap.MailboxInfo, error) {
 
 func (u *User) GetMailbox(name string, readOnly bool, conn backend.Conn) (*imap.MailboxStatus, backend.Mailbox, error) {
 	var mbox *Mailbox
+	mbox.readOnly = readOnly
+
 	if strings.EqualFold(name, "INBOX") {
 		mbox = &Mailbox{user: *u, id: u.inboxId, name: name, parent: u.parent}
 	} else {
@@ -121,7 +123,7 @@ func (u *User) GetMailbox(name string, readOnly bool, conn backend.Conn) (*imap.
 			return nil, nil, wrapErrf(err, "GetMailbox %s", name)
 		}
 
-		mbox.handle = u.parent.mngr.ManagementHandle(uids, recent)
+		mbox.handle = u.parent.mngr.ManagementHandle(mbox.id, uids, recent)
 		return nil, mbox, nil
 	}
 

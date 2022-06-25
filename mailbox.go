@@ -23,10 +23,11 @@ const flagsSep = "{"
 // Message UIDs are assigned sequentelly, starting at 1.
 
 type Mailbox struct {
-	user   User
-	name   string
-	parent *Backend
-	id     uint64
+	user     User
+	name     string
+	parent   *Backend
+	id       uint64
+	readOnly bool
 
 	conn   backend.Conn
 	handle *mess.MailboxHandle
@@ -636,6 +637,11 @@ func (m *Mailbox) DelMessages(uid bool, seqset *imap.SeqSet) error {
 		return wrapErr(err, "DelMessages")
 	}
 	defer tx.Rollback() // nolint:errcheck
+
+	seqset, err = m.handle.ResolveSeq(uid, seqset)
+	if err != nil {
+		return err
+	}
 
 	deleted, err := m.delMessages(tx, seqset)
 	if err != nil {

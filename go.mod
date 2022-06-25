@@ -7,7 +7,7 @@ require (
 	github.com/emersion/go-imap-sortthread v1.1.1-0.20200727121200-18e5fb409fed
 	github.com/emersion/go-message v0.15.0
 	github.com/foxcpp/go-imap-backend-tests v0.0.0-20220105184719-e80aa29a5e16
-	github.com/foxcpp/go-imap-mess v0.0.0-20220625121252-2006ec40a870
+	github.com/foxcpp/go-imap-mess v0.0.0-20220625145025-3c40e241d099
 	github.com/foxcpp/go-imap-namespace v0.0.0-20200802091432-08496dd8e0ed
 	github.com/frankban/quicktest v1.5.0 // indirect
 	github.com/go-sql-driver/mysql v1.4.1
@@ -21,4 +21,4 @@ require (
 	gotest.tools v2.2.0+incompatible
 )
 
-replace github.com/emersion/go-imap => github.com/foxcpp/go-imap v1.0.0-beta.1.0.20220105164802-1e767d4cfd62
+replace github.com/emersion/go-imap => github.com/foxcpp/go-imap v1.0.0-beta.1.0.20220623182312-df940c324887

@@ -20,7 +20,7 @@ func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.Fetch
 	defer close(ch)
 	var err error
 
-	setSeen := shouldSetSeen(items)
+	setSeen := !m.readOnly && shouldSetSeen(items)
 	var addSeenStmt *sql.Stmt
 	if setSeen {
 		addSeenStmt, err = m.parent.getFlagsAddStmt(1)

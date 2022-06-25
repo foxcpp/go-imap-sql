@@ -64,6 +64,35 @@ var standardFlags = map[string]struct{}{
 	imap.DraftFlag:    {},
 }
 
+func (m *Mailbox) readUids() (uids []uint32, recent *imap.SeqSet, err error) {
+	recent = new(imap.SeqSet)
+	var recentCount uint32
+	rows, err := m.parent.listMsgUidsRecent.Query(m.id)
+	if err != nil && err != sql.ErrNoRows {
+		m.parent.logMboxErr(m, err, "readUids (listMsgUidsRecent)")
+		return nil, nil, wrapErrf(err, "readUids %s", m.name)
+	}
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var (
+				uid        uint32
+				recentFlag int
+			)
+			if err := rows.Scan(&uid, &recentFlag); err != nil {
+				m.parent.logMboxErr(m, err, "readUids (listMsgUidsRecent scan)")
+				return nil, nil, wrapErrf(err, "readUids %s", m.name)
+			}
+			uids = append(uids, uid)
+			if recentFlag == 1 {
+				recentCount++
+				recent.AddNum(uid)
+			}
+		}
+	}
+	return uids, recent, nil
+}
+
 func (m *Mailbox) initSelected(unsetRecent bool) (uids []uint32, recent *imap.SeqSet, status *imap.MailboxStatus, err error) {
 	if m.parent.Opts.DisableRecent {
 		unsetRecent = false

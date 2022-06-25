@@ -115,6 +115,13 @@ func (u *User) GetMailbox(name string, readOnly bool, conn backend.Conn) (*imap.
 	}
 
 	if conn == nil {
+		uids, recent, err := mbox.readUids()
+		if err != nil {
+			u.parent.logUserErr(u, err, "GetMailbox", name)
+			return nil, nil, wrapErrf(err, "GetMailbox %s", name)
+		}
+
+		mbox.handle = u.parent.mngr.ManagementHandle(uids, recent)
 		return nil, mbox, nil
 	}
 

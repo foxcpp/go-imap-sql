@@ -206,7 +206,8 @@ func (b *Backend) prepareStmts() error {
 	}
 	b.listUsers, err = b.db.Prepare(`
 		SELECT id, username
-		FROM users`)
+		FROM users
+		ORDER BY id`)
 	if err != nil {
 		return wrapErr(err, "listUsers prep")
 	}
@@ -225,14 +226,16 @@ func (b *Backend) prepareStmts() error {
 	b.listMboxes, err = b.db.Prepare(`
 		SELECT id, name
 		FROM mboxes
-		WHERE uid = ?`)
+		WHERE uid = ?
+		ORDER BY id`)
 	if err != nil {
 		return wrapErr(err, "listMboxes prep")
 	}
 	b.listSubbedMboxes, err = b.db.Prepare(`
 		SELECT id, name
 		FROM mboxes
-		WHERE uid = ? AND sub = 1`)
+		WHERE uid = ? AND sub = 1
+		ORDER BY id`)
 	if err != nil {
 		return wrapErr(err, "listSubbedMboxes prep")
 	}
@@ -384,7 +387,8 @@ func (b *Backend) prepareStmts() error {
 		SELECT msgId
 		FROM flags
 		WHERE mboxId = ?
-		AND flag = '\Deleted'`)
+		AND flag = '\Deleted'
+		ORDER BY msgId`)
 	if err != nil {
 		return wrapErr(err, "deletedSeqnums prep")
 	}
@@ -402,7 +406,8 @@ func (b *Backend) prepareStmts() error {
 	b.mboxId, err = b.db.Prepare(`
 		SELECT id FROM mboxes
 		WHERE uid = ?
-		AND name = ?`)
+		AND name = ?
+		ORDER BY id`)
 	if err != nil {
 		return wrapErr(err, "mboxId prep")
 	}
@@ -420,7 +425,7 @@ func (b *Backend) prepareStmts() error {
 			WHERE id = ?
 		) + row_number() OVER (ORDER BY msgId) + ?, date, bodyLen, 0 AS mark, bodyStructure, cachedHeader, extBodyKey, seen, compressAlgo, 0
 		FROM msgs
-		WHERE mboxId = ? AND msgId BETWEEN ? AND ?`)
+		WHERE mboxId = ? AND msgId BETWEEN ? AND ? ORDER BY msgId`)
 	if err != nil {
 		return wrapErr(err, "copyMsgsUid prep")
 	}
@@ -437,6 +442,7 @@ func (b *Backend) prepareStmts() error {
 			FROM msgs
 			WHERE mboxId = ?
 			AND msgId BETWEEN ? AND ?
+			ORDER BY msgId
 		) map ON map.msgId = flags.msgId
 		AND map.mboxId = flags.mboxId`)
 	if err != nil {
@@ -474,7 +480,8 @@ func (b *Backend) prepareStmts() error {
 		SELECT msgId, extBodyKey
 		FROM msgs
 		WHERE mboxId = ?
-		AND mark = 1`)
+		AND mark = 1
+		ORDER BY msgId`)
 	if err != nil {
 		return wrapErr(err, "markedUids prep")
 	}
@@ -521,7 +528,8 @@ func (b *Backend) prepareStmts() error {
 		LEFT JOIN flags
 		ON flags.msgId = msgs.msgId AND flags.mboxId = msgs.mboxId AND msgs.mboxId = flags.mboxId
 		WHERE msgs.mboxId = ? AND msgs.msgId BETWEEN ? AND ?
-		GROUP BY msgs.mboxId, msgs.msgId`)
+		GROUP BY msgs.mboxId, msgs.msgId
+		ORDER BY msgs.msgId`)
 	if err != nil {
 		return wrapErr(err, "msgFlagsUid prep")
 	}
@@ -529,14 +537,16 @@ func (b *Backend) prepareStmts() error {
 	b.usedFlags, err = b.db.Prepare(`
 		SELECT DISTINCT flag
 		FROM flags
-		WHERE mboxId = ?`)
+		WHERE mboxId = ?
+		ORDER BY flag`)
 	if err != nil {
 		return wrapErr(err, "usedFlags prep")
 	}
 	b.listMsgUids, err = b.db.Prepare(`
         SELECT msgId
         FROM msgs
-        WHERE mboxId = ?`)
+		WHERE mboxId = ?
+		ORDER BY msgId`)
 	if err != nil {
 		return wrapErr(err, "listMsgUids prep")
 	}
@@ -544,6 +554,7 @@ func (b *Backend) prepareStmts() error {
         SELECT msgId, recent
         FROM msgs
         WHERE mboxId = ?
+		ORDER BY msgId
 		LIMIT 10000`)
 	if err != nil {
 		return wrapErr(err, "listMsgUidsRecent prep")
@@ -555,7 +566,8 @@ func (b *Backend) prepareStmts() error {
 		LEFT JOIN flags
 		ON flags.msgId = msgs.msgId AND msgs.mboxId = flags.mboxId
 		WHERE msgs.mboxId = ?
-		GROUP BY msgs.mboxId, msgs.msgId`)
+		GROUP BY msgs.mboxId, msgs.msgId
+		ORDER BY msgs.msgId`)
 	if err != nil {
 		return wrapErr(err, "searchFetchNoSeq prep")
 	}
@@ -700,7 +712,8 @@ func (b *Backend) prepareStmts() error {
 	b.cachedHeaderUid, err = b.db.Prepare(`
 		SELECT msgId, cachedHeader, bodyLen, date
 		FROM msgs
-		WHERE msgs.mboxId = ? AND msgId BETWEEN ? AND ?`)
+		WHERE msgs.mboxId = ? AND msgId BETWEEN ? AND ?
+		ORDER BY msgId`)
 	if err != nil {
 		return wrapErr(err, "cachedHeaderUid prep")
 	}

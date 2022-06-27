@@ -55,6 +55,8 @@ func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.Fetch
 		return err
 	}
 
+	m.parent.Opts.Log.Debugln("resolved", uid, seqset, "to", seqset)
+
 	for _, seq := range seqset.Set {
 		if setSeen {
 			params := m.makeFlagsAddStmtArgs([]string{imap.SeenFlag}, seq.Start, seq.Stop)
@@ -201,7 +203,7 @@ messageLoop:
 			}
 		}
 
-		m.parent.Opts.Log.Debugln("scanMessages: scanned", data.msgId, items)
+		m.parent.Opts.Log.Debugf("scanMessages: scanned msgId=%v (seq %v) %v", data.msgId, seqNum, items)
 
 		ch <- msg
 	}

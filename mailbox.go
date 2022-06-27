@@ -120,7 +120,7 @@ func (m *Mailbox) initSelected(unsetRecent bool) (uids []uint32, recent *imap.Se
 
 	rows, err := tx.Stmt(m.parent.usedFlags).Query(m.id)
 	if err != nil {
-		m.parent.logMboxErr(m, err, "initialize (used flags)")
+		m.parent.logMboxErr(m, err, "initSelected (used flags)")
 		return nil, nil, nil, wrapErrf(err, "initSelected (usedFlags) %s", m.name)
 	}
 	defer rows.Close()
@@ -188,6 +188,9 @@ func (m *Mailbox) initSelected(unsetRecent bool) (uids []uint32, recent *imap.Se
 			}
 		}
 	}
+
+	m.parent.Opts.Log.Debugln("initialized uidMap for selected mailbox:", len(uids), uids)
+
 	status.Messages = uint32(len(uids))
 	status.Recent = recentCount
 

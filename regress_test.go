@@ -23,7 +23,7 @@ const (
 		testMsgBody
 )
 
-type collectorConn struct{
+type collectorConn struct {
 	upds []backend.Update
 }
 
@@ -197,4 +197,35 @@ func TestHeaderCacheReuse(t *testing.T) {
 
 		assert.DeepEqual(t, msg2.Envelope.Subject, "")
 	})
+}
+
+func TestSearchEmptyFlags(t *testing.T) {
+	b := initTestBackend()
+	defer cleanBackend(b)
+	assert.NilError(t, b.CreateUser(t.Name()))
+	usr, err := b.GetUser(t.Name())
+	assert.NilError(t, err)
+	assert.NilError(t, usr.CreateMailbox(t.Name()))
+	_, mbox, err := usr.GetMailbox(t.Name(), true, &noopConn{})
+	assert.NilError(t, err)
+	for i := 0; i < 3; i++ {
+		assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{}, time.Now(), strings.NewReader(testMsg), mbox))
+	}
+
+	// creating '\Deleted' message to ensure flag checks are properly working
+	assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{"\\Deleted"}, time.Now(), strings.NewReader(testMsg), mbox))
+
+	assert.NilError(t, mbox.Poll(true))
+
+	res, err := mbox.SearchMessages(true, &imap.SearchCriteria{
+		WithoutFlags: []string{"\\Deleted"},
+	})
+	assert.NilError(t, err)
+	assert.DeepEqual(t, res, []uint32{1, 2, 3})
+
+	res, err = mbox.SearchMessages(false, &imap.SearchCriteria{
+		WithoutFlags: []string{"\\Seen"},
+	})
+	assert.NilError(t, err)
+	assert.DeepEqual(t, res, []uint32{1, 2, 3, 4})
 }

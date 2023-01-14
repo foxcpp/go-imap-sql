@@ -9,16 +9,17 @@ import (
 func buildSearchStmt(withFlags, withoutFlags []string) string {
 	var stmt string
 	stmt += `
-		SELECT DISTINCT flags.msgId
-		FROM flags
-		WHERE mboxId = ?
+		SELECT DISTINCT msgs.msgId
+		FROM msgs
+		LEFT JOIN flags ON msgs.msgId = flags.msgid
+		WHERE msgs.mboxId = ?
 		`
 
 	if len(withFlags) != 0 {
 		if len(withFlags) == 1 {
-			stmt += `AND flag = ? `
+			stmt += `AND flags.flag = ? `
 		} else {
-			stmt += `AND flag IN (`
+			stmt += `AND flags.flag IN (`
 			for i := range withFlags {
 				stmt += `?`
 				if i != len(withFlags)-1 {
@@ -29,7 +30,7 @@ func buildSearchStmt(withFlags, withoutFlags []string) string {
 		}
 	}
 	if len(withoutFlags) != 0 {
-		stmt += `AND flags.msgId NOT IN (` + buildSearchStmt(withoutFlags, nil) + `)`
+		stmt += `AND msgs.msgId NOT IN (` + buildSearchStmt(withoutFlags, nil) + `)`
 	}
 	if len(withFlags) > 1 {
 		stmt += `GROUP BY flags.msgId HAVING COUNT(*) = ` + strconv.Itoa(len(withFlags))

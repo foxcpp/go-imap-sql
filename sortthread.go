@@ -259,7 +259,7 @@ func (m *Mailbox) orderedSubjThread(tx *sql.Tx, uid bool, seqSet *imap.SeqSet, m
 			id := msg.id
 			if !uid {
 				var ok bool
-				_, ok = m.handle.UidAsSeq(id)
+				id, ok = m.handle.UidAsSeq(id)
 				if !ok {
 					continue // Wtf
 				}

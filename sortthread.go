@@ -265,7 +265,7 @@ func (m *Mailbox) orderedSubjThread(tx *sql.Tx, uid bool, seqSet *imap.SeqSet, m
 				}
 			}
 
-			next.Id = msg.id
+			next.Id = id
 			current.Children = []*sortthread.Thread{next}
 			current = next
 		}

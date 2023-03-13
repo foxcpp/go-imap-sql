@@ -189,7 +189,13 @@ func (m *Mailbox) initSelected(unsetRecent bool) (uids []uint32, recent *imap.Se
 		}
 	}
 
-	m.parent.Opts.Log.Debugln("initialized uidMap for selected mailbox:", len(uids), uids)
+	if len(uids) > 10000 {
+		m.parent.Opts.Log.Println("loaded a large mailbox with", len(uids), "messages, beware of performance issues")
+	} else if len(uids) > 100 {
+		m.parent.Opts.Log.Debugln("initialized uidMap for selected mailbox:", len(uids))
+	} else {
+		m.parent.Opts.Log.Debugln("initialized uidMap for selected mailbox:", len(uids), uids)
+	}
 
 	status.Messages = uint32(len(uids))
 	status.Recent = recentCount

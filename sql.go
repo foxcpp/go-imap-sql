@@ -378,7 +378,6 @@ func (b *Backend) prepareStmts() error {
         FROM msgs
 	  	WHERE mboxId = ?
 		AND seen = 0
-		LIMIT 10000
         `)
 	if err != nil {
 		return wrapErr(err, "unseenCount prep")
@@ -555,7 +554,7 @@ func (b *Backend) prepareStmts() error {
         FROM msgs
         WHERE mboxId = ?
 		ORDER BY msgId
-		LIMIT 10000`)
+		LIMIT 100000`)
 	if err != nil {
 		return wrapErr(err, "listMsgUidsRecent prep")
 	}

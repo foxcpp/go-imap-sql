@@ -163,6 +163,9 @@ messageLoop:
 			if err := json.Unmarshal(data.bodyStructureBlob, &data.bodyStructure); err != nil {
 				return err
 			}
+			if data.bodyStructure.Encoding == "" {
+				data.bodyStructure.Encoding = "7bit" // default per RFC 2045
+			}
 		}
 
 		seqNum, ok := m.handle.UidAsSeq(data.msgId)

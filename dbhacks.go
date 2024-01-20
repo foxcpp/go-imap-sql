@@ -125,7 +125,7 @@ func (db db) valuesSubquery(flagsCount int) string {
 }
 
 func (db db) aggrValuesSet(expr, separator string) string {
-	if db.driver == "sqlite3" {
+	if db.driver == "sqlite3" || db.driver == "sqlite" {
 		return "coalesce(group_concat(" + expr + ", '" + separator + "'), '')"
 	}
 	if db.driver == "postgres" {

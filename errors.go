@@ -14,7 +14,7 @@ func isSerializationErr(err error) bool {
 		return sqliteErr.Code == sqlite3.ErrBusy ||
 			sqliteErr.Code == sqlite3.ErrLocked
 	}
-	if pqErr, ok := err.(pq.Error); ok {
+	if pqErr, ok := err.(*pq.Error); ok {
 		return pqErr.Code.Class() == "40"
 	}
 

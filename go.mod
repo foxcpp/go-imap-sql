@@ -3,21 +3,23 @@ module github.com/foxcpp/go-imap-sql
 go 1.12
 
 require (
-	github.com/emersion/go-imap v1.0.5-0.20200511082158-271ea913b422
-	github.com/emersion/go-imap-sortthread v1.1.1-0.20200727121200-18e5fb409fed
-	github.com/emersion/go-message v0.15.0
+	github.com/cpuguy83/go-md2man/v2 v2.0.3 // indirect
+	github.com/emersion/go-imap v1.2.2-0.20220928192137-6fac715be9cf
+	github.com/emersion/go-imap-sortthread v1.2.0
+	github.com/emersion/go-message v0.18.0
+	github.com/emersion/go-sasl v0.0.0-20231106173351-e73c9f7bad43 // indirect
 	github.com/foxcpp/go-imap-backend-tests v0.0.0-20220105184719-e80aa29a5e16
-	github.com/foxcpp/go-imap-mess v0.0.0-20220625145025-3c40e241d099
+	github.com/foxcpp/go-imap-mess v0.0.0-20230108134257-b7ec3a649613
 	github.com/foxcpp/go-imap-namespace v0.0.0-20200802091432-08496dd8e0ed
 	github.com/frankban/quicktest v1.5.0 // indirect
-	github.com/go-sql-driver/mysql v1.4.1
-	github.com/klauspost/compress v1.10.5
-	github.com/lib/pq v1.4.0
-	github.com/mailru/easyjson v0.7.1
-	github.com/mattn/go-sqlite3 v2.0.3+incompatible
-	github.com/pierrec/lz4 v2.5.2+incompatible
-	github.com/urfave/cli v1.20.0
-	google.golang.org/appengine v1.6.1 // indirect
+	github.com/go-sql-driver/mysql v1.7.1
+	github.com/google/go-cmp v0.5.5 // indirect
+	github.com/klauspost/compress v1.17.4
+	github.com/lib/pq v1.10.9
+	github.com/mailru/easyjson v0.7.7
+	github.com/mattn/go-sqlite3 v1.14.19
+	github.com/pierrec/lz4 v2.6.1+incompatible
+	github.com/urfave/cli v1.22.14
 	gotest.tools v2.2.0+incompatible
 )
 

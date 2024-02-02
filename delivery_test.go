@@ -185,17 +185,24 @@ func TestDelivery_AddRcpt_NonExistent(t *testing.T) {
 }
 
 func TestDelivery_Mailbox(t *testing.T) {
-	test := func(t *testing.T, create bool) {
+	test := func(t *testing.T, create bool, override string) {
 		b := initTestBackend().(*Backend)
 		defer cleanBackend(b)
 		assert.NilError(t, b.CreateUser(t.Name()), "CreateUser")
 		u, err := b.GetUser(t.Name())
 		assert.NilError(t, err, "GetUser")
+		destMboxName := "Box"
+		if override != "" {
+			destMboxName = override
+		}
 		if create {
-			assert.NilError(t, u.CreateMailbox("Box"))
+			assert.NilError(t, u.CreateMailbox(destMboxName))
 		}
 
 		delivery := b.NewDelivery()
+		if override != "" {
+			delivery.UserMailbox(u.Username(), destMboxName, nil)
+		}
 
 		assert.NilError(t, delivery.AddRcpt(t.Name(), textproto.Header{}), "AddRcpt")
 
@@ -203,8 +210,8 @@ func TestDelivery_Mailbox(t *testing.T) {
 		assert.NilError(t, delivery.BodyRaw(strings.NewReader(testMsg)), "BodyRaw")
 		assert.NilError(t, delivery.Commit(), "Commit")
 
-		_, mbox, err := u.GetMailbox("Box", true, &noopConn{})
-		assert.NilError(t, err, "GetMailbox Box")
+		_, mbox, err := u.GetMailbox(destMboxName, true, &noopConn{})
+		assert.NilError(t, err, "GetMailbox %s", destMboxName)
 		defer mbox.Close()
 
 		seq, _ := imap.ParseSeqSet("*")
@@ -216,24 +223,41 @@ func TestDelivery_Mailbox(t *testing.T) {
 		checkTestMsg(t, msg)
 	}
 
-	test(t, true)
-	t.Run("nonexistent", func(t *testing.T) {
-		test(t, false)
-	})
+	for _, tt := range []struct {
+		name     string
+		create   bool
+		override string
+	}{
+		{"existent", true, ""},
+		{"nonexistent", false, ""},
+		{"existent_override", true, "Other"},
+		{"nonexistent_override", false, "Other"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			test(t, tt.create, tt.override)
+		})
+	}
 }
 
 func TestDelivery_SpecialMailbox(t *testing.T) {
-	test := func(t *testing.T, create bool, specialUse string) {
+	test := func(t *testing.T, create bool, specialUse, override string) {
 		b := initTestBackend().(*Backend)
 		defer cleanBackend(b)
 		assert.NilError(t, b.CreateUser(t.Name()), "CreateUser")
 		u, err := b.GetUser(t.Name())
 		assert.NilError(t, err, "GetUser")
+		destMboxName := "Box"
+		if override != "" {
+			destMboxName = override
+		}
 		if create {
-			assert.NilError(t, u.(*User).CreateMailboxSpecial("Box", specialUse))
+			assert.NilError(t, u.(*User).CreateMailboxSpecial(destMboxName, specialUse))
 		}
 
 		delivery := b.NewDelivery()
+		if override != "" {
+			delivery.UserMailbox(u.Username(), destMboxName, nil)
+		}
 
 		assert.NilError(t, delivery.AddRcpt(t.Name(), textproto.Header{}), "AddRcpt")
 
@@ -241,8 +265,8 @@ func TestDelivery_SpecialMailbox(t *testing.T) {
 		assert.NilError(t, delivery.BodyRaw(strings.NewReader(testMsg)), "BodyRaw")
 		assert.NilError(t, delivery.Commit(), "Commit")
 
-		_, mbox, err := u.GetMailbox("Box", true, &noopConn{})
-		assert.NilError(t, err, "GetMailbox Box")
+		_, mbox, err := u.GetMailbox(destMboxName, true, &noopConn{})
+		assert.NilError(t, err, "GetMailbox %s", destMboxName)
 		defer mbox.Close()
 
 		seq, _ := imap.ParseSeqSet("*")
@@ -273,10 +297,20 @@ func TestDelivery_SpecialMailbox(t *testing.T) {
 		}
 	}
 
-	test(t, true, imap.JunkAttr)
-	t.Run("nonexistent", func(t *testing.T) {
-		test(t, false, imap.JunkAttr)
-	})
+	for _, tt := range []struct {
+		name     string
+		create   bool
+		override string
+	}{
+		{"existent", true, ""},
+		{"nonexistent", false, ""},
+		{"existent_override", true, "Other"},
+		{"nonexistent_override", false, "Other"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			test(t, tt.create, imap.JunkAttr, tt.override)
+		})
+	}
 }
 
 func TestDelivery_BodyParsed(t *testing.T) {

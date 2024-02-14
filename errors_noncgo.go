@@ -9,7 +9,7 @@ import (
 )
 
 func isSerializationErr(err error) bool {
-	if pqErr, ok := err.(pq.Error); ok {
+	if pqErr, ok := err.(*pq.Error); ok {
 		return pqErr.Code.Class() == "40"
 	}
 

@@ -133,6 +133,9 @@ func (m *Mailbox) initSelected(unsetRecent bool) (uids []uint32, recent *imap.Se
 		if _, ok := standardFlags[flag]; ok {
 			continue
 		}
+		if flag == "" {
+			continue
+		}
 		status.Flags = append(status.Flags, flag)
 		status.PermanentFlags = append(status.PermanentFlags, flag)
 	}

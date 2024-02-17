@@ -163,6 +163,9 @@ messageLoop:
 			if err := json.Unmarshal(data.bodyStructureBlob, &data.bodyStructure); err != nil {
 				return err
 			}
+			if data.bodyStructure.Encoding == "" {
+				data.bodyStructure.Encoding = "7bit" // default per RFC 2045
+			}
 		}
 
 		seqNum, ok := m.handle.UidAsSeq(data.msgId)
@@ -187,10 +190,13 @@ messageLoop:
 			case imap.FetchBodyStructure:
 				msg.BodyStructure = data.bodyStructure
 			case imap.FetchFlags:
+				msg.Flags = []string{}
 				if data.flagStr != "" {
-					msg.Flags = strings.Split(data.flagStr, flagsSep)
-				} else {
-					msg.Flags = []string{}
+					for _, flag := range strings.Split(data.flagStr, flagsSep) {
+						if flag != "" {
+							msg.Flags = append(msg.Flags, flag)
+						}
+					}
 				}
 				if m.handle.IsRecent(data.msgId) {
 					msg.Flags = append(msg.Flags, imap.RecentFlag)

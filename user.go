@@ -97,6 +97,19 @@ func (u *User) ListMailboxes(subscribed bool) ([]imap.MailboxInfo, error) {
 	return res, nil
 }
 
+func (u *User) GetOrCreateMailbox(name string, readOnly bool, conn backend.Conn) (*imap.MailboxStatus, backend.Mailbox, error) {
+	status, mbox, err := u.GetMailbox(name, readOnly, conn)
+	if err == nil || err != backend.ErrNoSuchMailbox {
+		return status, mbox, err
+	}
+
+	if err := u.CreateMailbox(name); err != nil && err != backend.ErrMailboxAlreadyExists {
+		return nil, nil, err
+	}
+
+	return u.GetMailbox(name, readOnly, conn)
+}
+
 func (u *User) GetMailbox(name string, readOnly bool, conn backend.Conn) (*imap.MailboxStatus, backend.Mailbox, error) {
 	var mbox *Mailbox
 

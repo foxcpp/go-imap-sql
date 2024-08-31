@@ -78,7 +78,7 @@ func (d db) rewriteSQL(req string) (res string) {
 			res = strings.Replace(res, "ON CONFLICT DO NOTHING", "", -1)
 			res = strings.Replace(res, "INSERT", "INSERT IGNORE", 1)
 		}
-	} else if d.driver == "sqlite3" {
+	} else if d.driver == "sqlite3" || d.driver == "sqlite" {
 		if strings.HasPrefix(res, "CREATE TABLE") || strings.HasPrefix(res, "ALERT TABLE") {
 			res = strings.Replace(res, "BIGSERIAL", "INTEGER", -1)
 		}

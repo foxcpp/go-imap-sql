@@ -35,6 +35,40 @@ func (b *Backend) addSqlite3Params(dsn string) string {
 	return dsn
 }
 
+func (b *Backend) addModerncSqliteParams(dsn string) string {
+	if !strings.HasPrefix(dsn, "file:") {
+		dsn = "file:" + dsn
+	}
+	if !strings.Contains(dsn, "?") {
+		dsn += "?"
+	} else {
+		dsn += "&"
+	}
+
+	dsn += "_pragma=foreign_keys(1)&"
+
+	if !b.Opts.NoWAL {
+		dsn += "_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&"
+	}
+	if b.Opts.ExclusiveLock {
+		dsn += "_pragma=locking_mode(EXCLUSIVE)&"
+	}
+
+	if b.Opts.BusyTimeout == 0 {
+		b.Opts.BusyTimeout = 500000
+	}
+	if b.Opts.BusyTimeout == -1 {
+		b.Opts.BusyTimeout = 0
+	}
+
+	// _txlock affects non-read-only transactions. Avoiding transaction upgrade problem
+	// that results in SQLITE_BUSY:
+	// https://berthub.eu/articles/posts/a-brief-post-on-sqlite3-database-locked-despite-timeout/
+	dsn += "_pragma=busy_timeout(" + strconv.Itoa(b.Opts.BusyTimeout) + ")&_txlock=immediate"
+
+	return dsn
+}
+
 func (b *Backend) configureEngine() error {
 	if b.db.driver == "sqlite3" {
 		// For testing purposes, it is important that only one memory DB will

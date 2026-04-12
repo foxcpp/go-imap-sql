@@ -32,6 +32,20 @@ func (d db) Exec(req string, args ...interface{}) (sql.Result, error) {
 }
 
 func (d db) Begin(readOnly bool) (*sql.Tx, error) {
+	if d.driver == "sqlite3" {
+		// For go-sqlite3 we need to explicitly start write transactions
+		// as IMMEDIATE. For modernc, this is done via _txlock parameter already.
+
+		tx, err := d.DB.BeginTx(context.TODO(), &sql.TxOptions{
+			Isolation: sql.LevelRepeatableRead,
+			ReadOnly:  readOnly,
+		})
+		if err == nil && !readOnly {
+			_, err = tx.Exec("ROLLBACK; BEGIN IMMEDIATE")
+		}
+		return tx, err
+	}
+
 	return d.DB.BeginTx(context.TODO(), &sql.TxOptions{
 		Isolation: sql.LevelRepeatableRead,
 		ReadOnly:  readOnly,
@@ -39,6 +53,20 @@ func (d db) Begin(readOnly bool) (*sql.Tx, error) {
 }
 
 func (d db) BeginLevel(isolation sql.IsolationLevel, readOnly bool) (*sql.Tx, error) {
+	if d.driver == "sqlite3" {
+		// For go-sqlite3 we need to explicitly start write transactions
+		// as IMMEDIATE. For modernc, this is done via _txlock parameter already.
+
+		tx, err := d.DB.BeginTx(context.TODO(), &sql.TxOptions{
+			Isolation: isolation,
+			ReadOnly:  readOnly,
+		})
+		if err == nil && !readOnly {
+			_, err = tx.Exec("ROLLBACK; BEGIN IMMEDIATE")
+		}
+		return tx, err
+	}
+
 	return d.DB.BeginTx(context.TODO(), &sql.TxOptions{
 		Isolation: isolation,
 		ReadOnly:  readOnly,

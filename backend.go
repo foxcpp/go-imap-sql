@@ -284,9 +284,15 @@ func New(driver, dsn string, extStore ExternalStore, opts Opts) (*Backend, error
 	if driver == "sqlite3" {
 		dsn = b.addSqlite3Params(dsn)
 	}
+	if driver == "sqlite" {
+		dsn = b.addModerncSqliteParams(dsn)
+	}
 
 	b.db.driver = driver
 	b.db.dsn = dsn
+
+	b.Opts.Log.Debugln("db driver:", b.db.driver)
+	b.Opts.Log.Debugln("db dsn:", b.db.dsn)
 
 	b.db.DB, err = sql.Open(driver, dsn)
 	if err != nil {

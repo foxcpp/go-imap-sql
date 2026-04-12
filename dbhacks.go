@@ -37,8 +37,7 @@ func (d db) Begin(readOnly bool) (*sql.Tx, error) {
 		// as IMMEDIATE. For modernc, this is done via _txlock parameter already.
 
 		tx, err := d.DB.BeginTx(context.TODO(), &sql.TxOptions{
-			Isolation: sql.LevelRepeatableRead,
-			ReadOnly:  readOnly,
+			ReadOnly: readOnly,
 		})
 		if err == nil && !readOnly {
 			_, err = tx.Exec("ROLLBACK; BEGIN IMMEDIATE")
@@ -47,8 +46,7 @@ func (d db) Begin(readOnly bool) (*sql.Tx, error) {
 	}
 
 	return d.DB.BeginTx(context.TODO(), &sql.TxOptions{
-		Isolation: sql.LevelRepeatableRead,
-		ReadOnly:  readOnly,
+		ReadOnly: readOnly,
 	})
 }
 

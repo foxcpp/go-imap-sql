@@ -96,30 +96,17 @@ func (d *Delivery) Mailbox(name string) error {
 
 	for _, u := range d.users {
 		if mboxName := d.mboxOverrides[u.username]; mboxName != "" {
-			_, mbox, err := u.GetMailbox(mboxName, true, nil)
+			_, mbox, err := u.GetOrCreateMailbox(mboxName, true, nil)
 			if err == nil {
 				d.mboxes = append(d.mboxes, *mbox.(*Mailbox))
 				continue
 			}
 		}
 
-		_, mbox, err := u.GetMailbox(name, true, nil)
+		_, mbox, err := u.GetOrCreateMailbox(name, true, nil)
 		if err != nil {
-			if err != backend.ErrNoSuchMailbox {
-				d.mboxes = nil
-				return err
-			}
-
-			if err := u.CreateMailbox(name); err != nil && err != backend.ErrMailboxAlreadyExists {
-				d.mboxes = nil
-				return err
-			}
-
-			_, mbox, err = u.GetMailbox(name, true, nil)
-			if err != nil {
-				d.mboxes = nil
-				return err
-			}
+			d.mboxes = nil
+			return err
 		}
 
 		d.mboxes = append(d.mboxes, *mbox.(*Mailbox))
@@ -141,7 +128,7 @@ func (d *Delivery) SpecialMailbox(attribute, fallbackName string) error {
 	}
 	for _, u := range d.users {
 		if mboxName := d.mboxOverrides[u.username]; mboxName != "" {
-			_, mbox, err := u.GetMailbox(mboxName, true, nil)
+			_, mbox, err := u.GetOrCreateMailbox(mboxName, true, nil)
 			if err == nil {
 				d.mboxes = append(d.mboxes, *mbox.(*Mailbox))
 				continue

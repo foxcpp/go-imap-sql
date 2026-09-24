@@ -2,6 +2,7 @@ package imapsql
 
 import (
 	"io/ioutil"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -228,4 +229,27 @@ func TestSearchEmptyFlags(t *testing.T) {
 	})
 	assert.NilError(t, err)
 	assert.DeepEqual(t, res, []uint32{1, 2, 3, 4})
+}
+
+func TestSchemaUpgrade5To6(t *testing.T) {
+	dsn := filepath.Join(t.TempDir(), "test.db")
+	store := &FSStore{Root: t.TempDir()}
+	opts := Opts{Log: DummyLogger{}, BusyTimeout: 500}
+
+	b, err := New("sqlite3", dsn, store, opts)
+	assert.NilError(t, err)
+	_, err = b.DB.Exec(`ALTER TABLE msgs DROP COLUMN recent`)
+	assert.NilError(t, err)
+	assert.NilError(t, b.setSchemaVersion(5))
+	assert.NilError(t, b.Close())
+
+	b, err = New("sqlite3", dsn, store, opts)
+	assert.NilError(t, err)
+	defer b.Close()
+
+	ver, err := b.schemaVersion()
+	assert.NilError(t, err)
+	assert.Equal(t, ver, SchemaVersion)
+	_, err = b.DB.Exec(`SELECT recent FROM msgs LIMIT 0`)
+	assert.NilError(t, err)
 }

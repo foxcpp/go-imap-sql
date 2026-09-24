@@ -63,7 +63,7 @@ func (b *Backend) upgradeSchema(currentVer int) error {
 	//}
 
 	if currentVer == 5 {
-		_, err = b.DB.Exec(`ALTER TABLE msgs ADD COLUMN recent INTEGER NOT NULL DEFAULT 1`)
+		_, err = tx.Exec(`ALTER TABLE msgs ADD COLUMN recent INTEGER NOT NULL DEFAULT 1`)
 		if err != nil {
 			return wrapErr(err, "5->6 upgrade")
 		}

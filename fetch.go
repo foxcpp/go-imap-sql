@@ -163,6 +163,9 @@ messageLoop:
 			if err := json.Unmarshal(data.bodyStructureBlob, &data.bodyStructure); err != nil {
 				return err
 			}
+			if len(data.bodyStructure.Parts) == 0 {
+				normalizeBodyStructureEncoding(data.bodyStructure)
+			}
 		}
 
 		seqNum, ok := m.handle.UidAsSeq(data.msgId)

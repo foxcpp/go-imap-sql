@@ -304,6 +304,9 @@ func extractCachedData(hdr textproto.Header, bufferedBody *bufio.Reader) (bodySt
 	if err != nil {
 		return nil, nil, err
 	}
+	if len(bodyStruct.Parts) == 0 {
+		normalizeBodyStructureEncoding(bodyStruct)
+	}
 
 	jw := jwriter.Writer{}
 	buf := bytes.NewBuffer(make([]byte, 0, 2048))
@@ -316,6 +319,18 @@ func extractCachedData(hdr textproto.Header, bufferedBody *bufio.Reader) (bodySt
 	jw.DumpTo(buf)
 	cachedHeadersBlob = buf.Bytes()
 	return
+}
+
+// normalizeBodyStructureEncoding fills in the MIME default for every part.
+// BODYSTRUCTURE requires the encoding field to be a string, not NIL.
+func normalizeBodyStructureEncoding(bodyStruct *imap.BodyStructure) {
+	if bodyStruct.Encoding == "" {
+		// Content-Transfer-Encoding defaults to 7BIT when the header is absent.
+		bodyStruct.Encoding = "7BIT"
+	}
+	if bodyStruct.BodyStructure != nil {
+		normalizeBodyStructureEncoding(bodyStruct.BodyStructure)
+	}
 }
 
 func (b *Backend) processBody(literal imap.Literal) (bodyStruct, cachedHeader []byte, extBodyKey string, err error) {

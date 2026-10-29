@@ -69,27 +69,32 @@ func (m *Mailbox) readUids() (uids []uint32, recent *imap.SeqSet, err error) {
 	recent = new(imap.SeqSet)
 	var recentCount uint32
 	rows, err := m.parent.listMsgUidsRecent.Query(m.id)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return uids, recent, nil
+		}
 		m.parent.logMboxErr(m, err, "readUids (listMsgUidsRecent)")
 		return nil, nil, wrapErrf(err, "readUids %s", m.name)
 	}
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var (
-				uid        uint32
-				recentFlag int
-			)
-			if err := rows.Scan(&uid, &recentFlag); err != nil {
-				m.parent.logMboxErr(m, err, "readUids (listMsgUidsRecent scan)")
-				return nil, nil, wrapErrf(err, "readUids %s", m.name)
-			}
-			uids = append(uids, uid)
-			if recentFlag == 1 {
-				recentCount++
-				recent.AddNum(uid)
-			}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			uid        uint32
+			recentFlag int
+		)
+		if err := rows.Scan(&uid, &recentFlag); err != nil {
+			m.parent.logMboxErr(m, err, "readUids (listMsgUidsRecent scan)")
+			return nil, nil, wrapErrf(err, "readUids %s", m.name)
 		}
+		uids = append(uids, uid)
+		if recentFlag == 1 {
+			recentCount++
+			recent.AddNum(uid)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		m.parent.logMboxErr(m, err, "readUids (listMsgUidsRecent scan)")
+		return nil, nil, wrapErrf(err, "readUids %s", m.name)
 	}
 	return uids, recent, nil
 }

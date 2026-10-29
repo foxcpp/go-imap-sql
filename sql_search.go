@@ -11,7 +11,7 @@ func buildSearchStmt(withFlags, withoutFlags []string) string {
 	stmt += `
 		SELECT DISTINCT msgs.msgId
 		FROM msgs
-		LEFT JOIN flags ON msgs.msgId = flags.msgid
+		LEFT JOIN flags ON msgs.msgId = flags.msgid AND msgs.mboxId = flags.mboxId
 		WHERE msgs.mboxId = ?
 		`
 

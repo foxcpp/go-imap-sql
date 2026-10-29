@@ -231,6 +231,28 @@ func TestSearchEmptyFlags(t *testing.T) {
 	assert.DeepEqual(t, res, []uint32{1, 2, 3, 4})
 }
 
+func TestSearchMultipleWithoutFlags(t *testing.T) {
+	b := initTestBackend()
+	defer cleanBackend(b)
+	assert.NilError(t, b.CreateUser(t.Name()))
+	usr, err := b.GetUser(t.Name())
+	assert.NilError(t, err)
+	assert.NilError(t, usr.CreateMailbox(t.Name()))
+	_, mbox, err := usr.GetMailbox(t.Name(), true, &noopConn{})
+	assert.NilError(t, err)
+
+	assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{"\\Seen"}, time.Now(), strings.NewReader(testMsg), mbox))
+	assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{}, time.Now(), strings.NewReader(testMsg), mbox))
+	assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{"\\Deleted"}, time.Now(), strings.NewReader(testMsg), mbox))
+	assert.NilError(t, mbox.Poll(true))
+
+	res, err := mbox.SearchMessages(true, &imap.SearchCriteria{
+		WithoutFlags: []string{"\\Seen", "\\Deleted"},
+	})
+	assert.NilError(t, err)
+	assert.DeepEqual(t, res, []uint32{2})
+}
+
 func TestSchemaUpgrade5To6(t *testing.T) {
 	dsn := filepath.Join(t.TempDir(), "test.db")
 	store := &FSStore{Root: t.TempDir()}

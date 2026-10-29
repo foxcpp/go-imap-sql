@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-func buildSearchStmt(withFlags, withoutFlags []string) string {
+func buildSearchStmt(withFlags, withoutFlags []string, group bool) string {
 	var stmt string
 	stmt += `
 		SELECT DISTINCT msgs.msgId
@@ -30,9 +30,12 @@ func buildSearchStmt(withFlags, withoutFlags []string) string {
 		}
 	}
 	if len(withoutFlags) != 0 {
-		stmt += `AND msgs.msgId NOT IN (` + buildSearchStmt(withoutFlags, nil) + `)`
+		// The nested query identifies messages having any excluded flag. It
+		// must not require all flags with GROUP BY/HAVING, unlike the
+		// top-level query when multiple flags are required.
+		stmt += `AND msgs.msgId NOT IN (` + buildSearchStmt(withoutFlags, nil, false) + `)`
 	}
-	if len(withFlags) > 1 {
+	if group && len(withFlags) > 1 {
 		stmt += `GROUP BY flags.msgId HAVING COUNT(*) = ` + strconv.Itoa(len(withFlags))
 	}
 
@@ -48,7 +51,7 @@ func (m *Mailbox) getFlagSearchStmt(withFlags, withoutFlags []string) (*sql.Stmt
 		return stmt, nil
 	}
 
-	stmtStr := buildSearchStmt(withFlags, withoutFlags)
+	stmtStr := buildSearchStmt(withFlags, withoutFlags, true)
 	stmt, err := m.parent.db.Prepare(stmtStr)
 	if err != nil {
 		return nil, err

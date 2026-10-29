@@ -361,3 +361,33 @@ func TestDelivery_UserHeader(t *testing.T) {
 		assert.Check(t, is.Equal(hdr.Get("Test-Header"), "2"), "wrong user header stored")
 	}
 }
+
+func TestDelivery_UserMailboxSeen(t *testing.T) {
+	b := initTestBackend().(*Backend)
+	defer cleanBackend(b)
+
+	name := strings.ToLower(t.Name())
+	assert.NilError(t, b.CreateUser(name), "CreateUser")
+
+	delivery := b.NewDelivery()
+	assert.NilError(t, delivery.AddRcpt(name, textproto.Header{}), "AddRcpt")
+	delivery.UserMailbox(name, "INBOX", []string{imap.SeenFlag})
+	assert.NilError(t, delivery.BodyRaw(strings.NewReader(testMsg)), "BodyRaw")
+	assert.NilError(t, delivery.Commit(), "Commit")
+
+	u, err := b.GetUser(name)
+	assert.NilError(t, err, "GetUser")
+	_, mbox, err := u.GetMailbox("INBOX", true, &noopConn{})
+	assert.NilError(t, err, "GetMailbox")
+	defer mbox.Close()
+
+	seq, _ := imap.ParseSeqSet("1:*")
+	ch := make(chan *imap.Message, 10)
+	assert.NilError(t, mbox.ListMessages(false, seq, []imap.FetchItem{imap.FetchFlags}, ch), "ListMessages")
+	assert.Assert(t, is.Len(ch, 1))
+	assert.Assert(t, is.Contains((<-ch).Flags, imap.SeenFlag))
+
+	status, err := u.Status("INBOX", []imap.StatusItem{imap.StatusUnseen})
+	assert.NilError(t, err, "Status")
+	assert.Equal(t, status.Unseen, uint32(0), "message delivered with \\Seen counts as unseen")
+}

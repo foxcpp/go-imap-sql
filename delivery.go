@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"time"
 
+	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/backend"
 	"github.com/emersion/go-message/textproto"
 )
@@ -309,12 +310,19 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox Mailbox, bodyLen i
 	if mbox.parent.mngr.NewMessage(mbox.id, msgId) {
 		persistRecent = 1
 	}
+	haveSeen := 0
+	for _, flag := range d.flagOverrides[mbox.user.username] {
+		if flag == imap.SeenFlag {
+			haveSeen = 1
+			break
+		}
+	}
 
 	_, err = d.tx.Stmt(d.b.addMsg).Exec(
 		mbox.id, msgId, date.Unix(),
 		length,
 		bodyStruct, cachedHeader, extBodyKey,
-		0, d.b.Opts.CompressAlgo, persistRecent,
+		haveSeen, d.b.Opts.CompressAlgo, persistRecent,
 	)
 	if err != nil {
 		d.b.extStore.Delete([]string{extBodyKey})

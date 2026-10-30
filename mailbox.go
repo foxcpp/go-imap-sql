@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"io"
 	"io/ioutil"
@@ -290,7 +291,12 @@ func (m *Mailbox) SetMessageLimit(val *uint32) error {
 	return err
 }
 
-func extractCachedData(hdr textproto.Header, bufferedBody *bufio.Reader) (bodyStructBlob, cachedHeadersBlob []byte, err error) {
+type storedBodyStructure struct {
+	imap.BodyStructure
+	MalformedMIME bool
+}
+
+func extractCachedData(hdr textproto.Header, bufferedBody *bufio.Reader) (bodyStructBlob, cachedHeadersBlob []byte, malformedMIME bool, err error) {
 	hdrs := make(map[string][]string, len(cachedHeaderFields))
 	for field := hdr.Fields(); field.Next(); {
 		cKey := nettextproto.CanonicalMIMEHeaderKey(field.Key())
@@ -302,19 +308,28 @@ func extractCachedData(hdr textproto.Header, bufferedBody *bufio.Reader) (bodySt
 
 	bodyStruct, err := backendutil.FetchBodyStructure(hdr, bufferedBody, true)
 	if err != nil {
-		return nil, nil, err
+		bodyStruct = &imap.BodyStructure{
+			MIMEType:    "application",
+			MIMESubType: "octet-stream",
+			Encoding:    "binary",
+		}
+		malformedMIME = true
 	}
 	if len(bodyStruct.Parts) == 0 {
 		normalizeBodyStructureEncoding(bodyStruct)
 	}
 
+	stored := storedBodyStructure{
+		BodyStructure: *bodyStruct,
+		MalformedMIME: malformedMIME,
+	}
+	bodyStructBlob, err = json.Marshal(stored)
+	if err != nil {
+		return nil, nil, malformedMIME, err
+	}
+
 	jw := jwriter.Writer{}
 	buf := bytes.NewBuffer(make([]byte, 0, 2048))
-	easyjsonMarshalBodyStruct(&jw, *bodyStruct)
-	jw.DumpTo(buf)
-	bodyStructBlob = buf.Bytes()
-
-	buf = bytes.NewBuffer(make([]byte, 0, 2048))
 	easyjsonMarshalCachedHeader(&jw, hdrs)
 	jw.DumpTo(buf)
 	cachedHeadersBlob = buf.Bytes()
@@ -359,15 +374,35 @@ func (b *Backend) processBody(literal imap.Literal) (bodyStruct, cachedHeader []
 	bodyReader := io.TeeReader(literal, compressW)
 	bufferedBody := bufio.NewReader(bodyReader)
 	hdr, err := textproto.ReadHeader(bufferedBody)
+	malformedMIME := false
 	if err != nil {
-		b.extStore.Delete([]string{extBodyKey})
-		return nil, nil, "", wrapErr(err, "CreateMessage (readHeader)")
+		// Keep the raw message even when its top-level header is malformed.
+		// There is no reliable cached header in this case, but the message can
+		// still be represented as one opaque MIME part.
+		hdr = textproto.Header{}
+		malformedMIME = true
 	}
 
-	bodyStruct, cachedHeader, err = extractCachedData(hdr, bufferedBody)
+	bodyStruct, cachedHeader, malformed, err := extractCachedData(hdr, bufferedBody)
 	if err != nil {
 		b.extStore.Delete([]string{extBodyKey})
 		return nil, nil, "", wrapErr(err, "CreateMessage (extractCachedData)")
+	}
+	if malformedMIME && !malformed {
+		var stored storedBodyStructure
+		if err := json.Unmarshal(bodyStruct, &stored); err != nil {
+			return nil, nil, "", wrapErr(err, "CreateMessage (decode body structure)")
+		}
+		stored.MalformedMIME = true
+		stored.BodyStructure = imap.BodyStructure{
+			MIMEType:    "application",
+			MIMESubType: "octet-stream",
+			Encoding:    "binary",
+		}
+		bodyStruct, err = json.Marshal(stored)
+		if err != nil {
+			return nil, nil, "", wrapErr(err, "CreateMessage (encode body structure)")
+		}
 	}
 
 	// Consume all remaining body so io.TeeReader used with external store will

@@ -408,7 +408,7 @@ func (b *Backend) processParsedBody(headerInput []byte, header textproto.Header,
 	}
 
 	bufferedBody := bufio.NewReader(io.TeeReader(bodyLiteral, compressW))
-	bodyStruct, cachedHeader, err = extractCachedData(header, bufferedBody)
+	bodyStruct, cachedHeader, _, err = extractCachedData(header, bufferedBody)
 	if err != nil {
 		b.extStore.Delete([]string{extBodyKey})
 		return nil, nil, "", err

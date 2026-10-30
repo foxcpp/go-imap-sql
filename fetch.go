@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	nettextproto "net/textproto"
 	"strings"
 	"time"
@@ -97,6 +98,7 @@ type scanData struct {
 	compressAlgo  string
 
 	bodyStructure *imap.BodyStructure
+	malformedMIME bool
 	cachedHeader  map[string][]string
 	parsedHeader  *textproto.Header
 }
@@ -153,6 +155,7 @@ messageLoop:
 		data.parsedHeader = nil
 		data.cachedHeader = nil
 		data.bodyStructure = nil
+		data.malformedMIME = false
 
 		if data.cachedHeaderBlob != nil {
 			if err := json.Unmarshal(data.cachedHeaderBlob, &data.cachedHeader); err != nil {
@@ -160,9 +163,12 @@ messageLoop:
 			}
 		}
 		if data.bodyStructureBlob != nil {
-			if err := json.Unmarshal(data.bodyStructureBlob, &data.bodyStructure); err != nil {
+			var stored storedBodyStructure
+			if err := json.Unmarshal(data.bodyStructureBlob, &stored); err != nil {
 				return err
 			}
+			data.bodyStructure = &stored.BodyStructure
+			data.malformedMIME = stored.MalformedMIME
 			if len(data.bodyStructure.Parts) == 0 {
 				normalizeBodyStructureEncoding(data.bodyStructure)
 			}
@@ -222,6 +228,9 @@ func (m *Mailbox) extractBodyPart(item imap.FetchItem, data *scanData, msg *imap
 	if err != nil {
 		return err
 	}
+	if data.malformedMIME && part != needCachedHeader {
+		return m.extractMalformedBodyPart(sect, data, msg)
+	}
 
 	switch part {
 	case needCachedHeader:
@@ -255,6 +264,117 @@ func (m *Mailbox) extractBodyPart(item imap.FetchItem, data *scanData, msg *imap
 	}
 
 	return nil
+}
+
+func (m *Mailbox) extractMalformedBodyPart(sect *imap.BodySectionName, data *scanData, msg *imap.Message) error {
+	if len(sect.Path) != 0 && (len(sect.Path) != 1 || sect.Path[0] != 1) {
+		msg.Body[sect] = bytes.NewReader(nil)
+		return nil
+	}
+
+	body, err := m.openBody(true, data.compressAlgo, data.extBodyKey)
+	if err != nil {
+		return err
+	}
+	header, err := readMalformedMIMEHeader(body.Reader)
+	if err != nil {
+		body.Close()
+		return err
+	}
+
+	if sect.Specifier == imap.HeaderSpecifier || sect.Specifier == imap.MIMESpecifier {
+		body.Close()
+		if sect.Partial != nil {
+			header = sect.ExtractPartial(header)
+		}
+		msg.Body[sect] = bytes.NewReader(header)
+		return nil
+	}
+
+	if len(sect.Path) == 0 && sect.Specifier == imap.EntireSpecifier {
+		body.Close()
+		body, err = m.openBody(true, data.compressAlgo, data.extBodyKey)
+		if err != nil {
+			return err
+		}
+		msg.Body[sect] = &bodySectionLiteral{
+			Reader: body.Reader,
+			Closer: body,
+			Length: int(data.bodyLen),
+			Remain: int64(data.bodyLen),
+		}
+		return nil
+	}
+
+	length := int64(data.bodyLen) - int64(len(header))
+	if length < 0 {
+		length = 0
+	}
+	if sect.Partial != nil {
+		offset, size := int64(sect.Partial[0]), int64(sect.Partial[1])
+		if _, err := io.CopyN(ioutil.Discard, body.Reader, offset); err != nil && err != io.EOF {
+			body.Close()
+			return err
+		}
+		length = size
+		body.Reader = bufio.NewReader(io.LimitReader(body.Reader, size))
+	}
+	msg.Body[sect] = &bodySectionLiteral{
+		Reader: body.Reader,
+		Closer: body,
+		Length: int(length),
+		Remain: length,
+	}
+	return nil
+}
+
+func readMalformedMIMEHeader(r *bufio.Reader) ([]byte, error) {
+	var header bytes.Buffer
+	for {
+		line, err := r.ReadString('\n')
+		header.WriteString(line)
+		if line == "\r\n" || line == "\n" {
+			return header.Bytes(), nil
+		}
+		if err != nil {
+			if err == io.EOF {
+				return header.Bytes(), nil
+			}
+			return nil, err
+		}
+	}
+}
+
+type bodySectionLiteral struct {
+	io.Reader
+	io.Closer
+	Length int
+	Remain int64
+}
+
+func (l *bodySectionLiteral) Read(p []byte) (int, error) {
+	if l.Remain == 0 {
+		_ = l.Closer.Close()
+		return 0, io.EOF
+	}
+	if l.Remain > 0 && int64(len(p)) > l.Remain {
+		p = p[:l.Remain]
+	}
+	n, err := l.Reader.Read(p)
+	if n > 0 && l.Remain > 0 {
+		l.Remain -= int64(n)
+		if l.Remain == 0 {
+			_ = l.Closer.Close()
+		}
+	}
+	if err != nil {
+		_ = l.Closer.Close()
+	}
+	return n, err
+}
+
+func (l *bodySectionLiteral) Len() int {
+	return l.Length
 }
 
 type BufferedReadCloser struct {

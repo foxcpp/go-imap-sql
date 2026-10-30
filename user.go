@@ -289,6 +289,10 @@ func (u *User) DeleteMailbox(name string) error {
 }
 
 func (u *User) RenameMailbox(existingName, newName string) error {
+	if strings.HasPrefix(newName, existingName+MailboxPathSep) {
+		return errors.New("imap: can't rename mailbox under its own child")
+	}
+
 	tx, err := u.parent.db.Begin(false)
 	if err != nil {
 		u.parent.logUserErr(u, err, "RenameMailbox (tx start)", existingName, newName)

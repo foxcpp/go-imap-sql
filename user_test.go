@@ -37,3 +37,24 @@ func TestInboxCreation(t *testing.T) {
 	assert.NilError(t, err, "u.GetMailbox")
 	defer mbox.Close()
 }
+
+func TestRenameMailboxIntoOwnChild(t *testing.T) {
+	b := initTestBackend().(*Backend)
+	defer cleanBackend(b)
+
+	assert.NilError(t, b.CreateUser(t.Name()))
+	u, err := b.GetUser(t.Name())
+	assert.NilError(t, err)
+	assert.NilError(t, u.CreateMailbox("w58d"))
+
+	err = u.RenameMailbox("w58d", "w58d.child")
+	assert.Assert(t, err != nil, "renaming a mailbox into its own child must fail")
+
+	_, mbox, err := u.GetMailbox("w58d", false, &noopConn{})
+	assert.NilError(t, err)
+	assert.NilError(t, mbox.Close())
+	_, _, err = u.GetMailbox("w58d.child", false, &noopConn{})
+	assert.Assert(t, err != nil, "failed rename must not create the destination mailbox")
+	_, _, err = u.GetMailbox("w58d.child.child", false, &noopConn{})
+	assert.Assert(t, err != nil, "rename must not create a nested mailbox")
+}

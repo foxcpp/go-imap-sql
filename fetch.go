@@ -84,6 +84,11 @@ func (m *Mailbox) ListMessages(uid bool, seqset *imap.SeqSet, items []imap.Fetch
 		}
 	}
 
+	if err := tx.Commit(); err != nil {
+		m.parent.logMboxErr(m, err, "ListMessages (tx commit)", uid, seqset, items)
+		return err
+	}
+
 	return nil
 }
 

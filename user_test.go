@@ -7,8 +7,7 @@ import (
 )
 
 func TestUserCaseInsensitivity(t *testing.T) {
-	b := initTestBackend().(*Backend)
-	defer cleanBackend(b)
+	b := setupTestBackend(t)
 
 	assert.NilError(t, b.CreateUser("foXcpp"))
 	_, err := b.Login(nil, "foXCpp", "")
@@ -25,8 +24,7 @@ func TestUserCaseInsensitivity(t *testing.T) {
 }
 
 func TestInboxCreation(t *testing.T) {
-	b := initTestBackend().(*Backend)
-	defer cleanBackend(b)
+	b := setupTestBackend(t)
 
 	assert.NilError(t, b.CreateUser("foxcpp"))
 
@@ -39,8 +37,7 @@ func TestInboxCreation(t *testing.T) {
 }
 
 func TestRenameMailboxIntoOwnChild(t *testing.T) {
-	b := initTestBackend().(*Backend)
-	defer cleanBackend(b)
+	b := setupTestBackend(t)
 
 	assert.NilError(t, b.CreateUser(t.Name()))
 	u, err := b.GetUser(t.Name())

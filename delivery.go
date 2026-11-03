@@ -31,7 +31,11 @@ var ErrDeliveryInterrupted = errors.New("sql: delivery transaction interrupted, 
 // returns ErrDeliveryInterrupted.
 // Sender should retry delivery after a short delay.
 func (b *Backend) NewDelivery() Delivery {
-	return Delivery{b: b, perRcptHeader: map[string]textproto.Header{}}
+	return b.NewDeliveryWithOptions(DeliveryOptions{})
+}
+
+func (b *Backend) NewDeliveryWithOptions(opts DeliveryOptions) Delivery {
+	return Delivery{b: b, opts: opts, perRcptHeader: map[string]textproto.Header{}}
 }
 
 func (d *Delivery) clean() {
@@ -51,8 +55,13 @@ func (d *Delivery) clean() {
 	}
 }
 
+type DeliveryOptions struct {
+	SkipNotify bool
+}
+
 type Delivery struct {
-	b *Backend
+	b    *Backend
+	opts DeliveryOptions
 
 	users  []User
 	mboxes []Mailbox
@@ -521,7 +530,7 @@ func (d *Delivery) Commit() error {
 
 	defer func(tx *sql.Tx) {
 		err := tx.Rollback()
-		if err != nil {
+		if err != nil && !errors.Is(err, sql.ErrTxDone) {
 			d.b.Opts.Log.Println("delivery.Commit tx.Rollback:", err)
 		}
 	}(tx)

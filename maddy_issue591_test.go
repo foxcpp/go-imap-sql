@@ -10,8 +10,7 @@ import (
 )
 
 func TestSearchUnseenDoesNotUseFlagsFromOtherMailbox(t *testing.T) {
-	b := initTestBackend()
-	defer cleanBackend(b)
+	b := setupTestBackend(t)
 
 	assert.NilError(t, b.CreateUser(t.Name()))
 	usr, err := b.GetUser(t.Name())

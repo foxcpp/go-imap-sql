@@ -2,7 +2,6 @@ package imapsql
 
 import (
 	"fmt"
-	"io/ioutil"
 	"strings"
 	"testing"
 	"time"
@@ -12,26 +11,23 @@ import (
 	is "gotest.tools/assert/cmp"
 )
 
-func checkKeysCount(b *Backend, expected int) is.Comparison {
+func checkKeysCount(b *testBackendContainer, expected int) is.Comparison {
 	return func() is.Result {
-		dirList, err := ioutil.ReadDir(b.extStore.(*FSStore).Root)
-		if err != nil {
-			return is.ResultFromError(err)
-		}
-		if len(dirList) != expected {
-			names := make([]string, 0, len(dirList))
-			for _, ent := range dirList {
-				names = append(names, ent.Name())
+		keyList := b.Store.(*testStore).Keys()
+		if len(keyList) != expected {
+			names := make([]string, 0, len(keyList))
+			for _, ent := range keyList {
+				names = append(names, ent)
 			}
-			return is.ResultFailure(fmt.Sprintf("expected %d keys to be stored, got %d: %v", expected, len(dirList), names))
+			return is.ResultFailure(fmt.Sprintf("expected %d keys to be stored, got %d: %v", expected, len(keyList), names))
 		}
 		return is.ResultSuccess
 	}
 }
 
 func TestKeyIsRemovedWithMsg(t *testing.T) {
-	b := initTestBackend().(*Backend)
-	defer cleanBackend(b)
+	b := setupTestBackend(t)
+
 	assert.NilError(t, b.CreateUser(t.Name()))
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)
@@ -51,8 +47,8 @@ func TestKeyIsRemovedWithMsg(t *testing.T) {
 }
 
 func TestKeyIsRemovedWithMbox(t *testing.T) {
-	b := initTestBackend().(*Backend)
-	defer cleanBackend(b)
+	b := setupTestBackend(t)
+
 	assert.NilError(t, b.CreateUser(t.Name()))
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)
@@ -71,8 +67,8 @@ func TestKeyIsRemovedWithMbox(t *testing.T) {
 }
 
 func TestKeyIsRemovedWithCopiedMsgs(t *testing.T) {
-	b := initTestBackend().(*Backend)
-	defer cleanBackend(b)
+	b := setupTestBackend(t)
+
 	assert.NilError(t, b.CreateUser(t.Name()))
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)
@@ -108,8 +104,8 @@ func TestKeyIsRemovedWithCopiedMsgs(t *testing.T) {
 }
 
 func TestKeyIsRemovedWithUser(t *testing.T) {
-	b := initTestBackend().(*Backend)
-	defer cleanBackend(b)
+	b := setupTestBackend(t)
+
 	assert.NilError(t, b.CreateUser(t.Name()))
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)

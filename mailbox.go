@@ -105,7 +105,13 @@ func (m *Mailbox) initSelected(unsetRecent bool) (uids []uint32, recent *imap.Se
 		unsetRecent = false
 	}
 
-	tx, err := m.parent.db.Begin(!unsetRecent)
+	level := sql.LevelRepeatableRead
+	if unsetRecent {
+		// Locking reads under READ COMMITTED observe a Recent claim made by a
+		// concurrent selector after waiting for that selector's transaction.
+		level = sql.LevelReadCommitted
+	}
+	tx, err := m.parent.db.BeginLevel(level, !unsetRecent)
 	if err != nil {
 		return nil, nil, nil, wrapErrf(err, "statusInit %s", m.name)
 	}
@@ -168,7 +174,11 @@ func (m *Mailbox) initSelected(unsetRecent bool) (uids []uint32, recent *imap.Se
 
 	recent = new(imap.SeqSet)
 	var recentCount uint32
-	rows, err = tx.Stmt(m.parent.listMsgUidsRecent).Query(m.id)
+	if unsetRecent {
+		rows, err = tx.Query(m.parent.db.rewriteSQL(`SELECT msgId, recent FROM msgs WHERE mboxId = ? ORDER BY msgId FOR UPDATE`), m.id)
+	} else {
+		rows, err = tx.Stmt(m.parent.listMsgUidsRecent).Query(m.id)
+	}
 	if err != nil && err != sql.ErrNoRows {
 		m.parent.logMboxErr(m, err, "initSelected (listMsgUidsRecent)")
 		return nil, nil, nil, wrapErrf(err, "initSelected %s", m.name)
@@ -193,6 +203,12 @@ func (m *Mailbox) initSelected(unsetRecent bool) (uids []uint32, recent *imap.Se
 				recent.AddNum(uid)
 			}
 		}
+		if err := rows.Err(); err != nil {
+			return nil, nil, nil, wrapErrf(err, "initSelected (listMsgUidsRecent) %s", m.name)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, nil, nil, wrapErrf(err, "initSelected (close rows) %s", m.name)
+		}
 	}
 
 	if len(uids) > 10000 {
@@ -206,9 +222,9 @@ func (m *Mailbox) initSelected(unsetRecent bool) (uids []uint32, recent *imap.Se
 	status.Messages = uint32(len(uids))
 	status.Recent = recentCount
 
-	if unsetRecent {
-		if _, err := tx.Stmt(m.parent.clearRecent).Exec(m.id); err != nil {
-			m.parent.logMboxErr(m, err, "initSelected (clearRecent)")
+	if unsetRecent && len(uids) != 0 {
+		if _, err := tx.Stmt(m.parent.clearRecent).Exec(m.id, uids[len(uids)-1]); err != nil {
+			return nil, nil, nil, wrapErrf(err, "initSelected (clearRecent) %s", m.name)
 		}
 	}
 
@@ -228,7 +244,7 @@ func (m *Mailbox) initSelected(unsetRecent bool) (uids []uint32, recent *imap.Se
 
 	if unsetRecent {
 		if err := tx.Commit(); err != nil {
-			m.parent.logMboxErr(m, err, "initSelected (commit)")
+			return nil, nil, nil, wrapErrf(err, "initSelected (commit) %s", m.name)
 		}
 	}
 
@@ -499,17 +515,12 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		return wrapErr(err, "CreateMessage (addExtKey)")
 	}
 
-	recent := m.parent.mngr.NewMessage(m.id, msgId)
-	recentI := 0
-	if recent {
-		recentI = 1
-	}
 	_, err = tx.Stmt(m.parent.addMsg).Exec(
 		m.id, msgId, date.Unix(),
 		bodyLen,
 		bodyStruct, cachedHdr, extBodyKey,
 		haveSeen, m.parent.Opts.CompressAlgo,
-		recentI,
+		1,
 	)
 	if err != nil {
 		if err := m.parent.extStore.Delete([]string{extBodyKey}); err != nil {
@@ -538,6 +549,7 @@ func (m *Mailbox) CreateMessage(flags []string, date time.Time, fullBody imap.Li
 		return wrapErr(err, "CreateMessage (tx commit)")
 	}
 
+	m.parent.mngr.NewMessage(m.id, msgId)
 	return nil
 }
 
@@ -555,6 +567,28 @@ func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error
 	if err != nil {
 		return err
 	}
+	var destID uint64
+	if err := tx.Stmt(m.parent.mboxId).QueryRow(m.user.id, dest).Scan(&destID); err != nil {
+		if err == sql.ErrNoRows {
+			return backend.ErrNoSuchMailbox
+		}
+		return wrapErr(err, "MoveMessages (target lookup)")
+	}
+	// Lock both mailbox rows in ID order before touching either message set.
+	// This reserves destination UIDs and avoids opposite-direction MOVE deadlocks.
+	ids := []uint64{m.id, destID}
+	if ids[0] > ids[1] {
+		ids[0], ids[1] = ids[1], ids[0]
+	}
+	for i, id := range ids {
+		if i != 0 && id == ids[i-1] {
+			continue
+		}
+		var next uint32
+		if err := tx.Stmt(m.parent.uidNextLocked).QueryRow(id).Scan(&next); err != nil {
+			return wrapErrf(err, "MoveMessages (lock mailbox)")
+		}
+	}
 
 	for _, seq := range seqset.Set {
 		_, err = tx.Stmt(m.parent.markUid).Exec(m.id, seq.Start, seq.Stop)
@@ -567,15 +601,6 @@ func (m *Mailbox) MoveMessages(uid bool, seqset *imap.SeqSet, dest string) error
 	// There is no way we can reassign UIDs properly in UPDATE statment so we
 	// have to use INSERT + DELETE. This is still better than complete message
 	// copy and removal logic, though.
-
-	var destID uint64
-	if err := tx.Stmt(m.parent.mboxId).QueryRow(m.user.id, dest).Scan(&destID); err != nil {
-		if err == sql.ErrNoRows {
-			return backend.ErrNoSuchMailbox
-		}
-		m.parent.logMboxErr(m, err, "MoveMessages (target lookup)", uid, seqset, dest)
-		return wrapErr(err, "MoveMessages (target lookup)")
-	}
 
 	// Copy messages and flags...
 	copiedCount := uint32(0)
@@ -678,19 +703,12 @@ func (m *Mailbox) CopyMessages(uid bool, seqset *imap.SeqSet, dest string) error
 		return wrapErr(err, "CopyMessages")
 	}
 
-	persistRecent := m.parent.mngr.NewMessages(destID, imap.SeqSet{Set: []imap.Seq{{Start: firstCopy, Stop: lastCopy}}})
-	if persistRecent {
-		if _, err := tx.Stmt(m.parent.addRecentToLast).Exec(destID, destID, lastCopy-firstCopy+1); err != nil {
-			m.parent.logMboxErr(m, err, "CopyMessages (persistRecent)", uid, seqset, dest)
-			return wrapErr(err, "CopyMessages")
-		}
-	}
-
 	if err := tx.Commit(); err != nil {
 		m.parent.logMboxErr(m, err, "CopyMessages (tx commit)", uid, seqset, dest)
 		return wrapErr(err, "CopyMessages")
 	}
 
+	m.parent.mngr.NewMessages(destID, imap.SeqSet{Set: []imap.Seq{{Start: firstCopy, Stop: lastCopy}}})
 	return nil
 }
 
@@ -782,6 +800,13 @@ func (m *Mailbox) copyMessages(tx *sql.Tx, seqset *imap.SeqSet, dest string) (fi
 			return 0, 0, 0, backend.ErrNoSuchMailbox
 		}
 	}
+	// Reserve the destination's UID range before calculating any copied IDs.
+	// The row lock is held until commit, ordering copies with deliveries and
+	// other writers to this mailbox without serializing unrelated mailboxes.
+	var oldUidNext uint32
+	if err := tx.Stmt(m.parent.uidNextLocked).QueryRow(destID).Scan(&oldUidNext); err != nil {
+		return 0, 0, 0, err
+	}
 
 	m.parent.Opts.Log.Debugln("copyMessages: resolved target mailbox name to", destID)
 
@@ -806,11 +831,6 @@ func (m *Mailbox) copyMessages(tx *sql.Tx, seqset *imap.SeqSet, dest string) (fi
 		if _, err := tx.Stmt(m.parent.incrementRefUid).Exec(m.user.id, srcId, seq.Start, seq.Stop); err != nil {
 			return 0, 0, 0, err
 		}
-	}
-
-	var oldUidNext uint32
-	if err := tx.Stmt(m.parent.uidNext).QueryRow(destID).Scan(&oldUidNext); err != nil {
-		return 0, 0, 0, err
 	}
 
 	if _, err := tx.Stmt(m.parent.increaseMsgCount).Exec(totalCopied, totalCopied, destID); err != nil {

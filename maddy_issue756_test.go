@@ -10,8 +10,7 @@ import (
 )
 
 func TestFetchBodyStructureDefaultsEncodingTo7Bit(t *testing.T) {
-	b := initTestBackend().(*Backend)
-	defer cleanBackend(b)
+	b := setupTestBackend(t)
 
 	assert.NilError(t, b.CreateUser(t.Name()))
 	u, err := b.GetUser(t.Name())
@@ -38,8 +37,7 @@ func TestFetchBodyStructureDefaultsEncodingTo7Bit(t *testing.T) {
 }
 
 func TestFetchBodyStructureBackfillsEncodingForLegacyMessage(t *testing.T) {
-	b := initTestBackend().(*Backend)
-	defer cleanBackend(b)
+	b := setupTestBackend(t)
 
 	assert.NilError(t, b.CreateUser(t.Name()))
 	u, err := b.GetUser(t.Name())

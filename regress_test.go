@@ -34,8 +34,8 @@ func (c *collectorConn) SendUpdate(upd backend.Update) error {
 }
 
 func TestRecentIncorrectReset(t *testing.T) {
-	b := initTestBackend()
-	defer cleanBackend(b)
+	b := setupTestBackend(t)
+
 	assert.NilError(t, b.CreateUser(t.Name()))
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)
@@ -63,8 +63,8 @@ func TestRecentIncorrectReset(t *testing.T) {
 }
 
 func TestIssue7(t *testing.T) {
-	b := initTestBackend()
-	defer cleanBackend(b)
+	b := setupTestBackend(t)
+
 	assert.NilError(t, b.CreateUser(t.Name()))
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)
@@ -104,8 +104,8 @@ func TestIssue7(t *testing.T) {
 }
 
 func TestDuplicateSearchWithoutFlags(t *testing.T) {
-	b := initTestBackend()
-	defer cleanBackend(b)
+	b := setupTestBackend(t)
+
 	assert.NilError(t, b.CreateUser(t.Name()))
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)
@@ -132,8 +132,8 @@ func TestDuplicateSearchWithoutFlags(t *testing.T) {
 
 func TestHeaderInMultipleBodyFetch(t *testing.T) {
 	test := func(t *testing.T, fetchItems []imap.FetchItem) {
-		b := initTestBackend()
-		defer cleanBackend(b)
+		b := setupTestBackend(t)
+
 		assert.NilError(t, b.CreateUser(t.Name()))
 		usr, err := b.GetUser(t.Name())
 		assert.NilError(t, err)
@@ -172,8 +172,8 @@ func TestHeaderInMultipleBodyFetch(t *testing.T) {
 }
 
 func TestHeaderCacheReuse(t *testing.T) {
-	b := initTestBackend()
-	defer cleanBackend(b)
+	b := setupTestBackend(t)
+
 	assert.NilError(t, b.CreateUser(t.Name()))
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)
@@ -201,8 +201,8 @@ func TestHeaderCacheReuse(t *testing.T) {
 }
 
 func TestSearchEmptyFlags(t *testing.T) {
-	b := initTestBackend()
-	defer cleanBackend(b)
+	b := setupTestBackend(t)
+
 	assert.NilError(t, b.CreateUser(t.Name()))
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)
@@ -232,8 +232,8 @@ func TestSearchEmptyFlags(t *testing.T) {
 }
 
 func TestSearchMultipleWithoutFlags(t *testing.T) {
-	b := initTestBackend()
-	defer cleanBackend(b)
+	b := setupTestBackend(t)
+
 	assert.NilError(t, b.CreateUser(t.Name()))
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)

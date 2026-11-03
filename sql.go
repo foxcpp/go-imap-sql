@@ -392,7 +392,7 @@ func (b *Backend) prepareStmts() error {
 	b.clearRecent, err = b.db.Prepare(`
 		UPDATE msgs
 		SET recent = 0
-		WHERE mboxId = ?`)
+		WHERE mboxId = ? AND msgId <= ?`)
 	if err != nil {
 		return wrapErr(err, "clearRecent prep")
 	}
@@ -456,7 +456,7 @@ func (b *Backend) prepareStmts() error {
 			SELECT uidnext - 1
 			FROM mboxes
 			WHERE id = ?
-		) + row_number() OVER (ORDER BY msgId) + ?, date, bodyLen, 0 AS mark, bodyStructure, cachedHeader, extBodyKey, seen, compressAlgo, 0
+		) + row_number() OVER (ORDER BY msgId) + ?, date, bodyLen, 0 AS mark, bodyStructure, cachedHeader, extBodyKey, seen, compressAlgo, 1
 		FROM msgs
 		WHERE mboxId = ? AND msgId BETWEEN ? AND ? ORDER BY msgId`)
 	if err != nil {
@@ -587,8 +587,7 @@ func (b *Backend) prepareStmts() error {
         SELECT msgId, recent
         FROM msgs
         WHERE mboxId = ?
-		ORDER BY msgId
-		LIMIT 100000`)
+		ORDER BY msgId`)
 	if err != nil {
 		return wrapErr(err, "listMsgUidsRecent prep")
 	}

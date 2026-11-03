@@ -23,8 +23,8 @@ const malformedMIMEMessage = "From: sender@example.org\r\n" +
 const malformedTopLevelMessage = "not a MIME header\r\n\r\nraw message\r\n"
 
 func TestCreateMessageMalformedMIME(t *testing.T) {
-	b := initTestBackend().(*Backend)
-	defer cleanBackend(b)
+	b := setupTestBackend(t)
+
 	assert.NilError(t, b.CreateUser(t.Name()))
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)
@@ -85,8 +85,8 @@ func TestCreateMessageMalformedMIME(t *testing.T) {
 }
 
 func TestDeliveryMalformedMIME(t *testing.T) {
-	b := initTestBackend().(*Backend)
-	defer cleanBackend(b)
+	b := setupTestBackend(t)
+
 	assert.NilError(t, b.CreateUser(t.Name()))
 
 	delivery := b.NewDelivery()
@@ -112,8 +112,8 @@ func TestDeliveryMalformedMIME(t *testing.T) {
 }
 
 func TestCreateMessageMalformedTopLevelHeader(t *testing.T) {
-	b := initTestBackend()
-	defer cleanBackend(b)
+	b := setupTestBackend(t)
+
 	assert.NilError(t, b.CreateUser(t.Name()))
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)
@@ -147,8 +147,8 @@ func TestCreateMessageMalformedTopLevelHeader(t *testing.T) {
 }
 
 func TestMalformedMIMEMismatchedBodySelectors(t *testing.T) {
-	b := initTestBackend().(*Backend)
-	defer cleanBackend(b)
+	b := setupTestBackend(t)
+
 	assert.NilError(t, b.CreateUser(t.Name()))
 	usr, err := b.GetUser(t.Name())
 	assert.NilError(t, err)

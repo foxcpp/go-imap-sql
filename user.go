@@ -127,16 +127,18 @@ func (u *User) GetMailbox(name string, readOnly bool, conn backend.Conn) (*imap.
 		return nil, mbox, nil
 	}
 
-	// Do not initialize a selected handle between a delivery's database commit
-	// and its NewMessage notification; that would report the same UID twice.
 	mbox.conn = conn
-	uids, recent, status, err := mbox.initSelected(!readOnly)
-	if err != nil {
-		u.parent.logUserErr(u, err, "GetMailbox", name)
-		return nil, nil, wrapErrf(err, "GetMailbox %s", name)
+	var status *imap.MailboxStatus
+	initial := func() ([]uint32, *imap.SeqSet, error) {
+		uids, recent, s, err := mbox.initSelected(!readOnly)
+		status = s
+		return uids, recent, err
 	}
-
-	handle, err := u.parent.mngr.Mailbox(mbox.id, mbox, uids, recent)
+	refresh := func() ([]uint32, *imap.SeqSet, error) {
+		uids, recent, _, err := mbox.initSelected(!readOnly)
+		return uids, recent, err
+	}
+	handle, err := u.parent.mngr.MailboxWithSnapshot(mbox.id, mbox, initial, refresh)
 	if err != nil {
 		u.parent.logUserErr(u, err, "GetMailbox handle", name)
 		return nil, nil, wrapErrf(err, "GetMailbox %s (get handle)", name)

@@ -127,6 +127,8 @@ func (u *User) GetMailbox(name string, readOnly bool, conn backend.Conn) (*imap.
 		return nil, mbox, nil
 	}
 
+	// Do not initialize a selected handle between a delivery's database commit
+	// and its NewMessage notification; that would report the same UID twice.
 	mbox.conn = conn
 	uids, recent, status, err := mbox.initSelected(!readOnly)
 	if err != nil {

@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
+	"strings"
 	"time"
 
 	"github.com/emersion/go-imap"
@@ -24,10 +26,9 @@ var ErrDeliveryInterrupted = errors.New("sql: delivery transaction interrupted, 
 // Also use of this interface is more efficient than separate GetUser/GetMailbox/CreateMessage
 // calls.
 //
-// Note that for performance reasons, the DB is not locked while the Delivery object
-// exists, but only when BodyRaw/BodyParsed is called and until Abort/Commit is called.
-// This means that the recipient mailbox can be deleted between AddRcpt and Body* calls.
-// In that case, either Body* or Commit will return ErrDeliveryInterrupt.
+// Message bodies are staged until Commit. The recipient or mailbox can be
+// deleted or changed between AddRcpt, Body and Commit; in that case Commit
+// returns ErrDeliveryInterrupted.
 // Sender should retry delivery after a short delay.
 func (b *Backend) NewDelivery() Delivery {
 	return Delivery{b: b, perRcptHeader: map[string]textproto.Header{}}
@@ -36,21 +37,57 @@ func (b *Backend) NewDelivery() Delivery {
 func (d *Delivery) clean() {
 	d.users = d.users[0:0]
 	d.mboxes = d.mboxes[0:0]
-	d.extKey = ""
+	d.staged = nil
+	d.flagOverrides = nil
+	d.mboxOverrides = nil
+	d.pendingSpecial = nil
+	d.specialChecks = nil
+	d.createdMboxes = nil
+	d.bodyStarted = false
+	d.bodyErr = nil
+	d.commitFailed = false
 	for k := range d.perRcptHeader {
 		delete(d.perRcptHeader, k)
 	}
 }
 
 type Delivery struct {
-	b             *Backend
-	tx            *sql.Tx
-	users         []User
-	mboxes        []Mailbox
-	extKey        string
-	perRcptHeader map[string]textproto.Header
-	flagOverrides map[string][]string
-	mboxOverrides map[string]string
+	b *Backend
+
+	users  []User
+	mboxes []Mailbox
+
+	staged         []stagedMessage
+	perRcptHeader  map[string]textproto.Header
+	flagOverrides  map[string][]string
+	mboxOverrides  map[string]string
+	pendingSpecial map[uint64]string
+	specialChecks  map[uint64]deliverySpecialCheck
+	createdMboxes  map[deliveryMailboxKey]uint64
+	bodyStarted    bool
+	bodyErr        error
+	commitFailed   bool
+}
+
+type deliveryMailboxKey struct {
+	user uint64
+	name string
+}
+
+type deliverySpecialCheck struct {
+	attribute string
+	mailboxID uint64
+}
+
+type stagedMessage struct {
+	mbox         Mailbox
+	length       int64
+	bodyStruct   []byte
+	cachedHeader []byte
+	extKey       string
+	flags        []string
+	date         time.Time
+	msgID        uint32
 }
 
 // AddRcpt adds the recipient username/mailbox pair to the delivery.
@@ -58,10 +95,9 @@ type Delivery struct {
 // If this function returns an error - further calls will still work
 // correctly and there is no need to restart the delivery.
 //
-// The specified user account and mailbox should exist at the time AddRcpt
-// is called, but it can disappear before Body* call, in which case
-// Delivery will be terminated with ErrDeliveryInterrupted error.
-// See Backend.StartDelivery method documentation for details.
+// The specified user account should exist at the time AddRcpt is called. If
+// the account or its selected mailbox disappears before Commit, Commit returns
+// ErrDeliveryInterrupted.
 //
 // Fields from userHeader, if any, will be prepended to the message header
 // *only* for that recipient. Use this to add Received and Delivered-To
@@ -88,12 +124,12 @@ func (d *Delivery) AddRcpt(username string, userHeader textproto.Header) error {
 // Mailbox command changes the target mailbox for all recipients.
 // It should be called before BodyParsed/BodyRaw.
 //
-// If it is not called, it defaults to INBOX. If mailbox doesn't
-// exist for some users - it will created.
+// If it is not called, it defaults to INBOX. If the mailbox doesn't exist for
+// some users, it will be created during Commit.
 func (d *Delivery) Mailbox(name string) error {
-	if cap(d.mboxes) < len(d.users) {
-		d.mboxes = make([]Mailbox, 0, len(d.users))
-	}
+	d.mboxes = make([]Mailbox, 0, len(d.users))
+	d.pendingSpecial = nil
+	d.specialChecks = nil
 
 	for _, u := range d.users {
 		if mboxName := d.mboxOverrides[u.username]; mboxName != "" {
@@ -111,16 +147,8 @@ func (d *Delivery) Mailbox(name string) error {
 				return err
 			}
 
-			if err := u.CreateMailbox(name); err != nil && err != backend.ErrMailboxAlreadyExists {
-				d.mboxes = nil
-				return err
-			}
-
-			_, mbox, err = u.GetMailbox(name, true, nil)
-			if err != nil {
-				d.mboxes = nil
-				return err
-			}
+			d.mboxes = append(d.mboxes, Mailbox{user: u, name: name, parent: d.b})
+			continue
 		}
 
 		d.mboxes = append(d.mboxes, *mbox.(*Mailbox))
@@ -131,15 +159,20 @@ func (d *Delivery) Mailbox(name string) error {
 // SpecialMailbox is similar to Mailbox method but instead of looking up mailboxes
 // by name it looks it up by the SPECIAL-USE attribute.
 //
-// If no such mailbox exists for some user, it will be created with
-// fallbackName and requested SPECIAL-USE attribute set.
+// If no such mailbox exists for some user, it will be created during Commit
+// with fallbackName and the requested SPECIAL-USE attribute set.
 //
 // The main use-case of this function is to reroute messages into Junk directory
 // during multi-recipient delivery.
 func (d *Delivery) SpecialMailbox(attribute, fallbackName string) error {
-	if cap(d.mboxes) < len(d.users) {
-		d.mboxes = make([]Mailbox, 0, len(d.users))
+	switch attribute {
+	case imap.ArchiveAttr, imap.DraftsAttr, imap.JunkAttr, imap.SentAttr, imap.TrashAttr:
+	default:
+		return ErrUnsupportedSpecialAttr
 	}
+	d.mboxes = make([]Mailbox, 0, len(d.users))
+	d.pendingSpecial = make(map[uint64]string)
+	d.specialChecks = make(map[uint64]deliverySpecialCheck)
 	for _, u := range d.users {
 		if mboxName := d.mboxOverrides[u.username]; mboxName != "" {
 			_, mbox, err := u.GetMailbox(mboxName, true, nil)
@@ -157,21 +190,23 @@ func (d *Delivery) SpecialMailbox(attribute, fallbackName string) error {
 				d.mboxes = nil
 				return err
 			}
-
-			if err := u.CreateMailboxSpecial(fallbackName, attribute); err != nil && err != backend.ErrMailboxAlreadyExists {
-				d.mboxes = nil
-				return err
-			}
+			d.specialChecks[u.id] = deliverySpecialCheck{attribute: attribute}
 
 			_, mbox, err := u.GetMailbox(fallbackName, true, nil)
 			if err != nil {
-				d.mboxes = nil
-				return err
+				if err != backend.ErrNoSuchMailbox {
+					d.mboxes = nil
+					return err
+				}
+				d.mboxes = append(d.mboxes, Mailbox{user: u, name: fallbackName, parent: d.b})
+				d.pendingSpecial[u.id] = attribute
+				continue
 			}
 			d.mboxes = append(d.mboxes, *mbox.(*Mailbox))
 			continue
 		}
 
+		d.specialChecks[u.id] = deliverySpecialCheck{attribute: attribute, mailboxID: mboxId}
 		d.mboxes = append(d.mboxes, Mailbox{user: u, id: mboxId, name: mboxName, parent: d.b})
 	}
 	return nil
@@ -201,7 +236,12 @@ func (mb memoryBuffer) Open() (io.ReadCloser, error) {
 //
 // You want to use BodyParsed in most cases. It is much more efficient. BodyRaw reads the entire message
 // into memory.
-func (d *Delivery) BodyRaw(message io.Reader) error {
+func (d *Delivery) BodyRaw(message io.Reader) (err error) {
+	defer func() {
+		if err != nil {
+			d.bodyErr = err
+		}
+	}()
 	bufferedMsg := bufio.NewReader(message)
 	hdr, err := textproto.ReadHeader(bufferedMsg)
 	if err != nil {
@@ -221,7 +261,18 @@ type Buffer interface {
 	Open() (io.ReadCloser, error)
 }
 
-func (d *Delivery) BodyParsed(header textproto.Header, bodyLen int, body Buffer) error {
+func (d *Delivery) BodyParsed(header textproto.Header, bodyLen int, body Buffer) (err error) {
+	if d.bodyStarted || d.bodyErr != nil {
+		err := errors.New("delivery: body already provided or failed")
+		d.bodyErr = err
+		return err
+	}
+	d.bodyStarted = true
+	defer func() {
+		if err != nil {
+			d.bodyErr = err
+		}
+	}()
 	if len(d.mboxes) == 0 {
 		if err := d.Mailbox("INBOX"); err != nil {
 			return err
@@ -240,25 +291,8 @@ func (d *Delivery) BodyParsed(header textproto.Header, bodyLen int, body Buffer)
 		}
 	}
 
-	date := time.Now()
-
-	var err error
-	d.tx, err = d.b.db.BeginLevel(sql.LevelReadCommitted, false)
-	if err != nil {
-		return wrapErr(err, "Body")
-	}
-
 	for _, mbox := range d.mboxes {
-		var flagsStmt *sql.Stmt
-		if len(d.flagOverrides[mbox.user.username]) != 0 {
-			flagsStmt, err = d.b.getFlagsAddStmt(len(d.flagOverrides[mbox.user.username]))
-			if err != nil {
-				return wrapErr(err, "Body")
-			}
-		}
-
-		err = d.mboxDelivery(header, mbox, int64(bodyLen), body, date, flagsStmt)
-		if err != nil {
+		if err := d.stageMailbox(header, mbox, int64(bodyLen), body); err != nil {
 			return err
 		}
 	}
@@ -266,7 +300,7 @@ func (d *Delivery) BodyParsed(header textproto.Header, bodyLen int, body Buffer)
 	return nil
 }
 
-func (d *Delivery) mboxDelivery(header textproto.Header, mbox Mailbox, bodyLen int64, body Buffer, date time.Time, flagsStmt *sql.Stmt) (err error) {
+func (d *Delivery) stageMailbox(header textproto.Header, mbox Mailbox, bodyLen int64, body Buffer) error {
 	header = header.Copy()
 	userHeader := d.perRcptHeader[mbox.user.username]
 	for fields := userHeader.Fields(); fields.Next(); {
@@ -283,61 +317,146 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox Mailbox, bodyLen i
 	if err != nil {
 		return err
 	}
+	defer bodyReader.Close()
 
 	bodyStruct, cachedHeader, extBodyKey, err := d.b.processParsedBody(headerBlob.Bytes(), header, bodyReader, bodyLen)
 	if err != nil {
+		if extBodyKey != "" {
+			d.staged = append(d.staged, stagedMessage{extKey: extBodyKey})
+		}
 		return err
 	}
 
-	if _, err = d.tx.Stmt(d.b.addExtKey).Exec(extBodyKey, mbox.user.id, 1); err != nil {
-		d.b.extStore.Delete([]string{extBodyKey})
-		return wrapErr(err, "Body (addExtKey)")
-	}
+	d.staged = append(d.staged, stagedMessage{
+		mbox:         mbox,
+		length:       length,
+		bodyStruct:   bodyStruct,
+		cachedHeader: cachedHeader,
+		extKey:       extBodyKey,
+		flags:        append([]string(nil), d.flagOverrides[mbox.user.username]...),
+		date:         time.Now(),
+	})
+	return nil
+}
+
+func (d *Delivery) commitMailbox(tx *sql.Tx, msg *stagedMessage) error {
+	mbox := &msg.mbox
 
 	// Note that we are extremely careful here with ordering to
 	// decrease change of deadlocks as a result of transaction
 	// serialization.
 
 	// --- operations that involve mboxes table ---
-	msgId, err := mbox.incrementMsgCounters(d.tx)
-	if err != nil {
-		d.b.extStore.Delete([]string{extBodyKey})
-		return wrapErr(err, "Body (incrementMsgCounters)")
+
+	// Referred special mailbox lookup, if mailbox moved or renamed - interrupt delivery.
+	var id uint64
+	if check, ok := d.specialChecks[mbox.user.id]; ok {
+		var currentID uint64
+		err := tx.Stmt(d.b.specialUseMbox).QueryRow(mbox.user.id, check.attribute).Scan(new(string), &currentID)
+		if err != nil && err != sql.ErrNoRows {
+			return wrapErrf(err, "Commit (validate special mailbox)")
+		}
+		if currentID != check.mailboxID {
+			return ErrDeliveryInterrupted
+		}
 	}
 
-	// --- operations that involve msgs table ---
-	persistRecent := 0
-	if mbox.parent.mngr.NewMessage(mbox.id, msgId) {
-		persistRecent = 1
+	if mbox.id == 0 {
+		key := deliveryMailboxKey{user: mbox.user.id, name: mbox.name}
+		if id := d.createdMboxes[key]; id != 0 {
+			mbox.id = id
+		} else {
+			err := tx.QueryRow(d.b.db.rewriteSQL(`SELECT id FROM users WHERE id = ? AND username = ?`), mbox.user.id, mbox.user.username).Scan(&id)
+			if err == sql.ErrNoRows {
+				return ErrDeliveryInterrupted
+			}
+			if err != nil {
+				return wrapErr(err, "Commit (validate user)")
+			}
+			if err := mbox.user.createParentDirs(tx, mbox.name); err != nil {
+				return wrapErr(err, "Commit (create parent mailboxes)")
+			}
+			var special interface{}
+			if attr := d.pendingSpecial[mbox.user.id]; attr != "" {
+				special = attr
+			}
+			if _, err := tx.Stmt(d.b.createMbox).Exec(mbox.user.id, mbox.name, d.b.prng.Uint32(), special); err != nil {
+				if isForeignKeyErr(err) {
+					return ErrDeliveryInterrupted
+				}
+				return wrapErrf(err, "Commit (create mailbox)")
+			}
+			if err := tx.Stmt(d.b.mboxId).QueryRow(mbox.user.id, mbox.name).Scan(&mbox.id); err != nil {
+				return wrapErr(err, "Commit (get mailbox)")
+			}
+			if d.createdMboxes == nil {
+				d.createdMboxes = make(map[deliveryMailboxKey]uint64)
+			}
+			d.createdMboxes[key] = mbox.id
+			if check, ok := d.specialChecks[mbox.user.id]; ok && d.pendingSpecial[mbox.user.id] != "" {
+				check.mailboxID = mbox.id
+				d.specialChecks[mbox.user.id] = check
+			}
+		}
 	}
+
+	// Check that the target mailbox haven't been moved, renamed or deleted.
+	name := mbox.name
+	if strings.EqualFold(name, imap.InboxName) {
+		name = imap.InboxName
+	}
+	err := tx.QueryRow(
+		d.b.db.rewriteSQL(`SELECT id FROM mboxes WHERE id = ? AND uid = ? AND name = ?`),
+		mbox.id, mbox.user.id, name,
+	).Scan(&id)
+	if err == sql.ErrNoRows {
+		return ErrDeliveryInterrupted
+	}
+	if err != nil {
+		return wrapErrf(err, "Commit (validate mailbox)")
+	}
+	if _, err = tx.Stmt(d.b.addExtKey).Exec(msg.extKey, mbox.user.id, 1); err != nil {
+		return wrapErrf(err, "Commit (addExtKey)")
+	}
+
+	msgId, err := mbox.incrementMsgCounters(tx)
+	if err != nil {
+		return wrapErrf(err, "Commit (incrementMsgCounters)")
+	}
+	msg.msgID = msgId
+
+	// --- end of operations that involve mboxes table ---
+
+	// --- operations that involve msgs table ---
 	haveSeen := 0
-	for _, flag := range d.flagOverrides[mbox.user.username] {
+	for _, flag := range msg.flags {
 		if flag == imap.SeenFlag {
 			haveSeen = 1
 			break
 		}
 	}
 
-	_, err = d.tx.Stmt(d.b.addMsg).Exec(
-		mbox.id, msgId, date.Unix(),
-		length,
-		bodyStruct, cachedHeader, extBodyKey,
-		haveSeen, d.b.Opts.CompressAlgo, persistRecent,
+	_, err = tx.Stmt(d.b.addMsg).Exec(
+		mbox.id, msgId, msg.date.Unix(),
+		msg.length,
+		msg.bodyStruct, msg.cachedHeader, msg.extKey,
+		haveSeen, d.b.Opts.CompressAlgo, 1,
 	)
 	if err != nil {
-		d.b.extStore.Delete([]string{extBodyKey})
-		return wrapErr(err, "Body (addMsg)")
+		return wrapErrf(err, "Commit (addMsg)")
 	}
 	// --- end of operations that involve msgs table ---
 
 	// --- operations that involve flags table ---
-	flags := d.flagOverrides[mbox.user.username]
+	flags := msg.flags
 	if len(flags) != 0 {
-
+		flagsStmt, err := d.b.getFlagsAddStmt(len(flags))
+		if err != nil {
+			return wrapErrf(err, "Commit (flagsStmt)")
+		}
 		params := mbox.makeFlagsAddStmtArgs(flags, msgId, msgId)
-		if _, err := d.tx.Stmt(flagsStmt).Exec(params...); err != nil {
-			d.b.extStore.Delete([]string{extBodyKey})
-			return wrapErr(err, "Body (flagsStmt)")
+		if _, err := tx.Stmt(flagsStmt).Exec(params...); err != nil {
+			return wrapErr(err, "Commit (flagsStmt)")
 		}
 	}
 	// --- end operations that involve flags table ---
@@ -346,13 +465,24 @@ func (d *Delivery) mboxDelivery(header textproto.Header, mbox Mailbox, bodyLen i
 }
 
 func (d *Delivery) Abort() error {
-	if d.tx != nil {
-		if err := d.tx.Rollback(); err != nil {
-			return err
+	if len(d.staged) != 0 {
+		keys := make([]string, 0, len(d.staged))
+		for _, msg := range d.staged {
+			if d.commitFailed {
+				// COMMIT for PostgreSQL can fail on network error. Don't remove extKeys
+				// that are actually referenced in the DB.
+				var count int
+				if err := d.b.db.QueryRow(`SELECT COUNT(*) FROM extKeys WHERE id = ?`, msg.extKey).Scan(&count); err != nil {
+					d.b.Opts.Log.Println("check commited extKeys error:", err)
+					continue
+				}
+				if count != 0 {
+					continue
+				}
+			}
+			keys = append(keys, msg.extKey)
 		}
-	}
-	if d.extKey != "" {
-		if err := d.b.extStore.Delete([]string{d.extKey}); err != nil {
+		if err := d.b.extStore.Delete(keys); err != nil {
 			return err
 		}
 	}
@@ -369,9 +499,54 @@ func (d *Delivery) Abort() error {
 // After Commit or Abort is called, Delivery object can be reused as if it was
 // just created.
 func (d *Delivery) Commit() error {
-	if d.tx != nil {
-		if err := d.tx.Commit(); err != nil {
+	if d.bodyErr != nil {
+		err := d.bodyErr
+		if abortErr := d.Abort(); abortErr != nil {
+			return fmt.Errorf("%v; abort: %w", err, abortErr)
+		}
+		return err
+	}
+	if len(d.staged) == 0 {
+		d.clean()
+		return nil
+	}
+
+	tx, err := d.b.db.BeginLevel(sql.LevelReadCommitted, false)
+	if err != nil {
+		if abortErr := d.Abort(); abortErr != nil {
+			return fmt.Errorf("%v; abort: %w", err, abortErr)
+		}
+		return wrapErrf(err, "Commit (begin)")
+	}
+
+	defer func(tx *sql.Tx) {
+		err := tx.Rollback()
+		if err != nil {
+			d.b.Opts.Log.Println("delivery.Commit tx.Rollback:", err)
+		}
+	}(tx)
+
+	for i := range d.staged {
+		if err := d.commitMailbox(tx, &d.staged[i]); err != nil {
+			if abortErr := d.Abort(); abortErr != nil {
+				return fmt.Errorf("%v; abort: %w", err, abortErr)
+			}
 			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		d.commitFailed = true
+		if abortErr := d.Abort(); abortErr != nil {
+			return fmt.Errorf("%v; abort: %w", err, abortErr)
+		}
+		return wrapErrf(err, "Commit")
+	}
+
+	for _, msg := range d.staged {
+		if !d.b.mngr.NewMessage(msg.mbox.id, msg.msgID) {
+			if _, err := d.b.db.Exec(`UPDATE msgs SET recent = 0 WHERE mboxId = ? AND msgId = ?`, msg.mbox.id, msg.msgID); err != nil {
+				d.b.Opts.Log.Printf("delivery: failed to clear recent flag: %v", err)
+			}
 		}
 	}
 
@@ -384,6 +559,15 @@ func (b *Backend) processParsedBody(headerInput []byte, header textproto.Header,
 	if err != nil {
 		return nil, nil, "", err
 	}
+	key := extBodyKey
+	defer func() {
+		if err != nil {
+			if cleanupErr := b.extStore.Delete([]string{key}); cleanupErr != nil {
+				extBodyKey = key
+				err = fmt.Errorf("%v; delete staged body: %w", err, cleanupErr)
+			}
+		}
+	}()
 
 	objSize := int64(len(headerInput)) + bodyLen
 	if b.Opts.CompressAlgo != "" {
@@ -394,23 +578,33 @@ func (b *Backend) processParsedBody(headerInput []byte, header textproto.Header,
 	if err != nil {
 		return nil, nil, "", err
 	}
-	defer extWriter.Close()
+	defer func() {
+		if extWriter != nil {
+			if closeErr := extWriter.Close(); err == nil && closeErr != nil {
+				err = closeErr
+			}
+		}
+	}()
 
 	compressW, err := b.compressAlgo.WrapCompress(extWriter, b.Opts.CompressAlgoParams)
 	if err != nil {
 		return nil, nil, "", err
 	}
-	defer compressW.Close()
+	defer func() {
+		if compressW != nil {
+			if closeErr := compressW.Close(); err == nil && closeErr != nil {
+				err = closeErr
+			}
+		}
+	}()
 
 	if _, err := compressW.Write(headerInput); err != nil {
-		b.extStore.Delete([]string{extBodyKey})
 		return nil, nil, "", err
 	}
 
 	bufferedBody := bufio.NewReader(io.TeeReader(bodyLiteral, compressW))
 	bodyStruct, cachedHeader, _, err = extractCachedData(header, bufferedBody)
 	if err != nil {
-		b.extStore.Delete([]string{extBodyKey})
 		return nil, nil, "", err
 	}
 
@@ -418,13 +612,22 @@ func (b *Backend) processParsedBody(headerInput []byte, header textproto.Header,
 	// copy everything to extWriter.
 	_, err = io.Copy(ioutil.Discard, bufferedBody)
 	if err != nil {
-		b.extStore.Delete([]string{extBodyKey})
 		return nil, nil, "", err
 	}
 
+	if err := compressW.Close(); err != nil {
+		compressW = nil
+		return nil, nil, "", err
+	}
+	compressW = nil
 	if err := extWriter.Sync(); err != nil {
 		return nil, nil, "", err
 	}
+	if err := extWriter.Close(); err != nil {
+		extWriter = nil
+		return nil, nil, "", err
+	}
+	extWriter = nil
 
 	return
 }

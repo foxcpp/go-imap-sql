@@ -10,7 +10,7 @@ require (
 	github.com/foxcpp/go-imap-mess v0.0.0-20261103192234-6bb314614a44
 	github.com/foxcpp/go-imap-namespace v0.0.0-20200802091432-08496dd8e0ed
 	github.com/go-sql-driver/mysql v1.7.1
-	github.com/klauspost/compress v1.18.6
+	github.com/klauspost/compress v1.18.7
 	github.com/lib/pq v1.10.9
 	github.com/mailru/easyjson v0.7.7
 	github.com/mattn/go-sqlite3 v1.14.19

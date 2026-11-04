@@ -108,13 +108,13 @@ type scanData struct {
 	parsedHeader  *textproto.Header
 }
 
-func makeScanArgs(data *scanData, rows *sql.Rows) ([]interface{}, error) {
+func makeScanArgs(data *scanData, rows *sql.Rows) ([]any, error) {
 	cols, err := rows.Columns()
 	if err != nil {
 		return nil, err
 	}
 
-	scanOrder := make([]interface{}, 0, len(cols))
+	scanOrder := make([]any, 0, len(cols))
 	for _, col := range cols {
 		// PostgreSQL case-folds column names to lower-case.
 		switch col {
@@ -311,10 +311,7 @@ func (m *Mailbox) extractMalformedBodyPart(sect *imap.BodySectionName, data *sca
 		return nil
 	}
 
-	length := int64(data.bodyLen) - int64(len(header))
-	if length < 0 {
-		length = 0
-	}
+	length := max(int64(data.bodyLen)-int64(len(header)), 0)
 	if sect.Partial != nil {
 		offset, size := int64(sect.Partial[0]), int64(sect.Partial[1])
 		if _, err := io.CopyN(ioutil.Discard, body.Reader, offset); err != nil && err != io.EOF {

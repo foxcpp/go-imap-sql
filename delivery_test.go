@@ -2,7 +2,8 @@ package imapsql
 
 import (
 	"bufio"
-	"io/ioutil"
+	"io"
+
 	"strings"
 	"testing"
 
@@ -43,7 +44,7 @@ func checkTestMsg(t *testing.T, msg *imap.Message) {
 	}
 
 	for key, literal := range msg.Body {
-		blob, err := ioutil.ReadAll(literal)
+		blob, err := io.ReadAll(literal)
 		assert.NilError(t, err, "ReadAll literal")
 		switch fetchItem := key.FetchItem(); fetchItem {
 		case "BODY.PEEK[]":

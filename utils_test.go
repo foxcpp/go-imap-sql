@@ -36,19 +36,19 @@ type testLogger struct {
 	t *testing.T
 }
 
-func (t testLogger) Printf(format string, v ...interface{}) {
+func (t testLogger) Printf(format string, v ...any) {
 	t.t.Logf(format, v...)
 }
 
-func (t testLogger) Println(v ...interface{}) {
+func (t testLogger) Println(v ...any) {
 	t.t.Log(v...)
 }
 
-func (t testLogger) Debugf(format string, v ...interface{}) {
+func (t testLogger) Debugf(format string, v ...any) {
 	t.t.Logf(format, v...)
 }
 
-func (t testLogger) Debugln(v ...interface{}) {
+func (t testLogger) Debugln(v ...any) {
 	t.t.Log(v...)
 }
 

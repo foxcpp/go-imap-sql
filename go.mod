@@ -1,28 +1,29 @@
 module github.com/foxcpp/go-imap-sql
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/emersion/go-imap v1.2.2-0.20220928192137-6fac715be9cf
 	github.com/emersion/go-imap-sortthread v1.2.0
-	github.com/emersion/go-message v0.18.0
+	github.com/emersion/go-message v0.18.2
 	github.com/foxcpp/go-imap-backend-tests v0.0.0-20220105184719-e80aa29a5e16
 	github.com/foxcpp/go-imap-mess v0.0.0-20261103192234-6bb314614a44
 	github.com/foxcpp/go-imap-namespace v0.0.0-20200802091432-08496dd8e0ed
-	github.com/go-sql-driver/mysql v1.7.1
-	github.com/klauspost/compress v1.18.6
-	github.com/lib/pq v1.10.9
-	github.com/mailru/easyjson v0.7.7
-	github.com/mattn/go-sqlite3 v1.14.19
+	github.com/go-sql-driver/mysql v1.10.1
+	github.com/klauspost/compress v1.20.3
+	github.com/lib/pq v1.12.3
+	github.com/mailru/easyjson v0.9.2
+	github.com/mattn/go-sqlite3 v1.14.52
 	github.com/pierrec/lz4 v2.6.1+incompatible
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0
-	github.com/urfave/cli v1.22.14
+	github.com/urfave/cli v1.22.17
 	gotest.tools v2.2.0+incompatible
 )
 
 require (
 	dario.cat/mergo v1.0.2 // indirect
+	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
@@ -32,13 +33,13 @@ require (
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/containerd/platforms v0.2.1 // indirect
 	github.com/cpuguy83/dockercfg v0.3.2 // indirect
-	github.com/cpuguy83/go-md2man/v2 v2.0.3 // indirect
+	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/go-connections v0.7.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/ebitengine/purego v0.10.1 // indirect
-	github.com/emersion/go-sasl v0.0.0-20231106173351-e73c9f7bad43 // indirect
+	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6 // indirect
 	github.com/emersion/go-textwrapper v0.0.0-20200911093747-65d896831594 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/frankban/quicktest v1.5.0 // indirect
@@ -78,7 +79,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 

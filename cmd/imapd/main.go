@@ -17,20 +17,20 @@ import (
 
 type stdLogger struct{}
 
-func (s stdLogger) Printf(format string, v ...interface{}) {
+func (s stdLogger) Printf(format string, v ...any) {
 	log.Printf(format, v...)
 }
 
-func (s stdLogger) Println(v ...interface{}) {
+func (s stdLogger) Println(v ...any) {
 	log.Println(v...)
 }
 
-func (s stdLogger) Debugf(format string, v ...interface{}) {
+func (s stdLogger) Debugf(format string, v ...any) {
 	log.Printf("debug: "+format, v...)
 }
 
-func (s stdLogger) Debugln(v ...interface{}) {
-	v = append([]interface{}{"debug:"}, v...)
+func (s stdLogger) Debugln(v ...any) {
+	v = append([]any{"debug:"}, v...)
 	log.Println(v...)
 }
 

@@ -19,15 +19,15 @@ func (d db) Prepare(req string) (*sql.Stmt, error) {
 	return d.DB.Prepare(d.rewriteSQL(req))
 }
 
-func (d db) Query(req string, args ...interface{}) (*sql.Rows, error) {
+func (d db) Query(req string, args ...any) (*sql.Rows, error) {
 	return d.DB.Query(d.rewriteSQL(req), args...)
 }
 
-func (d db) QueryRow(req string, args ...interface{}) *sql.Row {
+func (d db) QueryRow(req string, args ...any) *sql.Row {
 	return d.DB.QueryRow(d.rewriteSQL(req), args...)
 }
 
-func (d db) Exec(req string, args ...interface{}) (sql.Result, error) {
+func (d db) Exec(req string, args ...any) (sql.Result, error) {
 	return d.DB.Exec(d.rewriteSQL(req), args...)
 }
 
@@ -135,7 +135,7 @@ func (db db) valuesSubquery(flagsCount int) string {
 		return sqlList
 	}
 
-	for i := 0; i < flagsCount; i++ {
+	for i := range flagsCount {
 		if db.driver == "postgres" {
 			sqlList += "(?::text)" // query rewriter will make it into $N::text.
 			// This is a workaround for CockroachDB's https://github.com/cockroachdb/cockroach/issues/41558

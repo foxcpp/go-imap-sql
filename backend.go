@@ -45,10 +45,10 @@ type Rand interface {
 }
 
 type Logger interface {
-	Printf(format string, v ...interface{})
-	Println(v ...interface{})
-	Debugf(format string, v ...interface{})
-	Debugln(v ...interface{})
+	Printf(format string, v ...any)
+	Println(v ...any)
+	Debugf(format string, v ...any)
+	Debugln(v ...any)
 }
 
 // Opts structure specifies additional settings that may be set
@@ -566,6 +566,62 @@ func (b *Backend) Login(_ *imap.ConnInfo, username, password string) (backend.Us
 	}
 	b.Opts.Log.Debugln(username, "logged in")
 	return u, nil
+}
+
+func (b *Backend) createUserMessageLimit(tx *sql.Tx, userId uint64) *uint32 {
+	var res sql.NullInt64
+	var row *sql.Row
+	if tx == nil {
+		row = b.userMsgSizeLimit.QueryRow(userId)
+	} else {
+		row = tx.Stmt(b.userMsgSizeLimit).QueryRow(userId)
+	}
+	if err := row.Scan(&res); err != nil {
+		// Oops!
+		return new(uint32)
+	}
+
+	if !res.Valid {
+		return nil
+	}
+
+	val := uint32(res.Int64)
+	return &val
+}
+
+func (b *Backend) createMboxMessageLimit(tx *sql.Tx, mboxId uint64) *uint32 {
+	var res sql.NullInt64
+	var row *sql.Row
+	if tx == nil {
+		row = b.mboxMsgSizeLimit.QueryRow(mboxId)
+	} else {
+		row = tx.Stmt(b.mboxMsgSizeLimit).QueryRow(mboxId)
+	}
+	if err := row.Scan(&res); err != nil {
+		return new(uint32) // 0
+	}
+
+	if !res.Valid {
+		return nil
+	}
+
+	val := uint32(res.Int64)
+	return &val
+}
+
+// effectiveMessageLimit returns the message size limit that applies to the
+// mailbox, or nil if there is no limit.
+//
+// Mailbox limit takes precedence over user limit, which takes precedence over
+// backend-wide limit.
+func (b *Backend) effectiveMessageLimit(tx *sql.Tx, userId, mboxId uint64) *uint32 {
+	if lim := b.createMboxMessageLimit(tx, mboxId); lim != nil {
+		return lim
+	}
+	if lim := b.createUserMessageLimit(tx, userId); lim != nil {
+		return lim
+	}
+	return b.Opts.MaxMsgBytes
 }
 
 func (b *Backend) CreateMessageLimit() *uint32 {

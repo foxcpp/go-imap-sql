@@ -352,14 +352,14 @@ func (u *User) Logout() error {
 
 func (u *User) createParentDirs(tx *sql.Tx, name string) error {
 	parts := strings.Split(name, MailboxPathSep)
-	curDir := ""
+	var curDir strings.Builder
 	for i, part := range parts[:len(parts)-1] {
 		if i != 0 {
-			curDir += MailboxPathSep
+			curDir.WriteString(MailboxPathSep)
 		}
-		curDir += part
+		curDir.WriteString(part)
 
-		if _, err := tx.Stmt(u.parent.createMboxExistsOk).Exec(u.id, curDir, u.parent.prng.Uint32()); err != nil {
+		if _, err := tx.Stmt(u.parent.createMboxExistsOk).Exec(u.id, curDir.String(), u.parent.prng.Uint32()); err != nil {
 			return err
 		}
 	}

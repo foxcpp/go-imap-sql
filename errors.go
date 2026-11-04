@@ -1,4 +1,5 @@
-//+build cgo,!nosqlite3
+//go:build cgo && !nosqlite3
+// +build cgo,!nosqlite3
 
 package imapsql
 
@@ -28,7 +29,7 @@ func wrapErr(err error, desc string) error {
 	return fmt.Errorf(desc+": %w", err)
 }
 
-func wrapErrf(err error, format string, args ...interface{}) error {
+func wrapErrf(err error, format string, args ...any) error {
 	if err == nil {
 		return nil
 	}

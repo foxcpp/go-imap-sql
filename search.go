@@ -2,6 +2,7 @@ package imapsql
 
 import (
 	"database/sql"
+	"slices"
 	"strings"
 	"time"
 
@@ -128,10 +129,8 @@ func searchNeedsBody(criteria *imap.SearchCriteria) bool {
 		return true
 	}
 
-	for _, crit := range criteria.Not {
-		if searchNeedsBody(crit) {
-			return true
-		}
+	if slices.ContainsFunc(criteria.Not, searchNeedsBody) {
+		return true
 	}
 	for _, crit := range criteria.Or {
 		if searchNeedsBody(crit[0]) || searchNeedsBody(crit[1]) {

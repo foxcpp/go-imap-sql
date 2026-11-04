@@ -7,30 +7,30 @@ import (
 
 type globalLogger struct{}
 
-func (globalLogger) Printf(format string, v ...interface{}) {
+func (globalLogger) Printf(format string, v ...any) {
 	log.Printf(format, v...)
 }
 
-func (globalLogger) Println(v ...interface{}) {
+func (globalLogger) Println(v ...any) {
 	log.Println(v...)
 }
 
-func (globalLogger) Debugf(format string, v ...interface{}) {
+func (globalLogger) Debugf(format string, v ...any) {
 	log.Printf(format, v...)
 }
 
-func (globalLogger) Debugln(v ...interface{}) {
+func (globalLogger) Debugln(v ...any) {
 	log.Println(v...)
 }
 
 type DummyLogger struct{}
 
-func (DummyLogger) Printf(format string, v ...interface{}) {}
-func (DummyLogger) Println(v ...interface{})               {}
-func (DummyLogger) Debugf(format string, v ...interface{}) {}
-func (DummyLogger) Debugln(v ...interface{})               {}
+func (DummyLogger) Printf(format string, v ...any) {}
+func (DummyLogger) Println(v ...any)               {}
+func (DummyLogger) Debugf(format string, v ...any) {}
+func (DummyLogger) Debugln(v ...any)               {}
 
-func (b *Backend) logUserErr(u *User, err error, when string, args ...interface{}) {
+func (b *Backend) logUserErr(u *User, err error, when string, args ...any) {
 	if err == nil {
 		return
 	}
@@ -38,7 +38,7 @@ func (b *Backend) logUserErr(u *User, err error, when string, args ...interface{
 		when, args, err, strconv.Quote(u.username), u.id)
 }
 
-func (b *Backend) logMboxErr(m *Mailbox, err error, when string, args ...interface{}) {
+func (b *Backend) logMboxErr(m *Mailbox, err error, when string, args ...any) {
 	if err == nil {
 		return
 	}

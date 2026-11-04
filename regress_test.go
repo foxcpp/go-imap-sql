@@ -1,7 +1,8 @@
 package imapsql
 
 import (
-	"io/ioutil"
+	"io"
+
 	"path/filepath"
 	"strings"
 	"testing"
@@ -41,7 +42,7 @@ func TestRecentIncorrectReset(t *testing.T) {
 	assert.NilError(t, err)
 	assert.NilError(t, usr.CreateMailbox(t.Name()))
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		assert.NilError(t, usr.CreateMessage(t.Name(), []string{"flag1", "flag2"}, time.Now(), strings.NewReader(testMsg), nil))
 	}
 
@@ -71,7 +72,7 @@ func TestIssue7(t *testing.T) {
 	assert.NilError(t, usr.CreateMailbox(t.Name()))
 	_, mbox, err := usr.GetMailbox(t.Name(), true, &noopConn{})
 	assert.NilError(t, err)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{"flag1", "flag2"}, time.Now(), strings.NewReader(testMsg), nil))
 	}
 
@@ -112,7 +113,7 @@ func TestDuplicateSearchWithoutFlags(t *testing.T) {
 	assert.NilError(t, usr.CreateMailbox(t.Name()))
 	_, mbox, err := usr.GetMailbox(t.Name(), true, &noopConn{})
 	assert.NilError(t, err)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{"flag1", "flag2"}, time.Now(), strings.NewReader(testMsg), mbox))
 	}
 	assert.NilError(t, mbox.Poll(true))
@@ -140,7 +141,7 @@ func TestHeaderInMultipleBodyFetch(t *testing.T) {
 		assert.NilError(t, usr.CreateMailbox(t.Name()))
 		_, mbox, err := usr.GetMailbox(t.Name(), true, &noopConn{})
 		assert.NilError(t, err)
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{}, time.Now(), strings.NewReader(testMsg), nil))
 		}
 		assert.NilError(t, mbox.Poll(true))
@@ -152,7 +153,7 @@ func TestHeaderInMultipleBodyFetch(t *testing.T) {
 		msg := <-ch
 
 		for name, literal := range msg.Body {
-			blob, err := ioutil.ReadAll(literal)
+			blob, err := io.ReadAll(literal)
 			assert.NilError(t, err, "ReadAll literal")
 			switch name.FetchItem() {
 			case "BODY.PEEK[HEADER]":
@@ -209,7 +210,7 @@ func TestSearchEmptyFlags(t *testing.T) {
 	assert.NilError(t, usr.CreateMailbox(t.Name()))
 	_, mbox, err := usr.GetMailbox(t.Name(), true, &noopConn{})
 	assert.NilError(t, err)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		assert.NilError(t, usr.CreateMessage(mbox.Name(), []string{}, time.Now(), strings.NewReader(testMsg), mbox))
 	}
 

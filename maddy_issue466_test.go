@@ -1,7 +1,7 @@
 package imapsql
 
 import (
-	"io/ioutil"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -61,19 +61,19 @@ func TestCreateMessageMalformedMIME(t *testing.T) {
 	for section, literal := range msg.Body {
 		switch section.FetchItem() {
 		case "BODY.PEEK[]":
-			body, err = ioutil.ReadAll(literal)
+			body, err = io.ReadAll(literal)
 			assert.NilError(t, err)
 		case "BODY.PEEK[HEADER]":
-			header, err = ioutil.ReadAll(literal)
+			header, err = io.ReadAll(literal)
 			assert.NilError(t, err)
 		case "BODY.PEEK[TEXT]":
-			text, err = ioutil.ReadAll(literal)
+			text, err = io.ReadAll(literal)
 			assert.NilError(t, err)
 		case "BODY.PEEK[1]":
-			part, err = ioutil.ReadAll(literal)
+			part, err = io.ReadAll(literal)
 			assert.NilError(t, err)
 		case "BODY.PEEK[1]<2.5>":
-			partial, err = ioutil.ReadAll(literal)
+			partial, err = io.ReadAll(literal)
 			assert.NilError(t, err)
 		}
 	}
@@ -140,7 +140,7 @@ func TestCreateMessageMalformedTopLevelHeader(t *testing.T) {
 		if section.FetchItem() != "BODY.PEEK[]" {
 			continue
 		}
-		body, err := ioutil.ReadAll(literal)
+		body, err := io.ReadAll(literal)
 		assert.NilError(t, err)
 		assert.Equal(t, string(body), malformedTopLevelMessage)
 	}
@@ -172,7 +172,7 @@ func TestMalformedMIMEMismatchedBodySelectors(t *testing.T) {
 	msg := <-ch
 	assert.Assert(t, msg != nil)
 	for section, literal := range msg.Body {
-		body, err := ioutil.ReadAll(literal)
+		body, err := io.ReadAll(literal)
 		assert.NilError(t, err)
 		assert.Equal(t, len(body), 0, section.FetchItem())
 	}

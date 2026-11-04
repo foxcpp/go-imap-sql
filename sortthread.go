@@ -42,10 +42,7 @@ func (m *Mailbox) Sort(uid bool, sortCrit []sortthread.SortCriterion, searchCrit
 
 	// XXX: Split SearchMessages to allow it running in the same transaction.
 
-	resultCount := len(msgs)
-	if resultCount > 1000 {
-		resultCount = 1000
-	}
+	resultCount := min(len(msgs), 1000)
 	sortBuffer := make([]*msgKey, 0, resultCount)
 
 	_, err = m.headerMetaScan(nil, &seqSet, func(k *msgKey) error {

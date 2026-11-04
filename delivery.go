@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
+	"slices"
 	"strings"
 	"time"
 
@@ -238,7 +238,7 @@ type memoryBuffer struct {
 }
 
 func (mb memoryBuffer) Open() (io.ReadCloser, error) {
-	return ioutil.NopCloser(bytes.NewReader(mb.slice)), nil
+	return io.NopCloser(bytes.NewReader(mb.slice)), nil
 }
 
 // BodyRaw is convenience wrapper for BodyParsed. Use it only for most simple cases (e.g. for tests).
@@ -257,7 +257,7 @@ func (d *Delivery) BodyRaw(message io.Reader) (err error) {
 		return err
 	}
 
-	blob, err := ioutil.ReadAll(bufferedMsg)
+	blob, err := io.ReadAll(bufferedMsg)
 	if err != nil {
 		return err
 	}
@@ -385,7 +385,7 @@ func (d *Delivery) commitMailbox(tx *sql.Tx, msg *stagedMessage) error {
 			if err := mbox.user.createParentDirs(tx, mbox.name); err != nil {
 				return wrapErr(err, "Commit (create parent mailboxes)")
 			}
-			var special interface{}
+			var special any
 			if attr := d.pendingSpecial[mbox.user.id]; attr != "" {
 				special = attr
 			}
@@ -438,11 +438,8 @@ func (d *Delivery) commitMailbox(tx *sql.Tx, msg *stagedMessage) error {
 
 	// --- operations that involve msgs table ---
 	haveSeen := 0
-	for _, flag := range msg.flags {
-		if flag == imap.SeenFlag {
-			haveSeen = 1
-			break
-		}
+	if slices.Contains(msg.flags, imap.SeenFlag) {
+		haveSeen = 1
 	}
 
 	_, err = tx.Stmt(d.b.addMsg).Exec(
@@ -619,7 +616,7 @@ func (b *Backend) processParsedBody(headerInput []byte, header textproto.Header,
 
 	// Consume all remaining body so io.TeeReader used with external store will
 	// copy everything to extWriter.
-	_, err = io.Copy(ioutil.Discard, bufferedBody)
+	_, err = io.Copy(io.Discard, bufferedBody)
 	if err != nil {
 		return nil, nil, "", err
 	}

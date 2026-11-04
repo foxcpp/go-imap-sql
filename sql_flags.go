@@ -14,8 +14,8 @@ func (b *Backend) buildFlagsAddStmt(flagsCount int) string {
 		ON CONFLICT DO NOTHING`
 }
 
-func (m *Mailbox) makeFlagsAddStmtArgs(flags []string, start, stop uint32) (params []interface{}) {
-	params = make([]interface{}, 0, 3+len(flags))
+func (m *Mailbox) makeFlagsAddStmtArgs(flags []string, start, stop uint32) (params []any) {
+	params = make([]any, 0, 3+len(flags))
 	for _, flag := range flags {
 		params = append(params, flag)
 	}
@@ -72,8 +72,8 @@ func (b *Backend) getFlagsRemStmt(flagsCount int) (*sql.Stmt, error) {
 	return stmt, nil
 }
 
-func (m *Mailbox) makeFlagsRemStmtArgs(flags []string, start, stop uint32) []interface{} {
-	params := make([]interface{}, 0, 3+len(flags))
+func (m *Mailbox) makeFlagsRemStmtArgs(flags []string, start, stop uint32) []any {
+	params := make([]any, 0, 3+len(flags))
 	params = append(params, m.id, start, stop)
 	for _, flag := range flags {
 		params = append(params, flag)

@@ -4,42 +4,43 @@ import (
 	"database/sql"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 func buildSearchStmt(withFlags, withoutFlags []string, group bool) string {
-	var stmt string
-	stmt += `
+	var stmt strings.Builder
+	stmt.WriteString(`
 		SELECT DISTINCT msgs.msgId
 		FROM msgs
 		LEFT JOIN flags ON msgs.msgId = flags.msgid AND msgs.mboxId = flags.mboxId
 		WHERE msgs.mboxId = ?
-		`
+		`)
 
 	if len(withFlags) != 0 {
 		if len(withFlags) == 1 {
-			stmt += `AND flags.flag = ? `
+			stmt.WriteString(`AND flags.flag = ? `)
 		} else {
-			stmt += `AND flags.flag IN (`
+			stmt.WriteString(`AND flags.flag IN (`)
 			for i := range withFlags {
-				stmt += `?`
+				stmt.WriteString(`?`)
 				if i != len(withFlags)-1 {
-					stmt += `, `
+					stmt.WriteString(`, `)
 				}
 			}
-			stmt += `)`
+			stmt.WriteString(`)`)
 		}
 	}
 	if len(withoutFlags) != 0 {
 		// The nested query identifies messages having any excluded flag. It
 		// must not require all flags with GROUP BY/HAVING, unlike the
 		// top-level query when multiple flags are required.
-		stmt += `AND msgs.msgId NOT IN (` + buildSearchStmt(withoutFlags, nil, false) + `)`
+		stmt.WriteString(`AND msgs.msgId NOT IN (` + buildSearchStmt(withoutFlags, nil, false) + `)`)
 	}
 	if group && len(withFlags) > 1 {
-		stmt += `GROUP BY flags.msgId HAVING COUNT(*) = ` + strconv.Itoa(len(withFlags))
+		stmt.WriteString(`GROUP BY flags.msgId HAVING COUNT(*) = ` + strconv.Itoa(len(withFlags)))
 	}
 
-	return stmt
+	return stmt.String()
 }
 
 func (m *Mailbox) getFlagSearchStmt(withFlags, withoutFlags []string) (*sql.Stmt, error) {
@@ -65,8 +66,8 @@ func (m *Mailbox) getFlagSearchStmt(withFlags, withoutFlags []string) (*sql.Stmt
 	return stmt, nil
 }
 
-func (m *Mailbox) buildFlagSearchQueryArgs(withFlags, withoutFlags []string) []interface{} {
-	queryArgs := make([]interface{}, 0, 2+len(withFlags)+1+len(withoutFlags))
+func (m *Mailbox) buildFlagSearchQueryArgs(withFlags, withoutFlags []string) []any {
+	queryArgs := make([]any, 0, 2+len(withFlags)+1+len(withoutFlags))
 	queryArgs = append(queryArgs, m.id)
 	for _, flag := range withFlags {
 		queryArgs = append(queryArgs, flag)

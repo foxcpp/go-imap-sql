@@ -149,19 +149,7 @@ func (u *User) GetMailbox(name string, readOnly bool, conn backend.Conn) (*imap.
 }
 
 func (u *User) CreateMessageLimit() *uint32 {
-	res := sql.NullInt64{}
-	row := u.parent.userMsgSizeLimit.QueryRow(u.id)
-	if err := row.Scan(&res); err != nil {
-		// Oops!
-		return new(uint32)
-	}
-
-	if !res.Valid {
-		return nil
-	} else {
-		val := uint32(res.Int64)
-		return &val
-	}
+	return u.parent.createUserMessageLimit(nil, u.id)
 }
 
 func (u *User) SetMessageLimit(val *uint32) error {
@@ -445,14 +433,8 @@ func (u *User) Status(mbox string, items []imap.StatusItem) (*imap.MailboxStatus
 				continue
 			}
 		case imap.StatusAppendLimit:
-			var res sql.NullInt64
-			row := tx.Stmt(u.parent.mboxMsgSizeLimit).QueryRow(mboxId)
-			if err := row.Scan(&res); err != nil {
-				u.parent.logUserErr(u, err, "Status: appendLimit scan")
-				continue
-			}
-			if res.Valid {
-				status.AppendLimit = uint32(res.Int64)
+			if lim := u.parent.effectiveMessageLimit(tx, u.id, mboxId); lim != nil {
+				status.AppendLimit = *lim
 			}
 		}
 	}

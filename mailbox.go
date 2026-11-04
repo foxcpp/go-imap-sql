@@ -279,23 +279,7 @@ func (m *Mailbox) incrementMsgCounters(tx *sql.Tx) (uint32, error) {
 }
 
 func (m *Mailbox) createMessageLimit(tx *sql.Tx) *uint32 {
-	var res sql.NullInt64
-	var row *sql.Row
-	if tx == nil {
-		row = m.parent.mboxMsgSizeLimit.QueryRow(m.id)
-	} else {
-		row = tx.Stmt(m.parent.mboxMsgSizeLimit).QueryRow(m.id)
-	}
-	if err := row.Scan(&res); err != nil {
-		return new(uint32) // 0
-	}
-
-	if !res.Valid {
-		return nil
-	} else {
-		val := uint32(res.Int64)
-		return &val
-	}
+	return m.parent.createMboxMessageLimit(tx, m.id)
 }
 
 func (m *Mailbox) CreateMessageLimit() *uint32 {
@@ -437,18 +421,9 @@ func (b *Backend) processBody(literal imap.Literal) (bodyStruct, cachedHeader []
 }
 
 func (m *Mailbox) checkAppendLimit(length int) error {
-	mboxLimit := m.CreateMessageLimit()
-	if mboxLimit != nil && uint32(length) > *mboxLimit {
+	limit := m.parent.effectiveMessageLimit(nil, m.user.id, m.id)
+	if limit != nil && uint32(length) > *limit {
 		return backend.ErrTooBig
-	} else if mboxLimit == nil {
-		userLimit := m.user.CreateMessageLimit()
-		if userLimit != nil && uint32(length) > *userLimit {
-			return backend.ErrTooBig
-		} else if userLimit == nil {
-			if m.parent.Opts.MaxMsgBytes != nil && uint32(length) > *m.parent.Opts.MaxMsgBytes {
-				return backend.ErrTooBig
-			}
-		}
 	}
 	return nil
 }

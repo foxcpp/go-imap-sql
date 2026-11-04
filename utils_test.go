@@ -14,6 +14,7 @@ import (
 	"sync"
 	"testing"
 
+	backendtests "github.com/foxcpp/go-imap-backend-tests"
 	"gotest.tools/assert"
 	is "gotest.tools/assert/cmp"
 )
@@ -28,6 +29,17 @@ func TestMain(m *testing.M) {
 	flag.StringVar(&TestDSN, "test.dsn", os.Getenv("TEST_DSN"), "DSN to use for tests by default")
 	flag.StringVar(&TestFSStore, "test.fsstore", os.Getenv("TEST_FS_STORE"), "FS store root to use")
 	flag.BoolVar(&TestPreserveDB, "test.preserve-db", os.Getenv("PRESERVE_DB") == "1", "Use persistent directory for SQLite DB and messages store")
+
+	// go-imap-backend-tests assumes STATUS APPENDLIMIT reports only the
+	// mailbox-specific value, with zero meaning "no limit". RFC 7889 defines
+	// the item as the effective limit for the mailbox, including user and
+	// backend-wide limits. The corrected behavior is covered by
+	// TestStatusAppendLimitReflectsEffectiveLimit.
+	backendtests.Blacklist = append(backendtests.Blacklist,
+		"TestWithLZ4/Mailbox_AppendLimit/Status_-_No_Limit",
+		"TestWithFSStore/Mailbox_AppendLimit/Status_-_No_Limit",
+		"TestWithPostgres/Mailbox_AppendLimit/Status_-_No_Limit",
+	)
 
 	m.Run()
 }

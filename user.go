@@ -311,6 +311,7 @@ func (u *User) RenameMailbox(existingName, newName string) error {
 		return wrapErrf(err, "RenameMailbox (childs) %s, %s", existingName, newName)
 	}
 
+	var inboxId uint64
 	if strings.EqualFold(existingName, "INBOX") {
 		if _, err := tx.Stmt(u.parent.createMbox).Exec(u.id, existingName, u.parent.prng.Uint32(), nil); err != nil {
 			u.parent.logUserErr(u, err, "RenameMailbox (create inbox)", existingName, newName)
@@ -318,7 +319,6 @@ func (u *User) RenameMailbox(existingName, newName string) error {
 		}
 
 		// TODO: Cut a query here by using RETURNING on PostgreSQL
-		var inboxId uint64
 		if err = tx.Stmt(u.parent.mboxId).QueryRow(u.id, "INBOX").Scan(&inboxId); err != nil {
 			u.parent.logUserErr(u, err, "RenameMailbox (query mboxid id)", existingName, newName)
 			return wrapErrf(err, "RenameMailbox %s, %s", existingName, newName)
@@ -331,6 +331,9 @@ func (u *User) RenameMailbox(existingName, newName string) error {
 
 	err = tx.Commit()
 	u.parent.logUserErr(u, err, "RenameMailbox (tx commit)", existingName, newName)
+	if err == nil && strings.EqualFold(existingName, "INBOX") {
+		u.inboxId = inboxId
+	}
 	return wrapErrf(err, "RenameMailbox %s, %s", existingName, newName)
 }
 

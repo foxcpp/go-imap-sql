@@ -1,7 +1,9 @@
 package imapsql
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	"gotest.tools/assert"
 )
@@ -54,4 +56,51 @@ func TestRenameMailboxIntoOwnChild(t *testing.T) {
 	assert.Assert(t, err != nil, "failed rename must not create the destination mailbox")
 	_, _, err = u.GetMailbox("w58d.child.child", false, &noopConn{})
 	assert.Assert(t, err != nil, "rename must not create a nested mailbox")
+}
+
+func TestRenameInboxUpdatesCachedMailboxID(t *testing.T) {
+	b := setupTestBackend(t)
+	assert.NilError(t, b.CreateUser(t.Name()))
+	u, err := b.GetUser(t.Name())
+	assert.NilError(t, err)
+
+	for i := 0; i < 2; i++ {
+		assert.NilError(t, u.CreateMessage("INBOX", nil, time.Now(), strings.NewReader(testMsg), nil))
+	}
+	assert.NilError(t, u.RenameMailbox("INBOX", "OldInbox"))
+
+	status, inbox, err := u.GetMailbox("INBOX", true, &noopConn{})
+	assert.NilError(t, err)
+	assert.Equal(t, status.Messages, uint32(0), "INBOX on the renaming user must refer to the new empty mailbox")
+	assert.NilError(t, inbox.Close())
+
+	status, archived, err := u.GetMailbox("OldInbox", true, &noopConn{})
+	assert.NilError(t, err)
+	assert.Equal(t, status.Messages, uint32(2), "renamed mailbox must retain its messages")
+	assert.NilError(t, archived.Close())
+
+	freshUser, err := b.GetUser(t.Name())
+	assert.NilError(t, err)
+	status, freshInbox, err := freshUser.GetMailbox("INBOX", true, &noopConn{})
+	assert.NilError(t, err)
+	assert.Equal(t, status.Messages, uint32(0), "a fresh user must see the same empty INBOX")
+	assert.NilError(t, freshInbox.Close())
+}
+
+func TestRenameNonInboxDoesNotChangeInbox(t *testing.T) {
+	b := setupTestBackend(t)
+	assert.NilError(t, b.CreateUser(t.Name()))
+	u, err := b.GetUser(t.Name())
+	assert.NilError(t, err)
+	assert.NilError(t, u.CreateMailbox("Archive"))
+	assert.NilError(t, u.RenameMailbox("Archive", "OldArchive"))
+
+	status, inbox, err := u.GetMailbox("INBOX", true, &noopConn{})
+	assert.NilError(t, err)
+	assert.Equal(t, status.Messages, uint32(0), "renaming another mailbox must leave INBOX unchanged")
+	assert.NilError(t, inbox.Close())
+
+	_, oldArchive, err := u.GetMailbox("OldArchive", true, &noopConn{})
+	assert.NilError(t, err)
+	assert.NilError(t, oldArchive.Close())
 }
